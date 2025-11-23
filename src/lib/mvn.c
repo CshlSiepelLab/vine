@@ -537,10 +537,10 @@ double mvn_mu2(MVN *mvn) {
    in the column space of R.  The new vector a can be assumed to be an
    MVN with zero mean and covariance R^T x R.  */
 void mvn_project_LOWR(MVN *mvn, Vector *z, Vector *a) {
-  int n = mvn->lowR->nrows, k = mvn->lowR->ncols;
+  int k = mvn->lowR->ncols;
   Vector *b = vec_new(k);
   
-  assert(z->size == n && a->size == k && mvn->lowRmvn != NULL &&
+  assert(z->size == mvn->lowR->nrows && a->size == k && mvn->lowRmvn != NULL &&
          mvn->lowR_invRtR != NULL);
     
   mat_vec_mult_transp(b, mvn->lowR, z); /* start by computing b = R^T z */
