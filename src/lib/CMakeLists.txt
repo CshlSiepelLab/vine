@@ -29,13 +29,6 @@ target_compile_options(vine_core PUBLIC
     -g -fno-inline -Wall -fno-strict-aliasing
 )
 
-# Make sure we use the same LAPACK configuration as PHAST on macOS:
-#   - VECLIB tells external_libs.h to use Accelerate
-#   - ACCELERATE_NEW_LAPACK selects the new (non-CLAPACK) interface
-if(APPLE)
-    target_compile_definitions(vine_core PUBLIC VECLIB ACCELERATE_NEW_LAPACK)
-endif()
-
 target_include_directories(vine_core
     PUBLIC
         "${VINE_INCLUDE_DIR}"     # vine/include
@@ -51,6 +44,8 @@ target_link_libraries(vine_core
 # PHAST was built against Accelerate/vecLib; add the same framework here
 if(APPLE)
     target_link_libraries(vine_core PUBLIC "-framework Accelerate")
+else()
+    target_link_libraries(vine_core PUBLIC LAPACK::LAPACK BLAS::BLAS)
 endif()
 
 # Install the library

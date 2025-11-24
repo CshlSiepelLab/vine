@@ -4,7 +4,7 @@ project(vine
   VERSION 0.1.0
   LANGUAGES C)
 
-# Use C99 (or whatever you use now)
+# Use C99 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
@@ -35,6 +35,17 @@ set_target_properties(phast PROPERTIES
   IMPORTED_LOCATION "${PHAST_LIBRARY}"
   INTERFACE_INCLUDE_DIRECTORIES "${PHAST_INCLUDE_DIR}"
 )
+
+# LAPACK handling
+if(APPLE)
+    add_compile_definitions(VECLIB ACCELERATE_NEW_LAPACK)
+#   - VECLIB tells external_libs.h to use Accelerate
+#   - ACCELERATE_NEW_LAPACK selects the new (non-CLAPACK) interface
+else()
+    find_package(BLAS REQUIRED)
+    find_package(LAPACK REQUIRED)
+    add_compile_definitions(PHAST_LAPACK_GENERIC)
+endif()
 
 # ---- Project layout ----------------------------------------------------
 

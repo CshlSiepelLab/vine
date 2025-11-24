@@ -1,5 +1,3 @@
-# src/progs/CMakeLists.txt
-
 # one executable per program, linked against vine + PHAST
 
 add_executable(vine vine.c)
