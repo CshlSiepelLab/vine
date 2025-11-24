@@ -47,6 +47,13 @@ else()
     add_compile_definitions(PHAST_LAPACK_GENERIC)
 endif()
 
+# ---- PCRE dependency via PHAST -----------------------------------------
+find_library(PCRE_LIBRARY NAMES pcre)
+
+if (NOT PCRE_LIBRARY)
+  message(FATAL_ERROR "Could not find libpcre; install it (e.g. Homebrew 'pcre').")
+endif()
+
 # ---- Project layout ----------------------------------------------------
 
 # public headers 

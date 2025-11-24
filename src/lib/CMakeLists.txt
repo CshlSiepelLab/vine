@@ -39,6 +39,7 @@ target_include_directories(vine_core
 target_link_libraries(vine_core
     PUBLIC
         phast        # libphast.a in ${PHAST_LIBRARY_DIR}
+        ${PCRE_LIBRARY}
 )
 
 # PHAST was built against Accelerate/vecLib; add the same framework here
