@@ -1,3 +1,13 @@
+/*
+ * VINE: Variational Inference with Node Embeddings
+ *
+ * Copyright (c) 2025, Adam Siepel
+ * All rights reserved.
+ *
+ * This file is part of VINE and is distributed under the BSD 3-Clause License.
+ * See the LICENSE file in the project root for details.
+ */
+
 /* Simple min-heap implementation.  Implemented as a pairing heap,
    with lazy updates for high amortized efficiency (insert,
    decrease-key, delete-min all O(log n) or better). */

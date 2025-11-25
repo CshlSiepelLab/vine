@@ -1,3 +1,16 @@
+/* PHylogenetic Analysis with Space/Time models
+ * Copyright (c) 2002-2005 University of California, 2006-2010 Cornell 
+ * University.  All rights reserved.
+ *
+ * This source code is distributed under a BSD-style license.  See the
+ * file LICENSE.txt for details.
+ ***************************************************************************/
+
+/** @file upgma.h
+    Simple UPGMA tree inference  
+    @ingroup phylo
+*/
+
 #ifndef VARRES_H
 #define VARRES_H
 

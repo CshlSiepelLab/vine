@@ -1,3 +1,13 @@
+/*
+ * VINE: Variational Inference with Node Embeddings
+ *
+ * Copyright (c) 2025, Adam Siepel
+ * All rights reserved.
+ *
+ * This file is part of VINE and is distributed under the BSD 3-Clause License.
+ * See the LICENSE file in the project root for details.
+ */
+
 /* Simple implementation of a sparse vector, stored as a list of pairs
    (idx, val), sorted by idx.  Optimized for set and get rather than
    multiplication or addition. */

@@ -1,3 +1,13 @@
+/*
+ * VINE: Variational Inference with Node Embeddings
+ *
+ * Copyright (c) 2025, Adam Siepel
+ * All rights reserved.
+ *
+ * This file is part of VINE and is distributed under the BSD 3-Clause License.
+ * See the LICENSE file in the project root for details.
+ */
+
 /* in SGA add a very small L2 prior to discourage extreme values, e.g., lambda * (||a||^2 + ||b||^2) where lambda is 1e-6 to 1e-4 */
 
 #include <stdio.h>
