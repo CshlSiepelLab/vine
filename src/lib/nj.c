@@ -8,6 +8,11 @@
  * See the LICENSE file in the project root for details.
  */
 
+/*
+ * Portions of this file are derived from the PHAST package,
+ * distributed under the BSD 3-Clause License.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>

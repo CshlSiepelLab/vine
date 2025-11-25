@@ -24,4 +24,4 @@ is retained.
 See the file [`LICENSE`] for the full license text.
 
 VINE depends on the **PHAST** library, which is also distributed under a BSD
-License.
+3-Clause License.
