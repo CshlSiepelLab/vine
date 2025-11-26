@@ -390,8 +390,8 @@ double mvn_log_dens(MVN *mvn, Vector *x) {
 
   if (mvn->type == MVN_STD || mvn->type == MVN_IDENTITY || mvn->type == MVN_DIAG) {
     for (i = 0; i < x->size; i++) {
-      retval -= 0.5 * pow(vec_get(x, i) - vec_get(mvn->mu, i), 2) /
-        mat_get(mvn->sigma, i, i);
+      double diff = vec_get(x, i) - vec_get(mvn->mu, i);
+      retval -= 0.5 * diff * diff / mat_get(mvn->sigma, i, i);
     }
   }
   else if (mvn->type == MVN_LOWR) {
@@ -412,7 +412,7 @@ double mvn_log_dens(MVN *mvn, Vector *x) {
       /* compute the quadratic form by forward substitution from the Cholesky lower triangular matrix */     
       mat_forward_subst(mvn->cholL, z, y);
       for (i = 0; i < mvn->dim; i++)
-        dotprod += pow(vec_get(y, i), 2);
+        dotprod += vec_get(y, i) * vec_get(y, i);
     }
     else if (mvn->evals != NULL) {
       /* compute the quadratic form from the eigendecomposition */
@@ -420,7 +420,8 @@ double mvn_log_dens(MVN *mvn, Vector *x) {
       for (i = 0; i < mvn->dim; i++) {
         for (j = 0; j < mvn->dim; j++)
           vec_set(y, i, vec_get(y, i) + mat_get(mvn->evecs, j, i) * vec_get(z, j));  /* note must use transpose of evecs here */
-        dotprod += pow(vec_get(y, i), 2) / vec_get(mvn->evals, i); /* weight by inverse eigenvalue */
+        dotprod += vec_get(y, i) * vec_get(y, i) /
+          vec_get(mvn->evals, i); /* weight by inverse eigenvalue */
       }
     }
     else
@@ -538,7 +539,7 @@ double mvn_mu2(MVN *mvn) {
   double retval = 0;
   int i;
   for (i = 0; i < mvn->dim; i++)
-    retval += pow(vec_get(mvn->mu, i), 2);
+    retval += vec_get(mvn->mu, i) * vec_get(mvn->mu, i);
   return retval;
 }
 
