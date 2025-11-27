@@ -5,10 +5,8 @@ All rights reserved.
 This software (VINE) is distributed under the terms of the BSD 3-Clause
 License. For details, see the file LICENSE.
 
-VINE incorporates and depends on components from the PHAST software package,
-also distributed under the BSD 3-Clause License. Portions of VINE may
-include modified or unmodified source code from PHAST, which is
-copyright (c) 2003–2025 by the authors of PHAST.
+VINE depends on the PHAST software package, which is also distributed
+under the BSD 3-Clause License.
 
 Users of this software must retain appropriate attribution in accordance
 with the terms of the BSD 3-Clause License.
