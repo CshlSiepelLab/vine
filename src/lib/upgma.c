@@ -13,13 +13,11 @@
 #include <ctype.h>
 #include <assert.h>
 #include <float.h>
-#include "phast/stacks.h"
-#include "phast/trees.h"
-#include "phast/misc.h"
-#include "phast/stringsplus.h"
-#include "nj.h"
-#include "upgma.h"
-#include "heap.h"
+#include <phast/trees.h>
+#include <phast/misc.h>
+#include <upgma.h>
+#include <backprop.h>
+#include <heap.h>
 
 void upgma_find_min(Matrix *D, Vector *active, int *u, int *v) {
   int i, j, n = D->nrows;

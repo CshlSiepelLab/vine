@@ -15,9 +15,13 @@
 #include <ctype.h>
 #include <assert.h>
 #include <float.h>
+#include <variational.h>
 #include <nj.h>
+#include <geometry.h>
 #include <adam_scheduler.h>
 #include <sparse_matrix.h>
+#include <gradients.h>
+#include <nuisance.h>
 
 /* uncomment to dump gradients to a file called "grads_log.txt" */
 //#define DUMPGRAD 1

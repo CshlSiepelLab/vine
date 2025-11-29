@@ -17,11 +17,14 @@
 #include <ctype.h>
 #include <assert.h>
 #include <float.h>
-#include "phast/misc.h"
-#include "nj.h"
-#include "mvn.h"
-#include "multi_mvn.h"
-#include "phast/trees.h"
+#include <phast/misc.h>
+#include <phast/trees.h>
+#include <nj.h>
+#include <likelihoods.h>
+#include <geometry.h>
+#include <variational.h>
+#include <mvn.h>
+#include <multi_mvn.h>
 
 /* subsample from a set of trees by importance sampling, using ratio
    of likelihoods to sampling density as weights.  Warning: tree

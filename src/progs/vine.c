@@ -15,6 +15,9 @@
 #include <phast/msa.h>
 #include <phast/maf.h>
 #include <nj.h>
+#include <likelihoods.h>
+#include <variational.h>
+#include <geometry.h>
 #include <upgma.h>
 #include <phast/tree_model.h>
 #include <phast/subst_mods.h>

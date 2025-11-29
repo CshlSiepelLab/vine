@@ -15,8 +15,10 @@
 #include <ctype.h>
 #include <assert.h>
 #include <float.h>
+#include <geometry.h>
 #include <nj.h>
 #include <phast/eigen.h>
+
 /* convert an nd-dimensional vector to an nxn upper triangular
    distance matrix.  Assumes each taxon is represented as a point in
    d-dimensional space.  Wrapper for versions that assume either

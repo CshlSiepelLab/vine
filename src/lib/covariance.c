@@ -16,7 +16,9 @@
 #include <ctype.h>
 #include <assert.h>
 #include <float.h>
+#include <covariance.h>
 #include <nj.h>
+#include <geometry.h>
 #include <phast/eigen.h>
 #include <phast/markov_matrix.h>
 

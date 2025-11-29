@@ -17,6 +17,8 @@
 #include <assert.h>
 #include <float.h>
 #include <nj.h>
+#include <likelihoods.h>
+#include <backprop.h>
 #include <heap.h>
 #include <upgma.h>
 

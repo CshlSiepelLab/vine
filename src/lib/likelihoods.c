@@ -21,6 +21,7 @@
 #include <assert.h>
 #include <float.h>
 #include <nj.h>
+#include <likelihoods.h>
 #include <phast/sufficient_stats.h>
 
 /* fully reset a tree model for use in likelihood calculations with a

@@ -3,6 +3,8 @@
 #include <getopt.h>
 #include <phast/misc.h>
 #include <nj.h>
+#include <likelihoods.h>
+#include <gradients.h>
 #include <phast/sufficient_stats.h>
 #include <sparse_matrix.h>
 #include <phast/lists.h>

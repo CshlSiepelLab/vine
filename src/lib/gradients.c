@@ -16,6 +16,12 @@
 #include <assert.h>
 #include <float.h>
 #include <nj.h>
+#include <gradients.h>
+#include <likelihoods.h>
+#include <backprop.h>
+#include <variational.h>
+#include <geometry.h>
+#include <covariance.h>
 
 /* compute the gradient of the log likelihood for a tree model with
    respect to the free parameters of the MVN averaging distribution,

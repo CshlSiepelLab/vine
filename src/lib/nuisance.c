@@ -15,8 +15,9 @@
 #include <ctype.h>
 #include <assert.h>
 #include <float.h>
-#include <nj.h>
 #include <phast/tree_model.h>
+#include <nuisance.h>
+#include <nj.h>
 
 /* helper functions for nuisance parameters in variational
    inference. For now these include only the HKY ti/tv parameter for

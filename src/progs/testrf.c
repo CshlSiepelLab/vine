@@ -5,6 +5,7 @@
 #include <nj.h>
 #include <radial_flow.h>
 #include <mvn.h>
+#include <geometry.h>
 
 #define MVN_N 10
 #define MVN_D 3
