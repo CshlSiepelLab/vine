@@ -155,9 +155,9 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
     /* (see equation 7, Doersch arXiv 2016) */
     kld = 0;
     vec_zero(kldgrad);
+    logdet = mmvn_log_det(mmvn);
     if (data->treeprior == NULL) { /* only do if no explicit tree prior */
       trace = mmvn_trace(mmvn);  /* we'll reuse this */
-      logdet = mmvn_log_det(mmvn);
     
       kld = 0.5 * (trace + mmvn_mu2(mmvn) - fulld - logdet);
 
@@ -185,6 +185,27 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
     
       if (data->type == LOWR) 
         nj_set_kld_grad_LOWR(kldgrad, mmvn);
+    }
+    else { /* with explicit tree prior, we need the entropy of the MVN instead */
+      kld = -0.5 * (fulld * (1.0 + log(2 * M_PI)) + logdet);
+      /* note overloading name and negating */
+      for (j = 0; j < grad->size; j++) {
+        double gj = 0.0;
+
+        if (j < n*dim)  /* partial deriv wrt mu_j is zero */
+          gj = 0.0;
+        else {            /* partial deriv wrt sigma_j */
+          if (data->type == CONST || data->type == DIST)
+            gj = 0.5 * fulld;
+          else if (data->type == DIAG) 
+            gj = 0.5;
+          else 
+            continue; /* LOWR case is messy; handle below */
+        }
+        vec_set(kldgrad, j, gj);
+      }
+      if (data->type == LOWR) 
+        nj_set_entropy_grad_LOWR(kldgrad, mmvn);
     }
     
     /* can also pre-compute variance penalty */
@@ -547,6 +568,32 @@ void nj_set_kld_grad_LOWR(Vector *kldgrad, multi_MVN *mmvn) {
   for (i = 0; i < mmvn->mvn->lowR->nrows; i++) 
     for (j = 0; j < mmvn->mvn->lowR->ncols; j++) 
       vec_set(kldgrad, offset + i*mmvn->mvn->lowR->ncols + j, mat_get(Rgrad, i, j));
+
+  mat_free(Rgrad);
+}
+
+/* compute partial derivatives of entropy H[q(x)] wrt LOWR variance
+   parameters: Sigma_0 = I + R R^T, Sigma = I_d ⊗ Sigma_0. */
+void nj_set_entropy_grad_LOWR(Vector *entgrad, multi_MVN *mmvn) {
+  int i, j;
+  int offset = mmvn->d * mmvn->n;
+  Matrix *Rgrad = mat_new(mmvn->mvn->lowR->nrows, mmvn->mvn->lowR->ncols);
+
+  /* For entropy, only the log det term contributes:
+       H[q] = (d/2) * log det(Sigma_0) + const
+     For Sigma_0 = I + R R^T, using the matrix determinant lemma,
+       ∂H/∂R = d * R * (I + R^T R)^{-1}
+     and lowR_invRtR is precomputed as (I + R^T R)^{-1}.
+  */
+  mat_mult(Rgrad, mmvn->mvn->lowR, mmvn->mvn->lowR_invRtR);
+  mat_scale(Rgrad, mmvn->d);   /* computing positive gradient of +H[q] */
+
+  /* populate vector from matrix */
+  for (i = 0; i < mmvn->mvn->lowR->nrows; i++)
+    for (j = 0; j < mmvn->mvn->lowR->ncols; j++)
+      vec_set(entgrad,
+              offset + i*mmvn->mvn->lowR->ncols + j,
+              mat_get(Rgrad, i, j));
 
   mat_free(Rgrad);
 }

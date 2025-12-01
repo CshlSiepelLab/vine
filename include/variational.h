@@ -48,4 +48,6 @@ void nj_apply_normalizing_flows(Vector *points_y, Vector *points_x,
 
 void nj_set_kld_grad_LOWR(Vector *kldgrad, multi_MVN *mmvn);
 
+void nj_set_entropy_grad_LOWR(Vector *entgrad, multi_MVN *mmvn);
+
 #endif
