@@ -43,8 +43,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
   double elb, ll, avell, migll, avemigll, kld, bestelb = -INFTY, bestll = -INFTY,
     bestkld = -INFTY, bestmigll = -INFTY,
     running_tot = 0, last_running_tot = -INFTY, trace, logdet, penalty = 0,
-    bestpenalty = 0, ave_nf_logdet, best_nf_logdet = -INFTY,
-    ave_lprior, best_lprior = -INFTY, subsamp_rescale = 1.0;
+    bestpenalty = 0, ave_lprior, best_lprior = -INFTY, subsamp_rescale = 1.0;
   FILE *gradf = NULL;
 
   /* for nuisance parameters; these are parameters that are optimized
@@ -108,8 +107,6 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
       fprintf(logf, "kld\t");
     if (data->var_reg != 0)
       fprintf(logf, "penalty\t");
-    if (data->rf != NULL || data->pf != NULL)
-      fprintf(logf, "nfld\t");
     if (data->crispr_mod == NULL)
       fprintf(logf, "subsamp\treuse\tgradnorm\tclip\t");
     if (data->migtable != NULL)
@@ -206,7 +203,6 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
       vec_zero(prior_grad);
     avell = 0;
     ave_lprior = 0;
-    ave_nf_logdet = 0;
     avemigll = 0;
 
     /* set up subsampling for this minibatch (but not in crispr mode) */
@@ -223,9 +219,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
 
     for (i = 0; i < nminibatch; i++) {
       int bail = 0;
-      double nf_logdet = 0; /* log det of Jacobian for normalizing flows;
-                               will only be set if needed */
-      
+
       do {
         /* do this in a way that keeps track of the original standard
            normal variable (points_std) for use in computing
@@ -233,7 +227,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
            variance */
         nj_sample_points(mmvn, points, points_std);
  
-        ll = nj_compute_model_grad(mod, mmvn, points, points_std, grad, data, &nf_logdet, &migll);
+        ll = nj_compute_model_grad(mod, mmvn, points, points_std, grad, data, NULL, &migll);
        
         if (++bail > 10 && !isfinite(ll)) {
           fprintf(stderr, "WARNING: repeatedly sampling zero-probability trees. Prohibiting zero-length branches.\n");
@@ -253,7 +247,6 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
       avell += ll;
       avemigll += migll;
       vec_plus_eq(avegrad, grad);
-      ave_nf_logdet += nf_logdet;
 
       /* calculate prior if needed; add gradient of branches */
       if (data->treeprior != NULL) {
@@ -271,7 +264,6 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
     vec_scale(avegrad, 1.0/nminibatch);
     avell /= nminibatch;
     ave_lprior /= nminibatch;
-    ave_nf_logdet /= nminibatch;
     avemigll /= nminibatch;
     
     vec_plus_eq(avegrad, kldgrad);
@@ -281,14 +273,13 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
       vec_scale(ave_nuis_grad, 1.0/nminibatch);
     
     /* store parameters if best yet */
-    elb = avell + ave_lprior - kld + ave_nf_logdet - penalty + avemigll;
+    elb = avell + ave_lprior - kld + penalty + avemigll;
     if (elb > bestelb && (sd->full_grad_now || data->crispr_mod != NULL)) {
       bestelb = elb;
       bestll = avell;  /* not necessarily best ll but ll corresponding to bestelb */
       best_lprior = ave_lprior;
       bestkld = kld;  
       bestpenalty = penalty;
-      best_nf_logdet = ave_nf_logdet;
       bestmigll = avemigll;
       bestt = t;
       mmvn_save_mu(mmvn, best_mu);
@@ -362,8 +353,6 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
         fprintf(logf, "%f\t", kld);
       if (data->var_reg != 0)
         fprintf(logf, "%f\t", data->var_pen);
-      if (data->rf != NULL || data->pf != NULL)
-        fprintf(logf, "%f\t", ave_nf_logdet);
       if (data->crispr_mod == NULL)
         fprintf(logf, "%d\t%d\t%f\t%d\t", data->subsampsize,
                 data->reuse_subsamp, sm->grad_norm, clipped);
@@ -407,9 +396,8 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
   if (logf != NULL) {
     fprintf(logf,
             "# Reverting to parameters from iteration %d; ELB: %.2f, LNL: "
-            "%.2f, LPRIOR: %.2f, KLD: %.2f, RFLD: %.2f, penalty: %.2f",
-            bestt + 1, bestelb, bestll, best_lprior, bestkld, best_nf_logdet,
-            bestpenalty);
+            "%.2f, LPRIOR: %.2f, KLD: %.2f, penalty: %.2f",
+            bestt + 1, bestelb, bestll, best_lprior, bestkld, bestpenalty);
     if (data->migtable != NULL)
       fprintf(logf, ", MIGLL: %.2f", bestmigll);
     for (j = 0; j < n_nuisance_params; j++) /* print these also if available */

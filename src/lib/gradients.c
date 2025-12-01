@@ -479,7 +479,7 @@ void nj_dt_dD_num(Matrix *dt_dD, Matrix *D, TreeModel *mod, CovarData *data) {
    for each component.  Fastest but most complicated and error-prone
    version. */
 double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
-                         CovarData *data, double *nj_logdet, double *migll) {
+                         CovarData *data, double *nf_logdet, double *migll) {
   int n = data->nseqs, nbranches = 2*n-2,  /* have to work with the rooted tree here */
     ndist = n * (n-1) / 2, ndim = data->nseqs * data->dim;
   Vector *dL_dt = vec_new(nbranches);
@@ -496,7 +496,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   *migll = 0.0;
   
   /* convert x to y using normalizing flows if available */
-  nj_apply_normalizing_flows(y, x, data, nj_logdet);
+  nj_apply_normalizing_flows(y, x, data, nf_logdet);
   
    /* set up baseline objects */
   nj_points_to_distances(y, data);
