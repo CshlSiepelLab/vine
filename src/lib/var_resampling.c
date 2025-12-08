@@ -178,7 +178,7 @@ List *nj_var_sample_rejection(int nsamples, multi_MVN *mmvn,
       nj_sample_points(mmvn, points_x, points_z);
       nj_apply_normalizing_flows(points_y, points_x, data, &logdet);
       nj_points_to_distances(points_y, data);
-      mod->tree = nj_inf(data->dist, data->names, NULL, data);
+      mod->tree = nj_inf(data->dist, data->names, NULL, NULL, data);
 
       if (data->crispr_mod != NULL)
         ll[i] = cpr_compute_log_likelihood(data->crispr_mod, NULL);
@@ -274,7 +274,7 @@ List *nj_var_sample_rejection(int nsamples, multi_MVN *mmvn,
       nj_sample_points(mmvn, points_x, points_z);
       nj_apply_normalizing_flows(points_y, points_x, data, &logdet);
       nj_points_to_distances(points_y, data);
-      mod->tree = nj_inf(data->dist, data->names, NULL, data);
+      mod->tree = nj_inf(data->dist, data->names, NULL, NULL, data);
 
       if (data->crispr_mod != NULL)
         lnl = cpr_compute_log_likelihood(data->crispr_mod, NULL);
@@ -446,7 +446,7 @@ List *nj_var_sample_importance(int nsamples, multi_MVN *mmvn,
       nj_sample_points(mmvn, points_x, points_z);
       nj_apply_normalizing_flows(points_y, points_x, data, &logdet);
       nj_points_to_distances(points_y, data);
-      mod->tree = nj_inf(data->dist, data->names, NULL, data);
+      mod->tree = nj_inf(data->dist, data->names, NULL, NULL, data);
 
       if (data->crispr_mod != NULL)
         lnl = cpr_compute_log_likelihood(data->crispr_mod, NULL);

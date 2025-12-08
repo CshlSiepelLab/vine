@@ -122,11 +122,12 @@ void nj_updateD(Matrix *D, int u, int v, int w, Vector *active, Vector *sums) {
    Does not alter the provided distance matrix.  If dt_dD is non-NULL,
    will be populated with Jacobian for 2n-3 branch lengths
    vs. n-choose-2 pairwise distances */
-TreeNode* nj_infer_tree(Matrix *initD, char **names, Matrix *dt_dD) {
+TreeNode* nj_infer_tree(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *nb) {
     int n = initD->nrows;
     int N = 2*n - 2;   /* number of nodes in unrooted tree */
     int i, j, u = -1, v = -1, w;
     Matrix *D, *Q;
+    int step_idx = 0; 
     Vector *sums, *active;
     List *nodes;  /* could just be an array */
     TreeNode *node_u, *node_v, *node_w, *root;
@@ -184,6 +185,12 @@ TreeNode* nj_infer_tree(Matrix *initD, char **names, Matrix *dt_dD) {
       node_u->dparent = mat_get(D, u, w);
       node_v->dparent = mat_get(D, v, w);
 
+      if (nb != NULL) { /* record neighbor-joining event */
+        nj_record_join(nb, step_idx, u, v, w, active, sums,
+                       D, node_u->id, node_v->id);
+        step_idx++;
+      }
+      
       if (dt_dD != NULL) {
         nj_backprop_set_dt_dD(Jk, dt_dD, n, u, v, node_u->id, node_v->id, active);
         nj_backprop(Jk, Jnext, n, u, v, w, active);
@@ -224,6 +231,13 @@ TreeNode* nj_infer_tree(Matrix *initD, char **names, Matrix *dt_dD) {
     node_u->dparent = mat_get(D, u, v) / 2;
     node_v->dparent = mat_get(D, u, v) / 2;
 
+    if (nb != NULL) {  /* record the final join under the root */
+      nb->root_u = u;
+      nb->root_v = v;
+      nb->branch_idx_root_u = node_u->id;
+      nb->branch_idx_root_v = node_v->id;
+    }
+    
     if (dt_dD != NULL) 
       nj_backprop_set_dt_dD(Jk, dt_dD, n, u, v, node_u->id, node_v->id, active);
     
@@ -253,10 +267,11 @@ TreeNode* nj_infer_tree(Matrix *initD, char **names, Matrix *dt_dD) {
    Does not alter the provided distance matrix. If dt_dD is non-NULL,
    will be populated with Jacobian for 2n-3 branch lengths
    vs. n-choose-2 pairwise distances */
-TreeNode* nj_fast_infer(Matrix *initD, char **names, Matrix *dt_dD) {
+TreeNode* nj_fast_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *nb) {
   int n = initD->nrows, orign = n;
   int N = 2*n - 2;   /* number of nodes in unrooted tree */
   int i, j, u = -1, v = -1, w;
+  int step_idx = 0;
   Matrix *D;
   Vector *sums, *active;
   List *nodes;  
@@ -368,6 +383,12 @@ TreeNode* nj_fast_infer(Matrix *initD, char **names, Matrix *dt_dD) {
       rev[i]++;
     }
     rev[w]++;
+
+    if (nb != NULL) { /* record neighbor-joining event */
+      nj_record_join(nb, step_idx, u, v, w, active, sums,
+                     D, node_u->id, node_v->id);
+      step_idx++;
+    }
     
     if (dt_dD != NULL) {
             nj_backprop_set_dt_dD_sparse(Jk, dt_dD, orign, u, v, node_u->id, node_v->id, active);
@@ -421,6 +442,13 @@ TreeNode* nj_fast_infer(Matrix *initD, char **names, Matrix *dt_dD) {
   node_u->dparent = mat_get(D, u, v) / 2;
   node_v->dparent = mat_get(D, u, v) / 2;
 
+  if (nb != NULL) {  /* record the final join under the root */
+    nb->root_u = u;
+    nb->root_v = v;
+    nb->branch_idx_root_u = node_u->id;
+    nb->branch_idx_root_v = node_v->id;
+  }
+  
   if (dt_dD != NULL) 
     nj_backprop_set_dt_dD_sparse(Jk, dt_dD, orign, u, v, node_u->id, node_v->id, active);
   //nj_backprop_set_dt_dD(Jk, dt_dD, orign, u, v, node_u->id, node_v->id, active);
@@ -590,7 +618,7 @@ double nj_distance_on_tree(TreeNode *root, TreeNode *n1, TreeNode *n2) {
 }
 
 /* wrapper for various distance-based tree inference algorithms */
-TreeNode *nj_inf(Matrix *D, char **names, Matrix *dt_dD,
+TreeNode *nj_inf(Matrix *D, char **names, Matrix *dt_dD, Neighbors *nb,
                  CovarData *data) {
   if (data->ultrametric) {
     TreeNode *t = upgma_fast_infer(D, names, dt_dD);
@@ -600,7 +628,7 @@ TreeNode *nj_inf(Matrix *D, char **names, Matrix *dt_dD,
     return t;
   }
   else {
-    TreeNode *tree = nj_fast_infer(D, names, dt_dD);
+    TreeNode *tree = nj_fast_infer(D, names, dt_dD, nb);
     if (data->treeprior != NULL && data->treeprior->relclock == TRUE) { /* need to reroot in this case */
       if (data->seq_to_node_map == NULL) /* only need to do this once */
         nj_update_seq_to_node_map(tree, names, data);
@@ -665,4 +693,65 @@ void nj_repair_zero_br(TreeNode *t) {
     if (n->parent != NULL && n->dparent <= 0)
       n->dparent = 1e-3;
   }
+}
+
+/* functions to record neighbor information to facilitate backpropagation */
+
+/* Allocate and initialize a Neighbors recorder for NJ on n taxa. */
+Neighbors *nj_new_neighbors(int n) {
+  Neighbors *nb = (Neighbors *)smalloc(sizeof(Neighbors));
+  nb->n           = n;
+  nb->total_nodes = 2*n - 2;
+
+  /* n-1 merges.  CHECK */
+  nb->nsteps = n;  
+
+  nb->steps = (JoinEvent *)calloc(nb->nsteps, sizeof(JoinEvent));
+
+  nb->root_u = nb->root_v = -1;
+  nb->branch_idx_root_u = nb->branch_idx_root_v = -1;
+  
+  return nb;
+}
+
+/* Optional helper to free a Neighbors recorder when you’re done. */
+void nj_free_neighbors(Neighbors *nb) {
+  if (nb == NULL) return;
+  free(nb->steps);
+  free(nb);
+}
+
+/* Record one neighbor-joining merge event into the Neighbors tape.
+ 
+   step_idx:       which step (0 .. nb->nsteps-1) this is
+   u, v, w:        indices of merged clusters (u,v -> w)
+   active:         current active vector BEFORE deactivating u,v and activating w
+   sums:           row sums as computed by nj_resetQ for this step
+   D:              current distance matrix (upper triangular, N x N)
+   branch_idx_u/v: which row in dL_dt corresponds to branches u->w, v->w
+ */
+void nj_record_join(Neighbors *nb, int step_idx, int u, int v, int w,
+                    Vector *active, Vector *sums, Matrix *D, int branch_idx_u,
+                    int branch_idx_v) {
+  if (step_idx < 0 || step_idx >= nb->nsteps)
+    die("nj_record_join: step_idx (%d) out of range [0,%d)\n",
+        step_idx, nb->nsteps);
+
+  JoinEvent *ev = &nb->steps[step_idx];
+
+  ev->u = u;
+  ev->v = v;
+  ev->w = w;
+
+  /* number of active taxa at this step (before the merge) */
+  ev->nk = vec_sum(active);
+
+  ev->branch_idx_u = branch_idx_u;
+  ev->branch_idx_v = branch_idx_v;
+
+  /* distance and row sums at this step */
+  assert(u < v);  /* enforced by nj algorithm */
+  ev->d_uv      = mat_get(D, u, v);
+  ev->row_sum_u = vec_get(sums, u);
+  ev->row_sum_v = vec_get(sums, v);
 }

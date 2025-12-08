@@ -36,4 +36,6 @@ UPGMAHeapNode* upgma_heap_node(int i, int j, Matrix *D);
 
 TreeNode* upgma_fast_infer(Matrix *initD, char **names, Matrix *dt_dD);
 
+void upgma_dL_dD_from_tree(TreeNode *tree, Vector *dL_dt, Vector *dL_dD);
+
 #endif

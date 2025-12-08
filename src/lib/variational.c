@@ -459,7 +459,7 @@ List *nj_var_sample(int nsamples, multi_MVN *mmvn, CovarData *data, char** names
      
     nj_apply_normalizing_flows(points_y, points_x, data, NULL);
     nj_points_to_distances(points_y, data);
-    tree = nj_inf(data->dist, names, NULL, data);
+    tree = nj_inf(data->dist, names, NULL, NULL, data);
     lst_push_ptr(retval, tree);
   }
   
@@ -476,7 +476,7 @@ TreeNode *nj_mean(Vector *mu, char **names, CovarData *data) {
     die("ERROR in nj_mean: bad dimensions\n");
 
   nj_points_to_distances(mu, data);  
-  tree = nj_inf(data->dist, names, NULL, data);
+  tree = nj_inf(data->dist, names, NULL, NULL, data);
   
   return(tree);
 }

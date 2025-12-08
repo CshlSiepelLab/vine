@@ -362,3 +362,117 @@ TreeNode* upgma_fast_infer(Matrix *initD, char **names, Matrix *dt_dD) {
 
   return root;
 }
+
+/* Efficiently compute dL/dD for UPGMA from a finished tree and
+   branch-length gradients dL_dt, without explicitly forming dt_dD.
+
+   tree   : rooted ultrametric tree produced by upgma_infer_tree
+   dL_dt  : gradient with respect to branch lengths; entry i is for
+            the branch from node i to its parent (same convention as
+            nj / upgma_set_dt_dD: root and root->rchild are skipped)
+   dL_dD  : OUTPUT, gradient with respect to original leaf–leaf
+            distances; length should be n_leaves choose 2
+*/
+void upgma_dL_dD_from_tree(TreeNode *tree, Vector *dL_dt, Vector *dL_dD) {
+  int i, j, k;
+  int nnodes  = tree->nnodes;
+  int nleaves = (nnodes + 2) / 2;
+  int ndist   = nleaves * (nleaves - 1) / 2;
+  List **leaf_lst;
+  Vector *lambda_H;
+  List *nodes;
+
+  if (dL_dD->size != ndist)
+    die("ERROR upgma_dL_dD_from_tree: dL_dD has wrong size\n");
+
+  /* initialize lists for leaves beneath each node (same as upgma_set_dt_dD) */
+  leaf_lst = smalloc(nnodes * sizeof(void*));
+  for (i = 0; i < nnodes; i++)
+    leaf_lst[i] = lst_new_ptr(nnodes);
+
+  tr_list_leaves(tree, leaf_lst);
+  assert(lst_size(leaf_lst[tree->id]) == nleaves);
+
+  /* adjoints for node heights H_i */
+  lambda_H = vec_new(nnodes);
+  vec_zero(lambda_H);
+
+  /* adjoints for original distances */
+  vec_zero(dL_dD);
+
+  nodes = tree->nodes;
+
+  /* Step 1: backprop t_child = H_parent - H_child
+     For each branch (node i -> parent(i)):
+       L += lambda_t * (H_parent - H_child)
+       => dL/dH_parent += lambda_t
+          dL/dH_child  -= lambda_t
+  */
+  for (i = 0; i < nnodes; i++) {
+    TreeNode *n = lst_get_ptr(nodes, i);
+
+    /* same unrooted convention as upgma_set_dt_dD */
+    if (n == tree || n == tree->rchild)
+      continue;
+
+    if (i >= dL_dt->size)
+      die("ERROR upgma_dL_dD_from_tree: dL_dt too small for node ids\n");
+
+    double lambda_t = vec_get(dL_dt, i);
+    if (lambda_t == 0.0)
+      continue;
+
+    TreeNode *parent = n->parent;
+    if (parent == NULL)
+      continue;  /* should not happen, but be safe */
+
+    vec_set(lambda_H, parent->id,
+            vec_get(lambda_H, parent->id) + lambda_t);
+    vec_set(lambda_H, n->id,
+            vec_get(lambda_H, n->id) - lambda_t);
+  }
+
+  /* Step 2: backprop through UPGMA height averaging:
+       H_i = (1/(2|L||R|)) sum_{a in L} sum_{b in R} d_{ab}
+     => for each i:
+       dL/dD_ab += lambda_H(i) * 1/(2|L||R|) for all a in L, b in R
+  */
+  for (i = 0; i < nnodes; i++) {
+    TreeNode *n = lst_get_ptr(nodes, i);
+
+    /* only internal nodes contribute (must have two children) */
+    if (n->lchild == NULL || n->rchild == NULL)
+      continue;
+
+    double lambda_hi = vec_get(lambda_H, n->id);
+    if (lambda_hi == 0.0)
+      continue;
+
+    List *lleaves = leaf_lst[n->lchild->id];
+    List *rleaves = leaf_lst[n->rchild->id];
+    int nl = lst_size(lleaves);
+    int nr = lst_size(rleaves);
+
+    if (nl == 0 || nr == 0)
+      continue;
+
+    /* weight = lambda_H(i) * (1 / (2|L||R|)) */
+    double weight = lambda_hi / (2.0 * nl * nr);
+
+    for (j = 0; j < nl; j++) {
+      TreeNode *ll = lst_get_ptr(lleaves, j);
+      for (k = 0; k < nr; k++) {
+        TreeNode *rl = lst_get_ptr(rleaves, k);
+        int idx = nj_i_j_to_dist(ll->id, rl->id, nleaves);
+        assert(idx < ndist);
+        vec_set(dL_dD, idx, vec_get(dL_dD, idx) + weight);
+      }
+    }
+  }
+
+  /* cleanup */
+  for (i = 0; i < nnodes; i++)
+    lst_free(leaf_lst[i]);
+  free(leaf_lst);
+  vec_free(lambda_H);
+}
