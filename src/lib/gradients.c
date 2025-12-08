@@ -484,7 +484,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   int n = data->nseqs, nbranches = 2*n-2,  /* have to work with the rooted tree here */
     ndist = n * (n-1) / 2, ndim = data->nseqs * data->dim;
   Vector *dL_dt = vec_new(nbranches);
-  Matrix *dt_dD = mat_new(nbranches, ndist);
+  /* Matrix *dt_dD = mat_new(nbranches, ndist); */
   Vector *dL_dD = vec_new(ndist);
   Vector *dL_dy = vec_new(dL_dx->size);
   Vector *migbranchgrad = data->migtable != NULL ?
@@ -495,7 +495,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   int i, j, d;
 
 /* set up Neighbors tape for this NJ run */
-  Neighbors *nb = data->crispr_mod != NULL ? nj_new_neighbors(n) : NULL;
+  Neighbors *nb = data->crispr_mod == NULL ? nj_new_neighbors(n) : NULL;
   
   *migll = 0.0;
   
@@ -504,7 +504,8 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   
    /* set up baseline objects */
   nj_points_to_distances(y, data);
-  tree = nj_inf(data->dist, data->names, dt_dD, nb, data);
+  /* tree = nj_inf(data->dist, data->names, dt_dD, nb, data); */
+  tree = nj_inf(data->dist, data->names, NULL, nb, data);
   nj_reset_tree_model(mod, tree);
 
   /* TEMPORARY: compare to numerical gradient */
@@ -532,7 +533,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   /* fprintf(stdout, "dL_dt (numerical):\n"); */
   /* vec_print(dL_dt, stdout); */
   /* exit(0); */
-
+  
   /* also get migration log likelihood if needed */
   if (data->migtable != NULL) {
     *migll = mig_compute_log_likelihood(mod, data->migtable, data->crispr_mod,
@@ -544,9 +545,9 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
 
   /* for now, keep old and new versions of this calculation for
      cross-checking */
-
+  
   /* old version using mat_vec_mult */
-  mat_vec_mult_transp(dL_dD, dt_dD, dL_dt);
+  /* mat_vec_mult_transp(dL_dD, dt_dD, dL_dt); */
   /* (note taking transpose of both vector and matrix and expressing
      result as column vector) */
 
@@ -555,7 +556,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
     nj_dL_dD_from_neighbors(nb, dL_dt, dL_dD);
   else /* UPGMA case can be done in post-processing */
     upgma_dL_dD_from_tree(mod->tree, dL_dt, dL_dD);
-
+  
   /* finally multiply by dD/dy to obtain gradient wrt y.  This part is
      different for the euclidean and hyperbolic geometries */
   vec_zero(dL_dy);
@@ -677,7 +678,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   }
 
   vec_free(dL_dt);
-  mat_free(dt_dD);
+  /* mat_free(dt_dD); */
   vec_free(dL_dD);
   vec_free(dL_dy);
   vec_free(y);
@@ -717,6 +718,26 @@ void nj_dL_dD_from_neighbors(const Neighbors *nb, Vector *dL_dt,
   for (i = 0; i < N; i++)
     active_states[0 * N + i] = (i < n ? 1 : 0);
 
+  /* --- Seed lambda_D with contributions from the final root branch
+     --- In the original code, only the left branch under the root has
+     a non-zero dt_dD row; the other root child is treated as
+     redundant.  Thus, to match that behavior, we seed only from
+     branch_idx_root_u.
+     
+     At the last step, with only root_u and root_v active:
+         t_root_u = 0.5 * d_{uv}
+     so:
+         dL/dd_{uv} += 0.5 * dL/dt_root_u
+  */
+  double lambda_root_u = vec_get(dL_dt, nb->branch_idx_root_u);
+
+  if (lambda_root_u != 0.0) {
+    int idx_uv_final = nj_i_j_to_dist(nb->root_u, nb->root_v, N);
+    double delta_uv = 0.5 * lambda_root_u;
+    vec_set(lambda_D, idx_uv_final,
+            vec_get(lambda_D, idx_uv_final) + delta_uv);
+  }
+  
   /* forward simulation of active sets */
   for (k = 0; k < S; k++) {
     const JoinEvent *ev = &nb->steps[k];
@@ -805,23 +826,6 @@ void nj_dL_dD_from_neighbors(const Neighbors *nb, Vector *dL_dt,
        for lookups at each (fixed) k and was already filled by the forward pass. */
   }
 
-  /* Add contributions from the final two branches under the root.
-     At this last step, the two remaining branches have lengths
-       t_u = t_v = d_{uv} / 2,
-     so dt_u/dd_{uv} = dt_v/dd_{uv} = 0.5, and there are no
-     contributions to any other distances. */
-  if (nb->branch_idx_root_u >= 0 && nb->branch_idx_root_v >= 0) {
-    double lambda_tu = vec_get(dL_dt, nb->branch_idx_root_u);
-    double lambda_tv = vec_get(dL_dt, nb->branch_idx_root_v);
-    int u = nb->root_u;
-    int v = nb->root_v;
-
-    int idx_uv = nj_i_j_to_dist(u, v, N);  /* u < v guaranteed by NJ */
-    double delta_uv = 0.5 * (lambda_tu + lambda_tv);
-
-    vec_set(lambda_D, idx_uv, vec_get(lambda_D, idx_uv) + delta_uv);
-  }
-  
   /* Finally, extract dL/dD for the original n x n distances (leaf–leaf) */
   vec_zero(dL_dD);
   for (i = 0; i < n; i++) {

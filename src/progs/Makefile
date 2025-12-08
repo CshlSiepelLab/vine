@@ -15,7 +15,7 @@ all: ${EXECS}
 %.o: %.c ${HELP} ../make-include.mk
 	$(CC) $(CFLAGS) -c $< -o $@ 
 
-${EXECS}: ${BIN}/%: %.o ${PHAST}/lib/libphast.a
+${EXECS}: ${BIN}/%: %.o ${PHAST}/lib/libphast.a ${LIB}/libvine.a
 	${CC} ${LIBPATH} ${LFLAGS} -o $@ $< ${LIBS} 
 
 %.help : %.help_src

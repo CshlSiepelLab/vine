@@ -703,7 +703,6 @@ Neighbors *nj_new_neighbors(int n) {
   nb->n           = n;
   nb->total_nodes = 2*n - 2;
 
-  /* n-1 merges.  CHECK */
   nb->nsteps = n;  
 
   nb->steps = (JoinEvent *)calloc(nb->nsteps, sizeof(JoinEvent));
