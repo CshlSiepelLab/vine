@@ -25,11 +25,15 @@ PHASTLIB = ${PHAST}/lib
 PHASTINC = ${PHAST}/include
 
 #for debugging
-CFLAGS = -g -fno-inline -Wall 
+#CFLAGS = -g -fno-inline -Wall 
 # for best performance
-#CFLAGS = -O3 -Wall
+CFLAGS = -O3 -Wall
 # for profiling
 #CFLAGS = -O2 -g 
+
+# for AddressSanitizer
+#CFLAGS = -O1 -g -fsanitize=address -fno-omit-frame-pointer
+#LDFLAGS = -fsanitize=address -fno-omit-frame-pointer
 
 CFLAGS += -I${INC} -I${PHASTINC} -I${PHAST}/src/lib/pcre -fno-strict-aliasing
 LIBPATH = -L${LIB} -L${PHASTLIB}

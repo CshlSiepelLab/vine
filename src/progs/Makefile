@@ -16,7 +16,7 @@ all: ${EXECS}
 	$(CC) $(CFLAGS) -c $< -o $@ 
 
 ${EXECS}: ${BIN}/%: %.o ${PHAST}/lib/libphast.a ${LIB}/libvine.a
-	${CC} ${LIBPATH} ${LFLAGS} -o $@ $< ${LIBS} 
+	${CC} ${LIBPATH} ${LDFLAGS} -o $@ $< ${LIBS} 
 
 %.help : %.help_src
 	../munge-help.sh $< > $@

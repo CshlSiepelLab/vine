@@ -231,7 +231,8 @@ TreeNode* nj_infer_tree(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *n
     node_u->dparent = mat_get(D, u, v) / 2;
     node_v->dparent = mat_get(D, u, v) / 2;
 
-    if (nb != NULL) {  /* record the final join under the root */
+    if (nb != NULL) { /* record the final join under the root */
+      nb->nsteps = step_idx; /* number of recorded merges */
       nb->root_u = u;
       nb->root_v = v;
       nb->branch_idx_root_u = node_u->id;
@@ -443,6 +444,7 @@ TreeNode* nj_fast_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *n
   node_v->dparent = mat_get(D, u, v) / 2;
 
   if (nb != NULL) {  /* record the final join under the root */
+    nb->nsteps = step_idx; /* number of recorded merges */
     nb->root_u = u;
     nb->root_v = v;
     nb->branch_idx_root_u = node_u->id;
@@ -702,10 +704,9 @@ Neighbors *nj_new_neighbors(int n) {
   Neighbors *nb = (Neighbors *)smalloc(sizeof(Neighbors));
   nb->n           = n;
   nb->total_nodes = 2*n - 2;
+  nb->nsteps = n-2;  /* This is the max; will be reset after NJ run */
 
-  nb->nsteps = n;  
-
-  nb->steps = (JoinEvent *)calloc(nb->nsteps, sizeof(JoinEvent));
+  nb->steps = (JoinEvent *)smalloc((n-2) * sizeof(JoinEvent));
 
   nb->root_u = nb->root_v = -1;
   nb->branch_idx_root_u = nb->branch_idx_root_v = -1;

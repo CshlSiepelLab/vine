@@ -505,7 +505,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
    /* set up baseline objects */
   nj_points_to_distances(y, data);
   /* tree = nj_inf(data->dist, data->names, dt_dD, nb, data); */
-  tree = nj_inf(data->dist, data->names, NULL, nb, data);
+  tree = nj_inf(data->dist, data->names, NULL, nb, data); 
   nj_reset_tree_model(mod, tree);
 
   /* TEMPORARY: compare to numerical gradient */
@@ -682,7 +682,8 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   vec_free(dL_dD);
   vec_free(dL_dy);
   vec_free(y);
-  nj_free_neighbors(nb);
+  if (nb != NULL)
+    nj_free_neighbors(nb);
   if (migbranchgrad != NULL) vec_free(migbranchgrad);
 
   return ll_base;  
@@ -707,7 +708,11 @@ void nj_dL_dD_from_neighbors(const Neighbors *nb, Vector *dL_dt,
   /* adjoints for all pairwise distances over the full node set (leaves+internals) */
   Vector *lambda_D = vec_new(Npairs);
   vec_zero(lambda_D);
-  
+
+  assert(lambda_D->size == Npairs);
+  assert(nb->total_nodes == 2*nb->n - 2);  
+  assert(S >= 0 && S <= N);                
+
   /* active states at each step: state[k] = active BEFORE merge k,
      state[S] = active after all merges (2 active nodes).
      Use a flat array for simplicity: (S+1) x N bytes. */
@@ -767,6 +772,13 @@ void nj_dL_dD_from_neighbors(const Neighbors *nb, Vector *dL_dt,
     double lambda_tu = vec_get(dL_dt, ev->branch_idx_u);
     double lambda_tv = vec_get(dL_dt, ev->branch_idx_v);
 
+#ifdef DEBUG
+    assert(u >= 0 && u < N);
+    assert(v >= 0 && v < N);
+    int idx_uv = nj_i_j_to_dist(u, v, N);
+    assert(idx_uv >= 0 && idx_uv < Npairs);
+#endif
+    
     /* --- (1) contributions from branch lengths t_u, t_v at this step --- */
 
     /* contribution to d_{uv} */
