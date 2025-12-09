@@ -25,9 +25,9 @@ PHASTLIB = ${PHAST}/lib
 PHASTINC = ${PHAST}/include
 
 #for debugging
-#CFLAGS = -g -fno-inline -Wall 
+CFLAGS = -g -fno-inline -Wall 
 # for best performance
-CFLAGS = -O3 -Wall
+#CFLAGS = -O3 -Wall
 # for profiling
 #CFLAGS = -O2 -g 
 

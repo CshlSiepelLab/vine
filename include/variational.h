@@ -35,6 +35,15 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
                         int nminibatch, double learnrate, int nbatches_conv,
                         int min_nbatches, CovarData *data, FILE *logf);
 
+double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
+                          int nminibatch, Vector *avegrad,
+                          Vector *ave_nuis_grad, double *ave_lprior,
+                          double *avemigll);
+
+double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
+                      Vector *avegrad, Vector *ave_nuis_grad,
+                      double *ave_lprior, double *avemigll);
+
 List *nj_var_sample(int nsamples, multi_MVN *mmvn, CovarData *data,
                     char** names, Vector *logdens);
 

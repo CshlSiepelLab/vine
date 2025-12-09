@@ -505,7 +505,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
    /* set up baseline objects */
   nj_points_to_distances(y, data);
   /* tree = nj_inf(data->dist, data->names, dt_dD, nb, data); */
-  tree = nj_inf(data->dist, data->names, NULL, nb, data); 
+  tree = nj_inf(data->dist, data->names, NULL, nb, data);
   nj_reset_tree_model(mod, tree);
 
   /* TEMPORARY: compare to numerical gradient */
@@ -547,7 +547,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
      cross-checking */
   
   /* old version using mat_vec_mult */
-  /* mat_vec_mult_transp(dL_dD, dt_dD, dL_dt); */
+  /* mat_vec_mult_transp(dL_dD, dt_dD, dL_dt);  */
   /* (note taking transpose of both vector and matrix and expressing
      result as column vector) */
 
@@ -556,7 +556,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
     nj_dL_dD_from_neighbors(nb, dL_dt, dL_dD);
   else /* UPGMA case can be done in post-processing */
     upgma_dL_dD_from_tree(mod->tree, dL_dt, dL_dD);
-  
+
   /* finally multiply by dD/dy to obtain gradient wrt y.  This part is
      different for the euclidean and hyperbolic geometries */
   vec_zero(dL_dy);

@@ -23,9 +23,6 @@
 #include <gradients.h>
 #include <nuisance.h>
 
-/* uncomment to dump gradients to a file called "grads_log.txt" */
-//#define DUMPGRAD 1
-
 /* optimize variational model by stochastic gradient ascent using the
    Adam algorithm.  Takes initial tree model and alignment and
    distance matrix, dimensionality of Euclidean space to work in.
@@ -34,36 +31,28 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
                         int nminibatch, double learnrate, int nbatches_conv,
                         int min_nbatches, CovarData *data, FILE *logf) {
 
-  Vector *points, *grad, *kldgrad, *avegrad, *m, *m_prev, *v, *v_prev,
+  Vector *kldgrad, *avegrad, *m, *m_prev, *v, *v_prev,
     *best_mu, *best_sigmapar, *rescaledgrad, *sparsitygrad = NULL, 
-    *points_std;
-  Vector *sigmapar = data->params;
-  int n = data->nseqs, i, j, t, stop = FALSE, bestt = -1, graddim,
+    *sigmapar = data->params;
+  int n = data->nseqs, j, t, stop = FALSE, bestt = -1, graddim,
     dim = data->dim, fulld = n*dim;
-  double elb, ll, avell, migll, avemigll, kld, bestelb = -INFTY, bestll = -INFTY,
+  double elb, avell, avemigll, kld, bestelb = -INFTY, bestll = -INFTY,
     bestkld = -INFTY, bestmigll = -INFTY,
     running_tot = 0, last_running_tot = -INFTY, trace, logdet, penalty = 0,
     bestpenalty = 0, ave_lprior, best_lprior = -INFTY, subsamp_rescale = 1.0;
-  FILE *gradf = NULL;
 
   /* for nuisance parameters; these are parameters that are optimized
      by stochastic gradient descent but are not fully sampled via the
      variational distribution */
   int n_nuisance_params = nj_get_num_nuisance_params(mod, data);
-  Vector *nuis_grad = NULL, *ave_nuis_grad = NULL, *m_nuis = NULL,
+  Vector *ave_nuis_grad = NULL, *m_nuis = NULL,
     *v_nuis = NULL, *m_nuis_prev = NULL, *v_nuis_prev = NULL,
-    *best_nuis_params = NULL, *prior_grad = NULL;
-  
-#ifdef DUMPGRAD
-  gradf = phast_fopen("grads_log.txt", "w");
-#endif
+    *best_nuis_params = NULL;
   
   if (mmvn->d * mmvn->n != dim * n)
     die("ERROR in nj_variational_inf: bad dimensions\n");
 
-  points = vec_new(fulld);
   graddim = fulld + data->params->size;
-  grad = vec_new(graddim);  
   kldgrad = vec_new(graddim);
   avegrad = vec_new(graddim);
   rescaledgrad = vec_new(graddim);
@@ -74,7 +63,6 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
   sparsitygrad = vec_new(graddim);
 
   if (n_nuisance_params > 0) {
-    nuis_grad = vec_new(n_nuisance_params);
     ave_nuis_grad = vec_new(n_nuisance_params);
     m_nuis = vec_new(n_nuisance_params);
     v_nuis = vec_new(n_nuisance_params);
@@ -82,15 +70,6 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
     v_nuis_prev = vec_new(n_nuisance_params);
     best_nuis_params = vec_new(n_nuisance_params);
   }
-
-  if (data->treeprior != NULL)
-    prior_grad = vec_new(graddim);  
-
-  if (data->type == LOWR) /* in this case, the underlying standard
-                             normal MVN is of the lower dimension */
-    points_std = vec_new(data->lowrank * dim);
-  else
-    points_std = vec_new(fulld);
   
   best_mu = vec_new(fulld);
   mmvn_save_mu(mmvn, best_mu);
@@ -119,15 +98,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
       fprintf(logf, "%s\t", nj_get_nuisance_param_name(mod, data, j));
     fprintf(logf, "\n");
   }
-  if (gradf != NULL) {
-    fprintf(gradf, "state\t");
-    for (j = 0; j < fulld; j++)
-      fprintf(gradf, "g_mu.%d\t", j);
-    for (j = fulld; j < grad->size; j++)
-      fprintf(gradf, "g_sig.%d\t", j-fulld);
-    fprintf(gradf, "\n");
-  }
-  
+
   /* initialize moments for Adam algorithm */
   vec_zero(m);  vec_zero(m_prev);
   vec_zero(v);  vec_zero(v_prev);
@@ -165,7 +136,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
     
       /* we can also precompute the contribution of the KLD to the gradient */
       /* Note KLD is subtracted rather than added, so compute the gradient of -KLD */
-      for (j = 0; j < grad->size; j++) {
+      for (j = 0; j < kldgrad->size; j++) {
         double gj = 0.0;
 
         if (j < n*dim)  /* partial deriv wrt mu_j is just mu_j */
@@ -188,8 +159,9 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
     }
     else { /* with explicit tree prior, we need the entropy of the MVN instead */
       kld = -0.5 * (fulld * (1.0 + log(2 * M_PI)) + logdet);
+      kld *= data->kld_upweight/(data->pointscale*data->pointscale);      
       /* note overloading name and negating */
-      for (j = 0; j < grad->size; j++) {
+      for (j = 0; j < kldgrad->size; j++) {
         double gj = 0.0;
 
         if (j < n*dim)  /* partial deriv wrt mu_j is zero */
@@ -214,19 +186,12 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
     penalty = data->var_pen;
 
     vec_scale(kldgrad, data->kld_upweight/(data->pointscale*data->pointscale));
-    
-    /* now sample a minibatch from the MVN averaging distribution and
-       compute log likelihoods and gradients */
-    vec_zero(avegrad);
-    if (n_nuisance_params > 0)
-      vec_zero(ave_nuis_grad);
-    if (data->treeprior != NULL)
-      vec_zero(prior_grad);
-    avell = 0;
-    ave_lprior = 0;
-    avemigll = 0;
 
-    /* set up subsampling for this minibatch (but not in crispr mode) */
+
+    /* now estimate ELBO and gradient, either by Monte Carlo integration or by
+     * the Taylor approximation */
+
+     /* first set up subsampling based on scheduler parameters (but not in crispr mode) */
     if (!sd->full_grad_now && data->crispr_mod == NULL) {
       data->subsample = TRUE;
       data->subsampsize = sd->m;
@@ -237,62 +202,21 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
       data->subsample = FALSE;
       subsamp_rescale = 1.0;
     }
-
-    for (i = 0; i < nminibatch; i++) {
-      int bail = 0;
-
-      do {
-        /* do this in a way that keeps track of the original standard
-           normal variable (points_std) for use in computing
-           gradients.  Also use antithetic sampling to reduce
-           variance */
-        nj_sample_points(mmvn, points, points_std);
- 
-        ll = nj_compute_model_grad(mod, mmvn, points, points_std, grad, data, NULL, &migll);
-       
-        if (++bail > 10 && !isfinite(ll)) {
-          fprintf(stderr, "WARNING: repeatedly sampling zero-probability trees. Prohibiting zero-length branches.\n");
-          data->no_zero_br = TRUE;
-          assert(bail < 15); /* prohibit infinite loop */
-        }
-      } while (!isfinite(ll));  /* in certain cases under the
-                                   irreversible CRISPR model, trees
-                                   can have likelihoods of zero; we'll
-                                   try to just keep sampling if that
-                                   happens and if necessary constrain
-                                   the tree structure */
-
-      if (data->subsample == TRUE)  /* rescale ll if subsampling */
-        ll *= subsamp_rescale;
-
-      avell += ll;
-      avemigll += migll;
-      vec_plus_eq(avegrad, grad);
-
-      /* calculate prior if needed; add gradient of branches */
-      if (data->treeprior != NULL) {
-        ave_lprior += tp_compute_log_prior(mod, data, prior_grad);
-        vec_plus_eq(avegrad, prior_grad);
-      }
-
-      if (n_nuisance_params > 0) {
-        nj_update_nuis_grad(mod, data, nuis_grad);
-        vec_plus_eq(ave_nuis_grad, nuis_grad);
-      }
-    }
-
-    /* divide by nminibatch to get expected gradient */
-    vec_scale(avegrad, 1.0/nminibatch);
-    avell /= nminibatch;
-    ave_lprior /= nminibatch;
-    avemigll /= nminibatch;
+    
+    if (data->taylor_elbo == TRUE) 
+      avell = nj_elbo_taylor(mod, mmvn, data, avegrad, ave_nuis_grad, &ave_lprior, &avemigll);
+    
+    else 
+      avell = nj_elbo_montecarlo(mod, mmvn, data, nminibatch,
+                                 avegrad, ave_nuis_grad, &ave_lprior, &avemigll);
+    
     
     vec_plus_eq(avegrad, kldgrad);
     vec_plus_eq(avegrad, sparsitygrad);
 
-    if (n_nuisance_params > 0) 
-      vec_scale(ave_nuis_grad, 1.0/nminibatch);
-    
+    if (data->subsample == TRUE)  /* rescale ll if subsampling */
+      avell *= subsamp_rescale;
+
     /* store parameters if best yet */
     elb = avell + ave_lprior - kld + penalty + avemigll;
     if (elb > bestelb && (sd->full_grad_now || data->crispr_mod != NULL)) {
@@ -386,12 +310,6 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
         fprintf(logf, "%f\t", nj_nuis_param_get(mod, data, j)); 
       fprintf(logf, "\n");
     }
-    if (gradf != NULL) {
-      fprintf(gradf, "%d\t", t);
-      for (j = 0; j < rescaledgrad->size; j++)
-        fprintf(gradf, "%f\t", vec_get(rescaledgrad, j));
-      fprintf(gradf, "\n");
-    }
     
     /* check total elb every nbatches_conv to decide whether to stop */
     running_tot += elb;
@@ -427,21 +345,122 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
     fprintf(logf, "\n");
   }
 
-  vec_free(grad); vec_free(avegrad); vec_free(rescaledgrad); vec_free(kldgrad);
-  vec_free(sparsitygrad); vec_free(points); vec_free(points_std); vec_free(m);
+  vec_free(avegrad); vec_free(rescaledgrad); vec_free(kldgrad);
+  vec_free(sparsitygrad); vec_free(m);
   vec_free(m_prev); vec_free(v); vec_free(v_prev); vec_free(best_mu); vec_free(best_sigmapar);
   sfree(s); sfree(st); sfree(sd); sfree(sm);
   
-  if (data->treeprior != NULL)
-    vec_free(prior_grad);
-  
   if (n_nuisance_params > 0) {
-    vec_free(nuis_grad); vec_free(ave_nuis_grad); vec_free(m_nuis); vec_free(v_nuis);
+    vec_free(ave_nuis_grad); vec_free(m_nuis); vec_free(v_nuis);
     vec_free(m_nuis_prev); vec_free(v_nuis_prev); vec_free(best_nuis_params);
   }    
 }
 
-/* sample a list of trees from the approximate posterior distribution
+/* estimate key components of the ELBO by Monte Carlo integration,
+   over a minibatch of size nminibatch.  Returns the expected log
+   likelihood.  The last four parameters are updated (avegrad,
+   ave_nuis_grad, ave_lprior, and avemigll) */ 
+double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
+                          int nminibatch, Vector *avegrad, Vector *ave_nuis_grad,
+                          double *ave_lprior, double *avemigll) {
+  Vector *grad = vec_new(avegrad->size), *prior_grad = NULL, *nuis_grad = NULL, *points, *points_std;
+  double ll, migll = 0, avell = 0;
+  int n = data->nseqs, dim = data->dim, fulld = n*dim;
+  
+  vec_zero(avegrad);
+  if (ave_nuis_grad != NULL) {
+    nuis_grad = vec_new(ave_nuis_grad->size);
+    vec_zero(ave_nuis_grad);
+  }
+  if (data->treeprior != NULL) 
+    prior_grad = vec_new(avegrad->size);  
+
+  *ave_lprior = *avemigll = 0;
+
+  points = vec_new(fulld);
+  if (data->type == LOWR) /* in this case, the underlying standard
+                             normal MVN is of the lower dimension */
+    points_std = vec_new(data->lowrank * dim);
+  else
+    points_std = vec_new(fulld);
+  
+  for (int i = 0; i < nminibatch; i++) {
+    int bail = 0;
+    migll = 0;
+
+    do {
+      /* do this in a way that keeps track of the original standard
+         normal variable (points_std) for use in computing
+         gradients.  Also use antithetic sampling to reduce
+         variance */
+      nj_sample_points(mmvn, points, points_std);
+
+      vec_zero(grad);
+      ll = nj_compute_model_grad(mod, mmvn, points, points_std, grad, data, NULL, &migll);
+       
+      if (++bail > 10 && !isfinite(ll)) {
+        fprintf(stderr, "WARNING: repeatedly sampling zero-probability trees. Prohibiting zero-length branches.\n");
+        data->no_zero_br = TRUE;
+        assert(bail < 15); /* prohibit infinite loop */
+      }
+    } while (!isfinite(ll));  /* in certain cases under the
+                                 irreversible CRISPR model, trees
+                                 can have likelihoods of zero; we'll
+                                 try to just keep sampling if that
+                                 happens and if necessary constrain
+                                 the tree structure */
+
+ 
+    avell += ll;
+    (*avemigll) += migll;
+    vec_plus_eq(avegrad, grad);
+
+    /* calculate prior if needed; add gradient of branches */
+    if (data->treeprior != NULL) {
+      vec_zero(prior_grad);
+      (*ave_lprior) += tp_compute_log_prior(mod, data, prior_grad);
+      vec_plus_eq(avegrad, prior_grad);
+    }
+
+    if (ave_nuis_grad != NULL) {
+      vec_zero(nuis_grad);
+      nj_update_nuis_grad(mod, data, nuis_grad);
+      vec_plus_eq(ave_nuis_grad, nuis_grad);
+    }
+  }
+
+  /* divide by nminibatch to get expected gradient */
+  vec_scale(avegrad, 1.0/nminibatch);
+  avell /= nminibatch;
+  (*ave_lprior) /= nminibatch;
+  (*avemigll) /= nminibatch;
+
+  /* same for nuisance grad if needed */
+  if (ave_nuis_grad != NULL) 
+    vec_scale(ave_nuis_grad, 1.0 / nminibatch);
+
+  /* free everything and return */
+  vec_free(points); vec_free(points_std); vec_free(grad);
+  if (ave_nuis_grad != NULL) 
+    vec_free(nuis_grad);
+  if (data->treeprior != NULL)
+    vec_free(prior_grad);
+ 
+  return avell;
+}
+
+/* estimate key components of the ELBO by a Taylor approximation
+   around the mean.  Returns the expected log likelihood */
+double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
+                      Vector *avegrad, Vector *ave_nuis_grad,
+                      double *ave_lprior, double *avemigll) {
+  /* key outputs: avell, ave_lprior, avemigll, avegrad, ave_nuis_grad */
+  /* be sure to zero everything first */
+  die("ERROR: Taylor approximation not yet implemented\n");
+  return 0;
+}
+
+  /* sample a list of trees from the approximate posterior distribution
    and return as a new list.  If logdens is non-null, return
    corresponding vector of log densities for the samples */
 List *nj_var_sample(int nsamples, multi_MVN *mmvn, CovarData *data, char** names,

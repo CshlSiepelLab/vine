@@ -121,6 +121,7 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
   retval->migtable = mtable;
   retval->gtr_params = NULL;
   retval->deriv_gtr = NULL;
+  retval->taylor_elbo = FALSE;
   
   if (radial_flow == TRUE) {
     retval->rf = rf_new(retval->nseqs, dim);
