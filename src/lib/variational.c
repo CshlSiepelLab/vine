@@ -460,7 +460,7 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   return 0;
 }
 
-  /* sample a list of trees from the approximate posterior distribution
+/* sample a list of trees from the approximate posterior distribution
    and return as a new list.  If logdens is non-null, return
    corresponding vector of log densities for the samples */
 List *nj_var_sample(int nsamples, multi_MVN *mmvn, CovarData *data, char** names,
