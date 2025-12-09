@@ -452,12 +452,68 @@ double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
 /* estimate key components of the ELBO by a Taylor approximation
    around the mean.  Returns the expected log likelihood */
 double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
-                      Vector *avegrad, Vector *ave_nuis_grad,
-                      double *ave_lprior, double *avemigll) {
-  /* key outputs: avell, ave_lprior, avemigll, avegrad, ave_nuis_grad */
-  /* be sure to zero everything first */
-  die("ERROR: Taylor approximation not yet implemented\n");
-  return 0;
+                      Vector *grad, Vector *nuis_grad, double *lprior, double *migll) {
+  double ll;
+  Vector *prior_grad = NULL;
+
+  if (data->treeprior != NULL) 
+    prior_grad = vec_new(grad->size);  
+  
+  /* first calculate log likelihood at the mean */
+  vec_zero(grad);
+  Vector *mu = vec_new(mmvn->n * mmvn->d), *mu_std = vec_new(mmvn->n * mmvn->d);
+  mmvn_save_mu(mmvn, mu); /* express mean as a single vector */
+  mmvn_rederive_std(mmvn, mu,
+                    mu_std); /* rederive associated standard normal variate */
+  /* CHECK: not sure mu_std is really needed here */
+
+  ll = nj_compute_model_grad(mod, mmvn, mu, mu_std, grad, data, NULL, migll);
+  /* CHECK: is handling of mean correct in this case?  several terms
+     reduce to zero but maybe ok.  Maybe variance is wrong here
+     however? */
+
+  /* also calculate log prior if needed */
+  if (data->treeprior != NULL) {
+    (*lprior) = tp_compute_log_prior(mod, data, prior_grad);
+    vec_plus_eq(grad, prior_grad);
+  }
+
+  if (nuis_grad != NULL) {
+    vec_zero(nuis_grad);
+    nj_update_nuis_grad(mod, data, nuis_grad);
+  }
+
+  /* note that there is no first-order term in the Taylor approximation
+     because we are expanding around the mean */
+  
+  /* CHECK: do we need to propagate gradients wrt to the variance
+     terms through to the migll?  how about nuisance params? */
+  /* CHECK: are there also second order terms to consider for the log prior? */
+
+  /* now add the second-order terms for the Taylor expansion.  These
+     terms are equal to 1/2 tr(H Sigma), where H is the Hessian of the
+     ELBO.  But we can simplify this expression by considering the
+     chain of transformations from the standard normal to the
+     phylogeny and likelihood.  The NJ transformation is linear up to
+     a choice of neighbors, the tranformation from z to x is linear.
+     If we also assume the distances are locally linear, then all
+     curvature comes from the phylogenetic likelihood function, and we
+     can approximate tr(H Sigma) by tr(H S), where S is a square
+     matrix of dimension nbranches x nbranches representing a product
+     of Sigma and the relevant Jacobian matrices [see
+     manuscript for detailed derivation] */
+ 
+  /* we will approximate tr(H S) using a Hutchinson trace estimator */
+  /* tr = hutch_tr(vineHfun, vine Sfun, data, grad->size, NHUTCH_SAMPLES); */
+
+  /* CHECK: should we consider the curvature of the flows? */
+     
+  /* free everything and return */
+  vec_free(mu); vec_free(mu_std);
+  if (data->treeprior != NULL)
+    vec_free(prior_grad);
+ 
+  return ll; 
 }
 
 /* sample a list of trees from the approximate posterior distribution
