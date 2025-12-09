@@ -672,3 +672,48 @@ void nj_set_entropy_grad_LOWR(Vector *entgrad, multi_MVN *mmvn) {
 
   mat_free(Rgrad);
 }
+
+/* version of Hessian-vector product function for variational inference
+   with NJ.  Computes H v, where H is the Hessian of the negative log
+   likelihood with respect to model parameters (branch lengths, etc)
+   and v is the perturbation vector supplied as input.  The result is
+   placed in out.  Context ctx must be a CovarData structure with
+   appropriate fields set up for gradient computation. */
+void HVP_vine(Vector *out,
+               const Vector *v,
+               void *data_vd)
+{
+    CovarData *data = (CovarData *)data_vd;
+    TreeModel *mod      = data->mod;
+
+    /* 1. Zero all gradient buffers (primal + directional) */
+    Vector *dL_dt = vec_new(v->size), dL_dt_dir = vec_new(v->size);
+    vec_zero(dL_dt);
+    vec_zero(dL_dt_dir);   /* directional derivative of dL_dt */
+
+    /* 2. Load perturbation v into model parameter structure */
+    /*    This must set the directional component of each branch length. */
+    vine_set_direction_vector(mod, v);
+
+    /* 3. Enable directional (Pearlmutter) mode for the NJ backprop tape */
+    vine_enable_directional_mode(mod);
+
+    /* 4. Run likelihood; this computes both:
+          - dL_dt     (ordinary gradient)
+          - dL_dt_dir (directional derivative giving H v)
+       */
+    double ll_base;
+    if (data->crispr_mod != NULL) 
+      ll_base = cpr_compute_log_likelihood(data->crispr_mod, dL_dt);
+    else 
+      ll_base = nj_compute_log_likelihood(mod, data, dL_dt);
+
+    /* 5. Copy directional derivative (H v) into out */
+    vec_copy(out, dL_dt_dir);
+
+    /* 6. Disable directional mode */
+    vine_disable_directional_mode(mod);
+
+    vec_free(dL_dt);
+    vec_free(dL_dt_dir);
+}
