@@ -83,12 +83,13 @@ void nj_update_covariance(multi_MVN *mmvn, CovarData *data) {
 /* create a new CovarData object appropriate for the choice of
    parameterization */
 CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
-                             MSA *msa, CrisprMutModel* crispr_mod, char **names,
+                             MSA *msa, CrisprMutModel *crispr_mod, char **names,
                              unsigned int natural_grad, double kld_upweight,
                              int rank, double var_reg, unsigned int hyperbolic,
                              double negcurvature, unsigned int ultrametric,
                              unsigned int radial_flow, unsigned int planar_flow,
-                             TreePrior *treeprior, MigTable *mtable) {
+                             TreePrior *treeprior, MigTable *mtable,
+                             unsigned int use_taylor) {
   static int seeded = 0;
   
   CovarData *retval = smalloc(sizeof(CovarData));
@@ -121,7 +122,7 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
   retval->migtable = mtable;
   retval->gtr_params = NULL;
   retval->deriv_gtr = NULL;
-  retval->taylor_elbo = FALSE;
+  retval->taylor = use_taylor ? tay_new(retval) : NULL;
   
   if (radial_flow == TRUE) {
     retval->rf = rf_new(retval->nseqs, dim);

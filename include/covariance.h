@@ -26,6 +26,7 @@
 #include <planar_flow.h>
 #include <tree_prior.h>
 #include <migration.h>
+#include <taylor.h>
 
 /* use this as a floor for variance parameters.  Avoids drift to ever
    smaller values */
@@ -66,7 +67,8 @@ typedef struct cvdat {
   double var_pen; /* the current value of the variance penalty */
   unsigned int hyperbolic; /* whether or not hyperbolic geometry is used */
   double negcurvature; /* for hyperbolic case */
-  MSA *msa; /* multiple alignment under analysis if available */
+  MSA *msa;            /* multiple alignment under analysis if available */
+  TreeModel *mod;  /* tree model under analysis if available */
   CrisprMutModel *crispr_mod; /* model for CRISPR mutation if needed */
   unsigned int ultrametric;   /* whether or not tree is ultrametric */
   MigTable *migtable; /* migration table if needed */
@@ -91,20 +93,20 @@ typedef struct cvdat {
   int tree_diam_leaf2;
   int *seq_to_node_map; /* mapping from sequence indices to leaf node
                            ids, used with leaf1 and leaf2 */
-  unsigned int taylor_elbo; /* whether or not to use Taylor
-                                  approximation to ELBO */
+  struct taylor_data *taylor;   /* auxiliary data for Taylor approximation to
+                               ELBO (or NULL) */
 } CovarData;
 
 void nj_update_covariance(multi_MVN *mmvn, CovarData *data);
 
-CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist,
-                             int dim, MSA *msa, CrisprMutModel *crispr_mod,
-                             char **names, unsigned int natural_grad,
-                             double kld_upweight, int rank,
-                             double var_reg, unsigned int hyperbolic,
+CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
+                             MSA *msa, CrisprMutModel *crispr_mod, char **names,
+                             unsigned int natural_grad, double kld_upweight,
+                             int rank, double var_reg, unsigned int hyperbolic,
                              double negcurvature, unsigned int ultrametric,
                              unsigned int radial_flow, unsigned int planar_flow,
-                             TreePrior *treeprior, MigTable *mtable);
+                             TreePrior *treeprior, MigTable *mtable,
+                             unsigned int use_taylor);
 
 void nj_dump_covar_data(CovarData *data, FILE *F);
 

@@ -533,6 +533,10 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   /* fprintf(stdout, "dL_dt (numerical):\n"); */
   /* vec_print(dL_dt, stdout); */
   /* exit(0); */
+
+  /* save the gradient for Taylor approximation if needed */
+  if (data->taylor != NULL)
+    vec_copy(data->taylor->base_grad, dL_dt);
   
   /* also get migration log likelihood if needed */
   if (data->migtable != NULL) {

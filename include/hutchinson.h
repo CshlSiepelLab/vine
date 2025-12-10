@@ -17,16 +17,12 @@
 #include <stdlib.h>
 #include <phast/vector.h>
 
-typedef void (*HVP_fun)(Vector *out,
-                        const Vector *v,
-                        void *data);
+typedef void (*HVP_fun)(Vector *out, Vector *v, void *data);
 /* Computes out = H v for arbitrary vector v using Pearlmutter
    directional derivative.  data = auxiliary data */
 
 
-typedef void (*SVP_fun)(Vector *out,
-                        const Vector *v,
-                        void *data);
+typedef void (*SVP_fun)(Vector *out, Vector *v, void *data);
 /* Computes out = S v using factored optionally factored S and
    arbitrary vector .  data = auxiliary data. */
 

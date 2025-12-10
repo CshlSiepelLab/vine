@@ -46,7 +46,7 @@ int main(int argc, char *argv[]) {
   unsigned int nj_only = FALSE, random_start = FALSE,
     hyperbolic = FALSE, embedding_only = FALSE, rejection_sampling = FALSE,
     mvn_dump = FALSE, natural_grad = FALSE, is_crispr = FALSE, ultrametric = FALSE,
-    radial_flow = FALSE, planar_flow = FALSE;
+    radial_flow = FALSE, planar_flow = FALSE, use_taylor = FALSE;
   MSA *msa = NULL;
   enum covar_type covar_param = CONST;
 
@@ -117,11 +117,12 @@ int main(int argc, char *argv[]) {
     {"relclock", 0, 0, 'L'},
     {"migration", 1, 0, 'G'},
     {"primary", 1, 0, '1'},
+    {"taylor", 0, 0, 'y'},
     {"help", 0, 0, 'h'},
     {0, 0, 0, 0}
   };
 
-  while ((c = getopt_long(argc, argv, "b:B:c:d:D:egG:hHi:FZjJkK:l:L:m:M:n:No:v:r:Rt:T:VW:S:s:CY:Pp:", long_opts, &opt_idx)) != -1) {
+  while ((c = getopt_long(argc, argv, "b:B:c:d:D:egG:hHi:FZjJkK:l:L:m:M:n:No:v:r:Rt:T:VW:S:s:CY:yPp:", long_opts, &opt_idx)) != -1) {
     switch (c) {
     case 'b':
       batchsize = atoi(optarg);
@@ -288,6 +289,9 @@ int main(int argc, char *argv[]) {
     case '1':
       primary_state = optarg;
       break;
+    case 'y':
+      use_taylor = TRUE;
+      break;
     case 'h':
       printf("%s", HELP); 
       exit(0);
@@ -409,7 +413,8 @@ int main(int argc, char *argv[]) {
   covar_data = nj_new_covar_data(covar_param, D, dim, msa, crispr_mod, names,
                                  natural_grad, kld_upweight, rank, var_reg,
                                  hyperbolic, negcurvature, ultrametric,
-                                 radial_flow, planar_flow, tprior, migtable);
+                                 radial_flow, planar_flow, tprior, migtable,
+                                 unsigned int use_taylor);
   if (primary_state != NULL) {
     if (mig_set_primary_state(migtable, primary_state) == -1)
       die("ERROR: primary state label '%s' not found in migration table\n",

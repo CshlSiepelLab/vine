@@ -117,6 +117,13 @@ OPTIMIZATION:
        convergence to <N> (default 50).  Larger values will lead to
        longer convergence times but may find better solutions.
 
+    --taylor, -y
+       Optimize a Taylor approximation to the ELBO around the mean of
+       the approximate posterior, rather than estimating the ELBO by
+       Monte Carlo sampling of mini-batches.  Effectively reduces
+       batchsize to one and potentially speeds up optimization by a
+       factor of <batchsize>.
+
 INITIALIZATION:
     --distances, -d <infile.dist>
        Use distance matrix from <infile.dist>. In this case, alignment.fa

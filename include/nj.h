@@ -38,7 +38,7 @@ typedef struct {
   double row_sum_v;      /* sum_m d_{vm} over all other active m (includes u) */
 } JoinEvent;
 
-typedef struct {
+typedef struct neigh_struc {
   int n;                 /* no. original taxa */
   int total_nodes;       /* 2n-2 */
   int nsteps;            /* number of recorded merges (n-2) */
@@ -72,11 +72,11 @@ Matrix *nj_tree_to_distances(TreeNode *tree, char **names, int n);
 double nj_distance_on_tree(TreeNode *root, TreeNode *n1, TreeNode *n2);
 
 TreeNode *nj_inf(Matrix *D, char **names, Matrix *dt_dD, Neighbors *nb,
-                 CovarData *covar_data);
+                 struct cvdat *covar_data);
 
-void nj_update_seq_to_node_map(TreeNode *tree, char **names, CovarData *data);
+void nj_update_seq_to_node_map(TreeNode *tree, char **names, struct cvdat *data);
 
-void nj_update_diam_leaves(Matrix *D, CovarData *data);
+void nj_update_diam_leaves(Matrix *D, struct cvdat *data);
 
 void nj_repair_zero_br(TreeNode *t);
 

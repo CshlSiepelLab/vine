@@ -40,9 +40,6 @@ double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
                           Vector *ave_nuis_grad, double *ave_lprior,
                           double *avemigll);
 
-double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
-                      Vector *grad, Vector *nuis_grad, double *lprior, double *migll);
-
 List *nj_var_sample(int nsamples, multi_MVN *mmvn, CovarData *data,
                     char** names, Vector *logdens);
 
