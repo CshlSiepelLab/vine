@@ -721,6 +721,18 @@ void nj_free_neighbors(Neighbors *nb) {
   free(nb);
 }
 
+void nj_copy_neighbors(Neighbors *dest, Neighbors *src) {
+  dest->n = src->n;
+  dest->total_nodes = src->total_nodes;
+  dest->nsteps = src->nsteps;
+  dest->root_u = src->root_u;
+  dest->root_v = src->root_v;
+  dest->branch_idx_root_u = src->branch_idx_root_u;
+  dest->branch_idx_root_v = src->branch_idx_root_v;
+
+  memcpy(dest->steps, src->steps, src->nsteps * sizeof(JoinEvent));
+}
+
 /* Record one neighbor-joining merge event into the Neighbors tape.
  
    step_idx:       which step (0 .. nb->nsteps-1) this is

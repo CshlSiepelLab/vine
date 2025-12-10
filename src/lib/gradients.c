@@ -534,10 +534,6 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   /* vec_print(dL_dt, stdout); */
   /* exit(0); */
 
-  /* save the gradient for Taylor approximation if needed */
-  if (data->taylor != NULL)
-    vec_copy(data->taylor->base_grad, dL_dt);
-  
   /* also get migration log likelihood if needed */
   if (data->migtable != NULL) {
     *migll = mig_compute_log_likelihood(mod, data->migtable, data->crispr_mod,
@@ -561,6 +557,13 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   else /* UPGMA case can be done in post-processing */
     upgma_dL_dD_from_tree(mod->tree, dL_dt, dL_dD);
 
+  /* save info for Taylor approximation if needed */
+  if (data->taylor != NULL) {
+    vec_copy(data->taylor->y, y);
+    vec_copy(data->taylor->base_grad, dL_dt);
+    nj_copy_neighbors(data->taylor->nb, nb);
+  }
+  
   /* finally multiply by dD/dy to obtain gradient wrt y.  This part is
      different for the euclidean and hyperbolic geometries */
   vec_zero(dL_dy);

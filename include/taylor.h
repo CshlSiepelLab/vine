@@ -26,14 +26,33 @@
 
 typedef struct taylor_data {
   struct cvdat *covar_data;
-  Vector *base_grad; /* base branch-length gradient for Taylor approximation */
-  Matrix *Jbx;    /* size nbranches x nx */
-  Matrix *JbxT;   /* size nx x nbranches */
-  int nbranches;  /* FIXME: redundant */
-  int nx;    /* FIXME: redundant */
-  Vector *tmp_x1, *tmp_x2, *tmp_dD, *tmp_dy, *y, *tmp_extra; /* Reusable workspace vectors */
+  Vector *base_grad; /* base branch-length gradient; copmputed
+                        elsewhere but copy is stored here */
+
+  /* dimensionality; these are redundant with covar_data but
+     convenient to have here */
+  int nseqs;     /* number of sequences */
+  int nbranches; /* number of branches in rooted tree */
+  int dim;       /* embedding dimension */
+  int fulld;     /* full embedding data dimension = nseqs * dim */
+  int ndist;     /* number of pairwise distances = nseqs * (nseqs-1) / 2 */
+
+    /* essential workspace vectors */
+  Matrix *Jbx;    /* dim nbranches x nx */
+  Matrix *JbxT;   /* dim fulld x nbranches */
+  Vector *tmp_x1;    /* dim fulld */
+  Vector *tmp_x2;    /* dim nbranches */
+  Vector *tmp_dD;    /* dim ndist */
+  Vector *tmp_dy;    /* dim fulld */
+
+  /* only needed if flows are enabled */
+  Vector *tmp_extra; /* fulld */
+
+  /* additional auxiliary data */
+  Vector *y;  
   struct neigh_struc *nb;
   multi_MVN *mmvn;
+  TreeModel *mod;
 } TaylorData;
 
 TaylorData *tay_new(struct cvdat *data);
@@ -53,6 +72,10 @@ void tay_prep_jacobians(TaylorData *data, TreeModel *mod, Vector *x_mean);
 void tay_dx_from_dt(Vector *dL_dt, Vector *dL_dx, TreeModel *mod,
                     TaylorData *data);
 
-void tay_sigma_vec_mult(Vector *out, multi_MVN *mmvn, Vector *v);
+void tay_sigma_vec_mult(Vector *out, multi_MVN *mmvn, Vector *v,
+                        struct cvdat *data);
+
+void tay_sigma_grad_mult(Vector *out, Vector *u, multi_MVN *mmvn,
+                         CovarData *data);
 
 #endif /* TAYLOR_H */

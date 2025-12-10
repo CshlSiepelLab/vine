@@ -52,3 +52,97 @@ double hutch_tr(HVP_fun   Hfun,
 
   return accum / nprobe;
 }
+
+/* ---------------------------------------------------------------
+   Unified Hutchinson estimator for:
+
+       T = tr(H S)
+
+   OPTIONALLY: also compute the gradient wrt the covariance
+   parameters using:
+
+       ∇_σ T = E_z [ ∂/∂σ (u_latᵀ Σ u_lat) ]
+
+   Everything model-specific is passed in via function pointers.
+
+   dim_out     = dimensionality of branch-space vectors (nbranches)
+   dim_lat     = latent coordinate dimension (n * d)
+------------------------------------------------------------------*/
+double hutch_tr_general(
+                        HVP_fun        Hfun,          /* Hessian–vector product    */
+                        SVP_fun        Sfun,          /* S * v                     */
+                        JT_fun         JTfun,         /* latent u_lat = Jᵀ * v     */
+                        Sigma_fun      Sigmafun,      /* Σ * v_lat                  */
+                        SigmaGrad_fun  SigmaGradFun,  /* accumulate ∂/∂σ (vᵀ Σ v)  */
+
+                        void          *userdata,      /* opaque pointer passed thru */
+
+                        int            dim_out,       /* branch-space dimension     */
+                        int            dim_lat,       /* latent-space dimension     */
+                        int            nprobe,        /* # of Hutchinson samples    */
+
+                        Vector        *grad_sigma_opt /* optional output (may be NULL) */
+                        )
+{
+  double accum = 0.0;
+  int sigdim = 0;
+    
+  Vector *z      = vec_new(dim_out);
+  Vector *u      = vec_new(dim_out);     /* S z           */
+  Vector *Hu     = vec_new(dim_out);     /* H(S z)        */
+
+  Vector *u_lat  = vec_new(dim_lat);     /* Jᵀ z          */
+  Vector *tmp    = vec_new(dim_lat);     /* Σ u_lat       */
+
+  if (grad_sigma_opt) {
+    sigdim = grad_sigma_opt->size;
+    vec_zero(grad_sigma_opt);
+  }
+
+  for (int k = 0; k < nprobe; k++) {
+
+    /* z ~ N(0, I) or Rademacher */
+    mvn_sample_std(z);
+
+    /* u = S z */
+    Sfun(u, z, userdata);
+
+    /* Hu = H u */
+    Hfun(Hu, u, userdata);
+
+    /* accumulate trace component: zᵀ H u */
+    accum += vec_inner_prod(z, Hu);
+
+    /* If no gradient requested, skip this part */
+    if (!grad_sigma_opt)
+      continue;
+
+    /* --------- gradient wrt covariance parameters ---------- */
+
+    /* latent-space vector: u_lat = Jᵀ z */
+    JTfun(u_lat, z, userdata);
+
+    /* tmp = Σ u_lat */
+    Sigmafun(tmp, u_lat, userdata);
+
+    /* accumulate ∂/∂σ (u_latᵀ Σ u_lat) */
+    SigmaGradFun(grad_sigma_opt, u_lat, userdata);
+  }
+
+  /* Scale gradient by 1/nprobe */
+  if (grad_sigma_opt) {
+    double scale = 1.0 / nprobe;
+    for (int i = 0; i < sigdim; i++)
+      vec_set(grad_sigma_opt, i,
+              scale * vec_get(grad_sigma_opt, i));
+  }
+
+  vec_free(z);
+  vec_free(u);
+  vec_free(Hu);
+  vec_free(u_lat);
+  vec_free(tmp);
+
+  /* return tr(H S) */
+  return accum / nprobe;
+}

@@ -84,6 +84,8 @@ Neighbors *nj_new_neighbors(int n);
 
 void nj_free_neighbors(Neighbors *nb);
 
+void nj_copy_neighbors(Neighbors *dest, Neighbors *src);
+
 void nj_record_join(Neighbors *nb, int step_idx, int u, int v, int w,
                     Vector *active, Vector *sums, Matrix *D, int branch_idx_u,
                     int branch_idx_v);

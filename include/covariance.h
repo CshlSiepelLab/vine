@@ -68,7 +68,6 @@ typedef struct cvdat {
   unsigned int hyperbolic; /* whether or not hyperbolic geometry is used */
   double negcurvature; /* for hyperbolic case */
   MSA *msa;            /* multiple alignment under analysis if available */
-  TreeModel *mod;  /* tree model under analysis if available */
   CrisprMutModel *crispr_mod; /* model for CRISPR mutation if needed */
   unsigned int ultrametric;   /* whether or not tree is ultrametric */
   MigTable *migtable; /* migration table if needed */
@@ -94,7 +93,7 @@ typedef struct cvdat {
   int *seq_to_node_map; /* mapping from sequence indices to leaf node
                            ids, used with leaf1 and leaf2 */
   struct taylor_data *taylor;   /* auxiliary data for Taylor approximation to
-                               ELBO (or NULL) */
+                                   ELBO (or NULL) */
 } CovarData;
 
 void nj_update_covariance(multi_MVN *mmvn, CovarData *data);

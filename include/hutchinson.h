@@ -29,4 +29,8 @@ typedef void (*SVP_fun)(Vector *out, Vector *v, void *data);
 double hutch_tr(HVP_fun Hfun, SVP_fun Sfun, void *data, int dim,
                 int nprobe);
 
+double hutch_tr_general(HVP_fun Hfun, SVP_fun Sfun, JT_fun JTfun,
+                        Sigma_fun Sigmafun, SigmaGrad_fun SigmaGradFun,
+                        void *userdata, int dim_out, int dim_lat, 
+                        int nprobe, Vector *grad_sigma_opt); 
 #endif /* HUTCH_H */

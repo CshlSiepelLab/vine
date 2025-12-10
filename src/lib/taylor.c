@@ -28,15 +28,31 @@
 TaylorData *tay_new(CovarData *data) {
   TaylorData *td = smalloc(sizeof(TaylorData));
   td->covar_data = data;
-  td->nbranches = data->nseqs * 2 - 2; /* CHECK */
-  td->nx = data->nseqs * data->dim;    /* necessary? */
 
-  /* allocate workspace memory, CHECK */
+  /* set dimensionalities */
+  td->nseqs = data->nseqs;
+  td->nbranches = data->nseqs * 2 - 2; 
+  td->dim = data->dim;
+  td->fulld = data->nseqs * data->dim;
+  td->ndist = data->nseqs * (data->nseqs - 1) / 2;
+  
+  /* allocate workspace memory */
   td->base_grad = vec_new(td->nbranches);
-  td->Jbx = mat_new(td->nbranches, td->nx);
-  td->JbxT = mat_new(td->nx, td->nbranches);
-  td->tmp_x1 = vec_new(td->nx);
+  td->Jbx = mat_new(td->nbranches, td->fulld);
+  td->JbxT = mat_new(td->fulld, td->nbranches);
+  td->tmp_x1 = vec_new(td->fulld);
   td->tmp_x2 = vec_new(td->nbranches);
+  td->tmp_dD = vec_new(td->ndist);
+  td->tmp_dy = vec_new(td->fulld);
+  td->tmp_extra = vec_new(td->fulld); /* for flows */
+
+  /* auxiliary data stored during gradient computation */
+  td->y = vec_new(td->fulld);
+  td->nb = nj_new_neighbors(td->nseqs);
+
+  /* these will be set later */
+  td->mmvn = NULL;
+  td->mod = NULL;
   
   return td;
 }
@@ -47,6 +63,9 @@ void tay_free(TaylorData *td) {
   mat_free(td->JbxT);
   vec_free(td->tmp_x1);
   vec_free(td->tmp_x2);
+  vec_free(td->tmp_dD);
+  vec_free(td->tmp_dy);
+  vec_free(td->tmp_extra);
   sfree(td);
 }
 
@@ -56,14 +75,15 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
                       Vector *grad, Vector *nuis_grad, double *lprior,
                       double *migll) {
   double ll;
-  Vector *prior_grad = NULL;
 
-  if (data->treeprior != NULL) 
-    prior_grad = vec_new(grad->size);  
+  /* make sure mmvn and mod are accessible from TaylorData */
+  data->taylor->mmvn = mmvn;
+  data->taylor->mod = mod;
   
   /* first calculate log likelihood at the mean */
   vec_zero(grad);
-  Vector *mu = vec_new(mmvn->n * mmvn->d), *mu_std = vec_new(mmvn->n * mmvn->d);
+  Vector *mu = vec_new(mmvn->n * mmvn->d);
+  Vector *mu_std = vec_new(mmvn->n * mmvn->d);
   mmvn_save_mu(mmvn, mu); /* express mean as a single vector */
   mmvn_rederive_std(mmvn, mu, mu_std); /* rederive associated standard normal variate */
   /* CHECK: not sure mu_std is really needed here */
@@ -73,27 +93,31 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
 
   /* FIXME: I need a tree model representing the mean.  Whill that be set
      up correctly inside nj_compute_model_grad? */
-  
-  ll = nj_compute_model_grad(mod, mmvn, mu, mu_std, grad, data, NULL, migll);
+
+  ll = nj_compute_model_grad(mod, mmvn, mu, mu_std,
+                             grad, data, NULL, migll);
   /* CHECK: is handling of mean correct in this case?  several terms
      reduce to zero but maybe ok.  Maybe variance is wrong here
      however? */
 
-  /* also calculate log prior if needed */
+  /* also handle log prior and nuisance gradient if needed */
   if (data->treeprior != NULL) {
-    (*lprior) = tp_compute_log_prior(mod, data, prior_grad);
+    Vector *prior_grad = vec_new(grad->size);
+    *lprior = tp_compute_log_prior(mod, data, prior_grad);
     vec_plus_eq(grad, prior_grad);
+    vec_free(prior_grad);
   }
+  else 
+    *lprior = 0.0;
 
-  /* build Jbx and JbxT once at the mean point */
-  tay_prep_jacobians(data->taylor, mod, mu);
- 
   if (nuis_grad != NULL) {
     vec_zero(nuis_grad);
     nj_update_nuis_grad(mod, data, nuis_grad);
   }
 
-
+  /* build Jacobians Jbx and JbxT once at the mean point */
+  tay_prep_jacobians(data->taylor, mod, mu);
+ 
   
   /* note that there is no first-order term in the Taylor approximation
      because we are expanding around the mean */
@@ -116,17 +140,36 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
      manuscript for detailed derivation] */
  
   /* we will approximate tr(H S) using a Hutchinson trace estimator */
-  double tr = hutch_tr(tay_HVP, tay_SVP, data->taylor, grad->size, NHUTCH_SAMPLES);
-  /* FIXME: check dimensions */
+  /* double tr = hutch_tr(tay_HVP, tay_SVP, data->taylor, */
+  /*                      data->taylor->nbranches, NHUTCH_SAMPLES); */
 
-  /* FIXME: apply constant of 1/2.  should we return this value or add it to ll? */
+  /* add to log likelihood at mean to get expected log L */
+  /* ll += 0.5 * tr; */
   
   /* CHECK: should we consider the curvature of the flows? */
-     
+
+  int sigdim = grad->size - nx; /* number of covariance parameters */
+  Vector *grad_sigma = vec_new(sigdim); /* FIXME: get sigdim correctly */
+  vec_zero(grad_sigma);
+
+  /* Compute scalar T and its covariance gradient */
+  double T = hutch_tr_sigma_grad(tay_HVP, tay_SVP, data_taylor,
+                                 data->taylor->nbranches, sigdim,
+                                 NHUTCH_SAMPLES, grad_sigma);
+  /* FIXME: alter this so that scaling is done in calling function for
+     consistency */
+
+  ll += T;
+
+  /* Add covariance part of gradient into grad */
+  int offset = nx; /* CHECK */
+  for (int j = 0; j < sigdim; j++)
+    vec_set(grad, offset + j, vec_get(grad, offset + j)
+                              + vec_get(grad_sigma, j));
+  
   /* free everything and return */
   vec_free(mu); vec_free(mu_std);
-  if (data->treeprior != NULL)
-    vec_free(prior_grad);
+  vec_free(grad_sigma);
  
   return ll; 
 }
@@ -175,7 +218,7 @@ void tay_HVP(Vector *out, Vector *v, void *dat) {
 
   TaylorData *tay_data = (TaylorData *)dat;
   CovarData *data = tay_data->covar_data;
-  TreeModel *mod  = data->mod;  /* FIXME: have to populate */
+  TreeModel *mod  = tay_data->mod;  /* FIXME: have to populate */
 
   Vector *origbl = vec_new(mod->tree->nnodes);
   tr_save_branch_lengths(mod->tree, origbl);
@@ -205,8 +248,7 @@ void tay_HVP(Vector *out, Vector *v, void *dat) {
    data_vd is CovarData*, which must contain Jbx, Sigma, and workspace vectors. */
 void tay_SVP(Vector *out, Vector *v, void *dat) {
   TaylorData *tay_data = (TaylorData *)dat;
-  CovarData *data = tay_data->covar_data;
-  int n = data->nseqs, nbranches = 2*n-2, ndim = data->nseqs * data->dim;
+  int nbranches = tay_data->nbranches;
     
   assert(v->size == nbranches);
   assert(out->size == nbranches);
@@ -215,7 +257,7 @@ void tay_SVP(Vector *out, Vector *v, void *dat) {
   mat_vec_mult(tay_data->tmp_x1, tay_data->JbxT, v);
 
   /* tmp_x2 = Sigma * tmp_x_1 */
-  tay_sigma_vec_mult(tay_data->tmp_x2, tay_data->mmvn, tay_data->tmp_x1);
+  tay_sigma_vec_mult(tay_data->tmp_x2, tay_data->mmvn, tay_data->tmp_x1, tay_data->covar_data);
 
   /* out = Jbx * tmp_x2 */
   mat_vec_mult(out, tay_data->Jbx, tay_data->tmp_x2);
@@ -224,17 +266,17 @@ void tay_SVP(Vector *out, Vector *v, void *dat) {
 /* FIXME: move this to gradients.c ? */
 void tay_prep_jacobians(TaylorData *tay_data, TreeModel *mod, Vector *x_mean) {
   int nb = tay_data->nbranches;
-  int nx = tay_data->nx;
+  int fulld = tay_data->fulld;
 
   if (tay_data->Jbx == NULL)
-    tay_data->Jbx  = mat_new(nb, nx);
+    tay_data->Jbx  = mat_new(nb, fulld);
 
   if (tay_data->JbxT == NULL)
-    tay_data->JbxT = mat_new(nx, nb);
+    tay_data->JbxT = mat_new(fulld, nb);
 
   /* Workspace for reverse-mode J^T e_j */
   Vector *dL_dt = vec_new(nb);
-  Vector *dL_dx = vec_new(nx);
+  Vector *dL_dx = vec_new(fulld);
   /* CHECK: use CovarData workspaces instead? */
 
   /* Loop over each branch length index */
@@ -251,7 +293,7 @@ void tay_prep_jacobians(TaylorData *tay_data, TreeModel *mod, Vector *x_mean) {
     tay_dx_from_dt(dL_dt, dL_dx, mod, tay_data);
 
     /* Fill column j of Jbx^T */
-    for (int k = 0; k < nx; k++)
+    for (int k = 0; k < fulld; k++)
       mat_set(tay_data->JbxT, k, j, vec_get(dL_dx, k));
   }
 
@@ -279,31 +321,25 @@ void tay_prep_jacobians(TaylorData *tay_data, TreeModel *mod, Vector *x_mean) {
 void tay_dx_from_dt(Vector *dL_dt, Vector *dL_dx, TreeModel *mod,
                     TaylorData *tay_data) {
   CovarData *data = tay_data->covar_data;
-  int n     = data->nseqs;
-  int dim   = data->dim;
-  int ndist = n*(n-1)/2;
-  int nx    = tay_data->nx;
+  int n     = tay_data->nseqs;
+  int dim   = tay_data->dim;
 
   /* Workspace from CovarData */
   Vector *dL_dD = tay_data->tmp_dD;   /* size ndist */
-  Vector *dL_dy = tay_data->tmp_dy;   /* size nx    */
+  Vector *dL_dy = tay_data->tmp_dy;   /* size fulld    */
 
   vec_zero(dL_dD);
   vec_zero(dL_dy);
   vec_zero(dL_dx);
 
-  /*--------------------------------------
-   * 1. Branch lengths → distances (reverse)
-   *--------------------------------------*/
+  /* Branch lengths → distances (reverse) */
 
   if (tay_data->nb != NULL)
     nj_dL_dD_from_neighbors(tay_data->nb, dL_dt, dL_dD);
   else
     upgma_dL_dD_from_tree(mod->tree, dL_dt, dL_dD);
 
-  /*--------------------------------------
-   * 2. Distances → embedding y  (reverse)
-   *--------------------------------------*/
+  /* Distances → embedding y  (reverse) */
 
   if (data->hyperbolic) {
     /* hyperbolic reverse-mode */
@@ -311,7 +347,7 @@ void tay_dx_from_dt(Vector *dL_dt, Vector *dL_dx, TreeModel *mod,
 
     /* Precompute needed geometric constants */
     double *x0 = (double *)smalloc(n * sizeof(double));
-    Vector *y  = tay_data->y;         /* size nx */
+    Vector *y  = tay_data->y;         /* size fulld */
     Matrix *dist = data->dist;    /* n x n  */
 
     for (i = 0; i < n; i++) {
@@ -424,14 +460,145 @@ void tay_dx_from_dt(Vector *dL_dt, Vector *dL_dx, TreeModel *mod,
   }
 }
 
-/* Sigma * v for diagonal Sigma */
-void tay_sigma_vec_mult(Vector *out, multi_MVN *mmvn, Vector *v)
-{
-  int nx = v->size;
-  assert(out->size == nx);
-  
-  for (int i = 0; i < nx; i++) {
-    double s = 1; /* exp(mmvn->eta[i]);*/  /* FIXME: make this parameterization general */
-    vec_set(out, i, s * vec_get(v, i));
+/* Sigma * v depending on parameterization */
+void tay_sigma_vec_mult(Vector *out, multi_MVN *mmvn, Vector *v, CovarData *data) {
+  int n = mmvn->n;
+  int d = mmvn->d;     /* embedding dimension */
+  int nx = n * d;
+
+  assert(out->size == nx && v->size == nx);
+
+  if (data->type == CONST || data->type == DIST) {
+    for (int i = 0; i < nx; i++)
+      vec_set(out, i, data->lambda * vec_get(v, i)); 
+    return;
+  }
+
+  else if (data->type == DIAG) {
+    for (int i = 0; i < nx; i++) {
+      double s = mat_get(mmvn->mvn->sigma, i, i);  
+      vec_set(out, i, s * vec_get(v, i));
+    }
+    return;
+  }
+
+ 
+  else if (data->type == LOWR) {
+
+    /* In the LOWR case, a vector v (nx = n*d) is reshaped into d blocks
+       v = [v^(1); v^(2); ...; v^(d)] where each v^(k) ∈ R^n Σv = [R(Rᵀ
+       v^(1)); ...; R(Rᵀ v^(d))] */
+    
+    Matrix *R = mmvn->mvn->lowR;   /* n x r */
+    int r = R->ncols;
+    assert(R->nrows == n);
+
+    /* temporary vector of length r */
+    Vector *tmp_r = vec_new(r);
+
+    /* operate dim-by-dim */
+    for (int k = 0; k < d; k++) {
+
+      /* pointers to the k-th block (size n) */
+      int offset = k * n;
+
+      /* Compute tmp_r = Rᵀ * v_block */
+      vec_zero(tmp_r);
+      for (int i = 0; i < n; i++) {
+        double vi = vec_get(v, offset + i);
+        for (int j = 0; j < r; j++) {
+          double rij = mat_get(R, i, j);
+          vec_set(tmp_r, j, vec_get(tmp_r, j) + rij * vi);
+        }
+      }
+
+      /* Compute out_block = R * tmp_r */
+      for (int i = 0; i < n; i++) {
+        double sum = 0.0;
+        for (int j = 0; j < r; j++)
+          sum += mat_get(R, i, j) * vec_get(tmp_r, j);
+
+        vec_set(out, offset + i, sum);
+      }
+    }
+
+    vec_free(tmp_r);
+    return;
+  }
+
+  else 
+    die("ERROR in tay_sigma_vec_mult: unknown covariance type.\n");
+}
+
+/* Compute gradient of uᵀ Σ u wrt the covariance parameters.  Adds
+   results into out (size = data->params->size).  u is the
+   latent-space vector Jᵀ z. */
+void tay_sigma_grad_mult(Vector *out, Vector *u, multi_MVN *mmvn,
+                         CovarData *data) {
+
+  int n = mmvn->n;
+  int d = mmvn->d;
+  int nx = n * d;
+
+  /* CONST and DIST share a scalar λ */
+  if (data->type == CONST || data->type == DIST) {
+    double sumsq = 0.0;
+    for (int i = 0; i < nx; i++) {
+      double ui = vec_get(u, i);
+      sumsq += ui * ui;
+    }
+    /* derivative wrt log(λ) = λ * ∂/∂λ */
+    double grad_lambda = data->lambda * sumsq;
+    vec_set(out, 0, vec_get(out, 0) + grad_lambda);
+    return;
+  }
+
+  /* DIAG case: Σ = diag(exp(sigma_params)) */
+  else if (data->type == DIAG) {
+    for (int i = 0; i < nx; i++) {
+      double ui = vec_get(u, i);
+      double lambda_i = mat_get(mmvn->mvn->sigma, i, i); /* exp(param_i) */
+      double grad_i = lambda_i * (ui * ui); /* derivative wrt param_i */
+      vec_set(out, i, vec_get(out, i) + grad_i);
+    }
+    return;
+  }
+
+  /* LOWR case: Σ = R Rᵀ, params = R[i,j] */
+  else if (data->type == LOWR) {
+    Matrix *R = mmvn->mvn->lowR; /* n x r */
+    int r = R->ncols;
+
+    /* Work per dimension block */
+    for (int k = 0; k < d; k++) {
+      int off = k * n;
+
+      /* tmp = Rᵀ u_block  (size r) */
+      Vector *tmp = vec_new(r);
+      vec_zero(tmp);
+      for (int i = 0; i < n; i++) {
+        double ui = vec_get(u, off + i);
+        for (int j = 0; j < r; j++) {
+          vec_set(tmp, j, vec_get(tmp, j) + ui * mat_get(R, i, j));
+        }
+      }
+
+      /* Now ∂/∂R[i,j] (uᵀ Σ u) = 2 * (u_i * tmp_j) */
+      for (int i = 0; i < n; i++) {
+        double ui = vec_get(u, off + i);
+        for (int j = 0; j < r; j++) {
+          int idx = i * r + j;
+          double g = 2.0 * ui * vec_get(tmp, j);
+          vec_set(out, idx, vec_get(out, idx) + g);
+        }
+      }
+
+      vec_free(tmp);
+    }
+    return;
+  }
+
+  else {
+    die("ERROR in tay_sigma_grad_mult: unknown covariance type\n");
   }
 }
