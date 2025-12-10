@@ -414,7 +414,7 @@ int main(int argc, char *argv[]) {
                                  natural_grad, kld_upweight, rank, var_reg,
                                  hyperbolic, negcurvature, ultrametric,
                                  radial_flow, planar_flow, tprior, migtable,
-                                 unsigned int use_taylor);
+                                 use_taylor);
   if (primary_state != NULL) {
     if (mig_set_primary_state(migtable, primary_state) == -1)
       die("ERROR: primary state label '%s' not found in migration table\n",

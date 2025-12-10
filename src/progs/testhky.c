@@ -56,7 +56,7 @@ int main(int argc, char *argv[]) {
   dmat = mat_new(5, 5); /* dummy */
   data = nj_new_covar_data(CONST, dmat, 3, msa, NULL, msa->names,
                            FALSE, 1, 3, -1,
-                           FALSE, 1, FALSE, FALSE, FALSE, NULL, NULL);
+                           FALSE, 1, FALSE, FALSE, FALSE, NULL, NULL, FALSE);
   data->hky_kappa = KAPPA;
     
   /* compute likelihood and output */
