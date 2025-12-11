@@ -19,12 +19,18 @@
 #include <mvn.h>
 #include <hutchinson.h>
 
+/* Compute T = tr(H S) using Hutchinson's trace estimator.
+
+   Hfun: function to compute H v for arbitrary vector v
+   Sfun: function to compute S v for arbitrary vector v
+   data: auxiliary data passed to Hfun and Sfun
+   dim:  dimensionality of vectors (nbranches)
+   nprobe: number of Hutchinson samples to use */
 double hutch_tr(HVP_fun   Hfun,
                 SVP_fun   Sfun,
                 void     *data, /* auxiliary data for Hfun and Sfun */
                 int       dim,
-                int       nprobe)
-{
+                int       nprobe) {
   double accum = 0.0;
 
   Vector *z  = vec_new(dim);
@@ -53,12 +59,12 @@ double hutch_tr(HVP_fun   Hfun,
   return accum / nprobe;
 }
 
-/* ---------------------------------------------------------------
-   Unified Hutchinson estimator for:
+/* Generalization of above that optionally computes gradient also.  In
+   particular, compute,
 
        T = tr(H S)
 
-   OPTIONALLY: also compute the gradient wrt the covariance
+   and optionally also compute the gradient wrt the covariance
    parameters using:
 
        ∇_σ T = E_z [ ∂/∂σ (u_latᵀ Σ u_lat) ]
@@ -66,9 +72,8 @@ double hutch_tr(HVP_fun   Hfun,
    Everything model-specific is passed in via function pointers.
 
    dim_out     = dimensionality of branch-space vectors (nbranches)
-   dim_lat     = latent coordinate dimension (n * d)
-------------------------------------------------------------------*/
-double hutch_tr_general(
+   dim_lat     = latent coordinate dimension (n * d) */
+double hutch_tr_plus_grad(
                         HVP_fun        Hfun,          /* Hessian–vector product    */
                         SVP_fun        Sfun,          /* S * v                     */
                         JT_fun         JTfun,         /* latent u_lat = Jᵀ * v     */
@@ -81,11 +86,9 @@ double hutch_tr_general(
                         int            dim_lat,       /* latent-space dimension     */
                         int            nprobe,        /* # of Hutchinson samples    */
 
-                        Vector        *grad_sigma_opt /* optional output (may be NULL) */
-                        )
-{
+                        Vector        *grad_sigma     /* optional output (may be NULL) */
+                        ) {
   double accum = 0.0;
-  int sigdim = 0;
     
   Vector *z      = vec_new(dim_out);
   Vector *u      = vec_new(dim_out);     /* S z           */
@@ -93,11 +96,6 @@ double hutch_tr_general(
 
   Vector *u_lat  = vec_new(dim_lat);     /* Jᵀ z          */
   Vector *tmp    = vec_new(dim_lat);     /* Σ u_lat       */
-
-  if (grad_sigma_opt) {
-    sigdim = grad_sigma_opt->size;
-    vec_zero(grad_sigma_opt);
-  }
 
   for (int k = 0; k < nprobe; k++) {
 
@@ -114,7 +112,7 @@ double hutch_tr_general(
     accum += vec_inner_prod(z, Hu);
 
     /* If no gradient requested, skip this part */
-    if (!grad_sigma_opt)
+    if (grad_sigma == NULL)
       continue;
 
     /* --------- gradient wrt covariance parameters ---------- */
@@ -126,15 +124,16 @@ double hutch_tr_general(
     Sigmafun(tmp, u_lat, userdata);
 
     /* accumulate ∂/∂σ (u_latᵀ Σ u_lat) */
-    SigmaGradFun(grad_sigma_opt, u_lat, userdata);
+    SigmaGradFun(grad_sigma, u_lat, userdata);
   }
 
   /* Scale gradient by 1/nprobe */
-  if (grad_sigma_opt) {
+  if (grad_sigma != NULL) {
     double scale = 1.0 / nprobe;
-    for (int i = 0; i < sigdim; i++)
-      vec_set(grad_sigma_opt, i,
-              scale * vec_get(grad_sigma_opt, i));
+    vec_zero(grad_sigma);
+    for (int i = 0; i < grad_sigma->size; i++)
+      vec_set(grad_sigma, i,
+              scale * vec_get(grad_sigma, i));
   }
 
   vec_free(z);

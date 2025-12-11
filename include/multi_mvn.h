@@ -27,6 +27,8 @@ typedef struct {
 
 multi_MVN *mmvn_new(int n, int d, enum mvn_type type);
 
+void mmvn_free(multi_MVN *mmvn);
+
 void mmvn_set_mu(multi_MVN *mmvn, Vector *mu);
 
 void mmvn_set_sigma(multi_MVN *mmvn, Matrix *sigma);

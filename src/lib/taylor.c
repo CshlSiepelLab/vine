@@ -88,12 +88,6 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   mmvn_rederive_std(mmvn, mu, mu_std); /* rederive associated standard normal variate */
   /* CHECK: not sure mu_std is really needed here */
 
-  /* FIXME: do I have to apply the flows here?  or does nj_compute_model_grad
-     do that internally? */
-
-  /* FIXME: I need a tree model representing the mean.  Whill that be set
-     up correctly inside nj_compute_model_grad? */
-
   ll = nj_compute_model_grad(mod, mmvn, mu, mu_std,
                              grad, data, NULL, migll);
   /* CHECK: is handling of mean correct in this case?  several terms
@@ -140,30 +134,26 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
      manuscript for detailed derivation] */
  
   /* we will approximate tr(H S) using a Hutchinson trace estimator */
-  /* double tr = hutch_tr(tay_HVP, tay_SVP, data->taylor, */
-  /*                      data->taylor->nbranches, NHUTCH_SAMPLES); */
-
-  /* add to log likelihood at mean to get expected log L */
-  /* ll += 0.5 * tr; */
   
   /* CHECK: should we consider the curvature of the flows? */
 
-  int sigdim = grad->size - nx; /* number of covariance parameters */
+  int sigdim = grad->size - data->taylor->fulld; /* number of covariance parameters */
   Vector *grad_sigma = vec_new(sigdim); /* FIXME: get sigdim correctly */
   vec_zero(grad_sigma);
 
   /* Compute scalar T and its covariance gradient */
-  double T = hutch_tr_sigma_grad(tay_HVP, tay_SVP, data_taylor,
-                                 data->taylor->nbranches, sigdim,
-                                 NHUTCH_SAMPLES, grad_sigma);
-  /* FIXME: alter this so that scaling is done in calling function for
-     consistency */
+  double T = hutch_tr_plus_grad(tay_HVP, tay_SVP, tay_JTfun, tay_Sigmafun,
+                                tay_SigmaGradfun, data->taylor,
+                                data->taylor->nbranches, data->taylor->fulld,
+                                NHUTCH_SAMPLES, grad_sigma);
 
-  ll += T;
-
-  /* Add covariance part of gradient into grad */
-  int offset = nx; /* CHECK */
-  for (int j = 0; j < sigdim; j++)
+  /* add 1/2 T to log likelihood and scale gradient by 1/2 */
+  ll += 0.5 * T;
+  vec_scale(grad_sigma, 0.5);
+  
+  /* add covariance part of gradient into grad */
+  int offset = data->taylor->fulld; /* CHECK */
+  for (int j = 0; j < grad_sigma->size; j++)
     vec_set(grad, offset + j, vec_get(grad, offset + j)
                               + vec_get(grad_sigma, j));
   
@@ -602,3 +592,34 @@ void tay_sigma_grad_mult(Vector *out, Vector *u, multi_MVN *mmvn,
     die("ERROR in tay_sigma_grad_mult: unknown covariance type\n");
   }
 }
+
+/* out = Jbx^T * v_branch */
+void tay_JTfun(Vector *out, Vector *v, void *userdata)
+{
+    TaylorData *td = (TaylorData *)userdata;
+
+    /* out ∈ R^{fulld}, v ∈ R^{nbranches} */
+    assert(out->size == td->fulld);
+    assert(v->size   == td->nbranches);
+
+    mat_vec_mult(out, td->JbxT, v);   /* uses your existing mat_vec_mult */
+}
+
+/* out = Sigma * v_latent */
+void tay_Sigmafun(Vector *out, Vector *v, void *userdata)
+{
+    TaylorData *td = (TaylorData *)userdata;
+    tay_sigma_vec_mult(out, td->mmvn, v, td->covar_data);
+}
+
+/* grad_sigma += ∂/∂σ ( v_lat^T Σ v_lat )
+   NOTE: no factor 1/2 and no 1/nprobe scaling here — the Hutchinson driver handles it.
+*/
+void tay_SigmaGradfun(Vector *grad_sigma, Vector *v_lat, void *userdata)
+{
+    TaylorData *td = (TaylorData *)userdata;
+
+    /* add contribution of this probe */
+    tay_sigma_grad_mult(grad_sigma, v_lat, td->mmvn, td->covar_data);
+}
+

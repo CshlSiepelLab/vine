@@ -76,6 +76,12 @@ void tay_sigma_vec_mult(Vector *out, multi_MVN *mmvn, Vector *v,
                         struct cvdat *data);
 
 void tay_sigma_grad_mult(Vector *out, Vector *u, multi_MVN *mmvn,
-                         CovarData *data);
+                         struct cvdat *data);
+
+void tay_JTfun(Vector *out, Vector *v, void *userdata);
+
+void tay_Sigmafun(Vector *out, Vector *v, void *userdata);
+
+void tay_SigmaGradfun(Vector *grad_sigma, Vector *v_lat, void *userdata);
 
 #endif /* TAYLOR_H */

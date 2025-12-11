@@ -62,6 +62,18 @@ multi_MVN *mmvn_new(int n, int d, enum mvn_type type) {
   return retval;
 }
 
+void mmvn_free(multi_MVN *mmvn) {
+  int d;
+  if (mmvn->type == MVN_GEN || mmvn->type == MVN_LOWR) {
+    for (d = 0; d < mmvn->d; d++)
+      vec_free(mmvn->mu[d]);
+    free(mmvn->mu);
+    mmvn->mvn->mu = NULL; /* prevent double free */
+  }
+  mvn_free(mmvn->mvn);
+  free(mmvn);
+}
+
 /* set the mean parameters */
 void mmvn_set_mu(multi_MVN *mmvn, Vector *mu) {
   assert(mu->size == mmvn->d * mmvn->n);

@@ -101,7 +101,8 @@ MVN *mvn_copy(MVN *mvn) {
 }
 
 void mvn_free(MVN *mvn) {
-  vec_free(mvn->mu);
+  if (mvn->mu != NULL) /* can be NULL in multi-MVN  */
+    vec_free(mvn->mu);
   mat_free(mvn->sigma);
   if (mvn->cholL != NULL)
     mat_free(mvn->cholL);

@@ -17,20 +17,35 @@
 #include <stdlib.h>
 #include <phast/vector.h>
 
-typedef void (*HVP_fun)(Vector *out, Vector *v, void *data);
 /* Computes out = H v for arbitrary vector v using Pearlmutter
    directional derivative.  data = auxiliary data */
+typedef void (*HVP_fun)(Vector *out, Vector *v, void *data);
 
-
-typedef void (*SVP_fun)(Vector *out, Vector *v, void *data);
 /* Computes out = S v using factored optionally factored S and
    arbitrary vector .  data = auxiliary data. */
+typedef void (*SVP_fun)(Vector *out, Vector *v, void *data);
 
+/* Computes out = J^T * v   (latent-space dimension)  */
+typedef void (*JT_fun)(Vector *out, Vector *v, void *userdata);
+
+/* Computes out = Σ * v_lat  (latent-space covariance application) */
+typedef void (*Sigma_fun)(Vector *out, Vector *v_lat, void *userdata);
+
+/* Accumulates gradient wrt covariance parameters:
+      grad_sigma += ∂/∂σ ( v_lat^T Σ v_lat )
+   v_lat is J^T * z for a Hutchinson probe. */
+typedef void (*SigmaGrad_fun)(Vector *grad_sigma,
+                              Vector *v_lat,
+                              void   *userdata);
+
+/* Compute T = tr(H S) using Hutchinson's trace estimator. */
 double hutch_tr(HVP_fun Hfun, SVP_fun Sfun, void *data, int dim,
                 int nprobe);
 
-double hutch_tr_general(HVP_fun Hfun, SVP_fun Sfun, JT_fun JTfun,
-                        Sigma_fun Sigmafun, SigmaGrad_fun SigmaGradFun,
-                        void *userdata, int dim_out, int dim_lat, 
-                        int nprobe, Vector *grad_sigma_opt); 
+/* Compute T = tr(H S) using Hutchinson's trace estimator and
+   optionally compute gradient wrt covariance parameters */
+double hutch_tr_plus_grad(HVP_fun Hfun, SVP_fun Sfun, JT_fun JTfun,
+                          Sigma_fun Sigmafun, SigmaGrad_fun SigmaGradFun,
+                          void *userdata, int dim_out, int dim_lat, 
+                          int nprobe, Vector *grad_sigma); 
 #endif /* HUTCH_H */
