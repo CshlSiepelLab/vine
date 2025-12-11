@@ -97,6 +97,9 @@ double hutch_tr_plus_grad(
   Vector *u_lat  = vec_new(dim_lat);     /* Jᵀ z          */
   Vector *tmp    = vec_new(dim_lat);     /* Σ u_lat       */
 
+  if (grad_sigma != NULL) 
+    vec_zero(grad_sigma);
+  
   for (int k = 0; k < nprobe; k++) {
 
     /* z ~ N(0, I) or Rademacher */
@@ -128,13 +131,8 @@ double hutch_tr_plus_grad(
   }
 
   /* Scale gradient by 1/nprobe */
-  if (grad_sigma != NULL) {
-    double scale = 1.0 / nprobe;
-    vec_zero(grad_sigma);
-    for (int i = 0; i < grad_sigma->size; i++)
-      vec_set(grad_sigma, i,
-              scale * vec_get(grad_sigma, i));
-  }
+  if (grad_sigma != NULL) 
+    vec_scale(grad_sigma, 1.0 / nprobe); 
 
   vec_free(z);
   vec_free(u);

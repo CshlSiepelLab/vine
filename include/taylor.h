@@ -21,7 +21,7 @@
 #include <multi_mvn.h>
 #include <nj.h>
 
-#define NHUTCH_SAMPLES 10  /* number of probe vectors for Hutchinson's
+#define NHUTCH_SAMPLES 1000  /* number of probe vectors for Hutchinson's
                               estimator of trace of Hessian */
 
 typedef struct taylor_data {
@@ -41,7 +41,7 @@ typedef struct taylor_data {
   Matrix *Jbx;    /* dim nbranches x nx */
   Matrix *JbxT;   /* dim fulld x nbranches */
   Vector *tmp_x1;    /* dim fulld */
-  Vector *tmp_x2;    /* dim nbranches */
+  Vector *tmp_x2;    /* dim fulld */
   Vector *tmp_dD;    /* dim ndist */
   Vector *tmp_dy;    /* dim fulld */
 

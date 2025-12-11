@@ -41,7 +41,7 @@ TaylorData *tay_new(CovarData *data) {
   td->Jbx = mat_new(td->nbranches, td->fulld);
   td->JbxT = mat_new(td->fulld, td->nbranches);
   td->tmp_x1 = vec_new(td->fulld);
-  td->tmp_x2 = vec_new(td->nbranches);
+  td->tmp_x2 = vec_new(td->fulld);
   td->tmp_dD = vec_new(td->ndist);
   td->tmp_dy = vec_new(td->fulld);
   td->tmp_extra = vec_new(td->fulld); /* for flows */
@@ -180,11 +180,10 @@ void tr_save_branch_lengths(TreeNode *root, Vector *bl) {
    excludes root */
 static inline
 void tr_incr_branch_lengths(TreeNode *root, Vector *bl, double scale) {
-  assert(root->nnodes == bl->size);
+  assert(root->nnodes - 1 == bl->size);
   for (int i = 0; i < bl->size; i++) {
     TreeNode *n = lst_get_ptr(root->nodes, i);
-    if (n->parent == NULL)
-      continue; /* skip root */
+    assert(n->parent != NULL); /* root must be node with id bl->size */
     n->dparent += (scale * vec_get(bl, i));
     if (n->dparent < 1e-6)
       n->dparent = 1e-6; /* prohibit zero or negative lengths */
@@ -217,7 +216,6 @@ void tay_HVP(Vector *out, Vector *v, void *dat) {
 
   tr_incr_branch_lengths(mod->tree, v, DERIV_EPS);
   /* excludes root, which is ignored in gradient calculations */
-  /* CHECK: does v have correct dimension? need to skip root or look up by id? */
 
   if (data->crispr_mod != NULL) 
     cpr_compute_log_likelihood(data->crispr_mod, out);
