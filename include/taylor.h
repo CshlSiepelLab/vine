@@ -75,13 +75,14 @@ void tay_dx_from_dt(Vector *dL_dt, Vector *dL_dx, TreeModel *mod,
 void tay_sigma_vec_mult(Vector *out, multi_MVN *mmvn, Vector *v,
                         struct cvdat *data);
 
-void tay_sigma_grad_mult(Vector *out, Vector *u, multi_MVN *mmvn,
-                         struct cvdat *data);
+void tay_sigma_grad_mult(Vector *out, Vector *p, Vector *q,
+                         multi_MVN *mmvn, struct cvdat *data);
 
 void tay_JTfun(Vector *out, Vector *v, void *userdata);
 
 void tay_Sigmafun(Vector *out, Vector *v, void *userdata);
 
-void tay_SigmaGradfun(Vector *grad_sigma, Vector *v_lat, void *userdata);
+void tay_SigmaGradfun(Vector *grad_sigma, Vector *p_lat, Vector *q_lat,
+                      void *userdata);
 
 #endif /* TAYLOR_H */

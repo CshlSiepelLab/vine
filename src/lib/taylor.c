@@ -79,6 +79,7 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   /* make sure mmvn and mod are accessible from TaylorData */
   data->taylor->mmvn = mmvn;
   data->taylor->mod = mod;
+  assert(mod->tree->nnodes - 1 == data->taylor->nbranches);
   
   /* first calculate log likelihood at the mean */
   vec_zero(grad);
@@ -169,9 +170,10 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
 /* save current branch lengths from tree into vector bl */
 static inline
 void tr_save_branch_lengths(TreeNode *root, Vector *bl) {
-  assert(root->nnodes == bl->size);
+  assert(root->nnodes - 1 == bl->size);
   for (int i = 0; i < bl->size; i++) {
     TreeNode *n = lst_get_ptr(root->nodes, i);
+    assert(n->parent != NULL); /* root must be node with id bl->size */
     vec_set(bl, i, n->dparent);
   }
 }
@@ -183,7 +185,6 @@ void tr_incr_branch_lengths(TreeNode *root, Vector *bl, double scale) {
   assert(root->nnodes - 1 == bl->size);
   for (int i = 0; i < bl->size; i++) {
     TreeNode *n = lst_get_ptr(root->nodes, i);
-    assert(n->parent != NULL); /* root must be node with id bl->size */
     n->dparent += (scale * vec_get(bl, i));
     if (n->dparent < 1e-6)
       n->dparent = 1e-6; /* prohibit zero or negative lengths */
@@ -193,7 +194,7 @@ void tr_incr_branch_lengths(TreeNode *root, Vector *bl, double scale) {
 /* restore branch lengths from vector bl */
 static inline
 void tr_restore_branch_lengths(TreeNode *root, Vector *bl) {
-  assert(root->nnodes == bl->size);
+  assert(root->nnodes - 1 == bl->size);
   for (int i = 0; i < bl->size; i++) {
     TreeNode *n = lst_get_ptr(root->nodes, i);
     n->dparent = vec_get(bl, i);
@@ -203,31 +204,55 @@ void tr_restore_branch_lengths(TreeNode *root, Vector *bl) {
 /* Finite-difference version of Hessian-vector product based on
    directional gradient.  Computes H v ≈ (grad(theta + eps*v) -
    grad(theta)) / eps */
-void tay_HVP(Vector *out, Vector *v, void *dat) {
-
+void tay_HVP(Vector *out, Vector *v, void *dat)
+{
   TaylorData *tay_data = (TaylorData *)dat;
-  CovarData *data = tay_data->covar_data;
-  TreeModel *mod  = tay_data->mod;  /* FIXME: have to populate */
+  CovarData  *data     = tay_data->covar_data;
+  TreeModel  *mod      = tay_data->mod;
 
-  Vector *origbl = vec_new(mod->tree->nnodes);
+  assert(v->size   == tay_data->nbranches);
+  assert(out->size == tay_data->nbranches);
+
+  /* Save original non-root branch lengths */
+  Vector *origbl = vec_new(tay_data->nbranches);
   tr_save_branch_lengths(mod->tree, origbl);
-  /* all branch lengths including root are stored, but root is not
-     modified */
 
-  tr_incr_branch_lengths(mod->tree, v, DERIV_EPS);
-  /* excludes root, which is ignored in gradient calculations */
+  /* Compute baseline gradient g0 at current b */
+  /* FIXME: compare this to base_grad already stored in tay_data.  If
+     base_grad is sufficient we can avoid this extra call */
+  Vector *g0 = vec_new(tay_data->nbranches);
+  if (data->crispr_mod != NULL)
+    cpr_compute_log_likelihood(data->crispr_mod, g0);
+  else
+    nj_compute_log_likelihood(mod, data, g0);
 
-  if (data->crispr_mod != NULL) 
+  /* Pick an eps that is local relative to v */
+  double maxabs = 0.0;
+  for (int i = 0; i < v->size; i++) {
+    double a = fabs(vec_get(v, i));
+    if (a > maxabs) maxabs = a;
+  }
+  double eps_eff = DERIV_EPS;
+  if (maxabs > 1.0) eps_eff /= maxabs;     /* keep max perturbation ~ DERIV_EPS */
+
+  /* Apply perturbation */
+  tr_incr_branch_lengths(mod->tree, v, eps_eff);
+
+  /* Compute perturbed gradient g1 */
+  if (data->crispr_mod != NULL)
     cpr_compute_log_likelihood(data->crispr_mod, out);
-  else 
+  else
     nj_compute_log_likelihood(mod, data, out);
 
-  vec_minus_eq(out, tay_data->base_grad); /* FIXME: have to populate base_grad */
-  vec_scale(out, 1.0 / DERIV_EPS);
+  /* out = (g1 - g0)/eps_eff */
+  vec_minus_eq(out, g0);
+  vec_scale(out, 1.0 / eps_eff);
 
+  /* Restore original branch lengths */
   tr_restore_branch_lengths(mod->tree, origbl);
 
   vec_free(origbl);
+  vec_free(g0);
 }
 
 /* Compute S_b * v, where S_b = Jbx * Sigma_x * Jbx^T.
@@ -251,7 +276,6 @@ void tay_SVP(Vector *out, Vector *v, void *dat) {
   mat_vec_mult(out, tay_data->Jbx, tay_data->tmp_x2);
 }
 
-/* FIXME: move this to gradients.c ? */
 void tay_prep_jacobians(TaylorData *tay_data, TreeModel *mod, Vector *x_mean) {
   int nb = tay_data->nbranches;
   int fulld = tay_data->fulld;
@@ -521,33 +545,29 @@ void tay_sigma_vec_mult(Vector *out, multi_MVN *mmvn, Vector *v, CovarData *data
 /* Compute gradient of uᵀ Σ u wrt the covariance parameters.  Adds
    results into out (size = data->params->size).  u is the
    latent-space vector Jᵀ z. */
-void tay_sigma_grad_mult(Vector *out, Vector *u, multi_MVN *mmvn,
+void tay_sigma_grad_mult(Vector *out, Vector *p, Vector *q, multi_MVN *mmvn,
                          CovarData *data) {
 
   int n = mmvn->n;
   int d = mmvn->d;
   int nx = n * d;
 
+  assert(p->size == nx);
+  assert(q->size == nx);
+  
   /* CONST and DIST share a scalar λ */
   if (data->type == CONST || data->type == DIST) {
-    double sumsq = 0.0;
-    for (int i = 0; i < nx; i++) {
-      double ui = vec_get(u, i);
-      sumsq += ui * ui;
-    }
-    /* derivative wrt log(λ) = λ * ∂/∂λ */
-    double grad_lambda = data->lambda * sumsq;
-    vec_set(out, 0, vec_get(out, 0) + grad_lambda);
+    double dotpq = vec_inner_prod(p, q);
+    vec_set(out, 0, vec_get(out, 0) + data->lambda * dotpq);
     return;
   }
 
   /* DIAG case: Σ = diag(exp(sigma_params)) */
   else if (data->type == DIAG) {
     for (int i = 0; i < nx; i++) {
-      double ui = vec_get(u, i);
-      double lambda_i = mat_get(mmvn->mvn->sigma, i, i); /* exp(param_i) */
-      double grad_i = lambda_i * (ui * ui); /* derivative wrt param_i */
-      vec_set(out, i, vec_get(out, i) + grad_i);
+      double lam = mat_get(mmvn->mvn->sigma, i, i);
+      double gi  = lam * vec_get(p, i) * vec_get(q, i);
+      vec_set(out, i, vec_get(out, i) + gi);
     }
     return;
   }
@@ -557,32 +577,40 @@ void tay_sigma_grad_mult(Vector *out, Vector *u, multi_MVN *mmvn,
     Matrix *R = mmvn->mvn->lowR; /* n x r */
     int r = R->ncols;
 
-    /* Work per dimension block */
+    Vector *Rt_p = vec_new(r);
+    Vector *Rt_q = vec_new(r);
+
     for (int k = 0; k < d; k++) {
       int off = k * n;
 
-      /* tmp = Rᵀ u_block  (size r) */
-      Vector *tmp = vec_new(r);
-      vec_zero(tmp);
+      vec_zero(Rt_p);
+      vec_zero(Rt_q);
+
+      /* Rt_p = Rᵀ p_block ; Rt_q = Rᵀ q_block */
       for (int i = 0; i < n; i++) {
-        double ui = vec_get(u, off + i);
+        double pi = vec_get(p, off + i);
+        double qi = vec_get(q, off + i);
         for (int j = 0; j < r; j++) {
-          vec_set(tmp, j, vec_get(tmp, j) + ui * mat_get(R, i, j));
+          double Rij = mat_get(R, i, j);
+          vec_set(Rt_p, j, vec_get(Rt_p, j) + Rij * pi);
+          vec_set(Rt_q, j, vec_get(Rt_q, j) + Rij * qi);
         }
       }
 
-      /* Now ∂/∂R[i,j] (uᵀ Σ u) = 2 * (u_i * tmp_j) */
+      /* d/dR[i,j] = p_i * (Rᵀ q)_j + q_i * (Rᵀ p)_j */
       for (int i = 0; i < n; i++) {
-        double ui = vec_get(u, off + i);
+        double pi = vec_get(p, off + i);
+        double qi = vec_get(q, off + i);
         for (int j = 0; j < r; j++) {
           int idx = i * r + j;
-          double g = 2.0 * ui * vec_get(tmp, j);
+          double g = pi * vec_get(Rt_q, j) + qi * vec_get(Rt_p, j);
           vec_set(out, idx, vec_get(out, idx) + g);
         }
       }
-
-      vec_free(tmp);
     }
+
+    vec_free(Rt_p);
+    vec_free(Rt_q); 
     return;
   }
 
@@ -613,11 +641,11 @@ void tay_Sigmafun(Vector *out, Vector *v, void *userdata)
 /* grad_sigma += ∂/∂σ ( v_lat^T Σ v_lat )
    NOTE: no factor 1/2 and no 1/nprobe scaling here — the Hutchinson driver handles it.
 */
-void tay_SigmaGradfun(Vector *grad_sigma, Vector *v_lat, void *userdata)
+void tay_SigmaGradfun(Vector *grad_sigma, Vector *p_lat, Vector *q_lat, void *userdata)
 {
     TaylorData *td = (TaylorData *)userdata;
 
     /* add contribution of this probe */
-    tay_sigma_grad_mult(grad_sigma, v_lat, td->mmvn, td->covar_data);
+    tay_sigma_grad_mult(grad_sigma, p_lat, q_lat, td->mmvn, td->covar_data);
 }
 

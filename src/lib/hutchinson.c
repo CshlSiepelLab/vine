@@ -94,7 +94,10 @@ double hutch_tr_plus_grad(
   Vector *u      = vec_new(dim_out);     /* S z           */
   Vector *Hu     = vec_new(dim_out);     /* H(S z)        */
 
-  Vector *u_lat  = vec_new(dim_lat);     /* Jᵀ z          */
+  Vector *Hz     = vec_new(dim_out);     /* H z (or Hᵀ z because symmetric) */
+
+  Vector *q_lat  = vec_new(dim_lat);     /* Jᵀ z */
+  Vector *p_lat = vec_new(dim_lat);      /* Jᵀ (H z) */
   Vector *tmp    = vec_new(dim_lat);     /* Σ u_lat       */
 
   if (grad_sigma != NULL) 
@@ -120,14 +123,21 @@ double hutch_tr_plus_grad(
 
     /* --------- gradient wrt covariance parameters ---------- */
 
-    /* latent-space vector: u_lat = Jᵀ z */
-    JTfun(u_lat, z, userdata);
+    /* q_lat = Jᵀ z */
+    JTfun(q_lat, z, userdata);
 
-    /* tmp = Σ u_lat */
-    Sigmafun(tmp, u_lat, userdata);
+    /* Hz = H z   (needed for left factor p_lat) */
+    Hfun(Hz, z, userdata);   /* relies on symmetry of H */
 
-    /* accumulate ∂/∂σ (u_latᵀ Σ u_lat) */
-    SigmaGradFun(grad_sigma, u_lat, userdata);
+    /* p_lat = Jᵀ (H z) */
+    JTfun(p_lat, Hz, userdata);
+
+    /* optional: tmp = Σ q_lat (not strictly needed for grad) */
+    Sigmafun(tmp, q_lat, userdata);
+
+    /* accumulate bilinear Σ-gradient: p_latᵀ (∂Σ) q_lat */
+    SigmaGradFun(grad_sigma, p_lat, q_lat, userdata);
+
   }
 
   /* Scale gradient by 1/nprobe */
@@ -137,7 +147,9 @@ double hutch_tr_plus_grad(
   vec_free(z);
   vec_free(u);
   vec_free(Hu);
-  vec_free(u_lat);
+  vec_free(Hz);
+  vec_free(q_lat);
+  vec_free(p_lat);
   vec_free(tmp);
 
   /* return tr(H S) */

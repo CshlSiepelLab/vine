@@ -35,7 +35,8 @@ typedef void (*Sigma_fun)(Vector *out, Vector *v_lat, void *userdata);
       grad_sigma += ∂/∂σ ( v_lat^T Σ v_lat )
    v_lat is J^T * z for a Hutchinson probe. */
 typedef void (*SigmaGrad_fun)(Vector *grad_sigma,
-                              Vector *v_lat,
+                              Vector *p_lat,
+                              Vector *q_lat,
                               void   *userdata);
 
 /* Compute T = tr(H S) using Hutchinson's trace estimator. */
