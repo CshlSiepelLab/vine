@@ -46,6 +46,8 @@ void mvn_sample_std(Vector *retval);
 
 void mvn_map_std(MVN *mvn, Vector *rv, Vector *lowrv);
 
+void mvn_seed(unsigned int seed);
+
 void mvn_sample(MVN *mvn, Vector *retval);
 
 void mvn_sample_anti(MVN *mvn, Vector *retval1, Vector *retval2);

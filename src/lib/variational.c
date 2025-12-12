@@ -119,7 +119,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
   SchedDirectives *sd = smalloc(sizeof(SchedDirectives));
   SchedMetrics *sm = smalloc(sizeof(SchedMetrics));
   sm->grad_norm = 0;
-  
+
   do {
     /* get directives from scheduler */
     sched_next(s, st, sm, sd);
@@ -205,33 +205,35 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
       data->subsample = FALSE;
       subsamp_rescale = 1.0;
     }
-    
+
     if (data->taylor != NULL) 
-      avell = nj_elbo_taylor(mod, mmvn, data, avegrad, ave_nuis_grad, &ave_lprior, &avemigll);
+      avell = nj_elbo_taylor(mod, mmvn, data, avegrad, ave_nuis_grad,
+                             &ave_lprior, &avemigll);
     
-    else 
-      avell = nj_elbo_montecarlo(mod, mmvn, data, nminibatch,
-                                 avegrad, ave_nuis_grad, &ave_lprior, &avemigll);
+    else
+      avell = nj_elbo_montecarlo(mod, mmvn, data, nminibatch, avegrad,
+                                 ave_nuis_grad, &ave_lprior, &avemigll);
 
     /* TEMPORARY: compare taylor and monte carlo for debugging */
-    {
-      Vector *avegrad_mc = vec_new(avegrad->size);
-      /*      Vector *ave_nuis_grad_mc = vec_new(n_nuisance_params); */
-      double avell_mc = nj_elbo_montecarlo(mod, mmvn, data, nminibatch,
-                                    avegrad_mc, NULL, &ave_lprior, &avemigll);
-      fprintf(stderr, "DEBUG: ELBO MC: %f, Taylor: %f\n", avell_mc, avell);
-      fprintf(stderr, "DEBUG: Gradient MC:\n");
-      vec_print(avegrad_mc, stderr);
-      fprintf(stderr, "DEBUG: Gradient Taylor:\n");
-      vec_print(avegrad, stderr);
-      /* fprintf(stderr, "DEBUG: Nuisance Gradient MC:\n"); */
-      /* vec_print(ave_nuis_grad_mc, stderr); */
-      /* fprintf(stderr, "DEBUG: Nuisance Gradient Taylor:\n"); */
-      /* vec_print(ave_nuis_grad, stderr); */
-      vec_free(avegrad_mc);
-      /* vec_free(ave_nuis_grad_mc); */
-      exit(0);
-    }
+    
+    /* { */
+    /*   Vector *avegrad_mc = vec_new(avegrad->size); */
+    /*   /\*      Vector *ave_nuis_grad_mc = vec_new(n_nuisance_params); *\/ */
+    /*   double avell_mc = nj_elbo_montecarlo(mod, mmvn, data, nminibatch, */
+    /*                                 avegrad_mc, NULL, &ave_lprior, &avemigll); */
+    /*   fprintf(stderr, "DEBUG: ELBO MC: %f, Taylor: %f\n", avell_mc, avell); */
+    /*   fprintf(stderr, "DEBUG: Gradient MC:\n"); */
+    /*   vec_print(avegrad_mc, stderr); */
+    /*   fprintf(stderr, "DEBUG: Gradient Taylor:\n"); */
+    /*   vec_print(avegrad, stderr); */
+    /*   /\* fprintf(stderr, "DEBUG: Nuisance Gradient MC:\n"); *\/ */
+    /*   /\* vec_print(ave_nuis_grad_mc, stderr); *\/ */
+    /*   /\* fprintf(stderr, "DEBUG: Nuisance Gradient Taylor:\n"); *\/ */
+    /*   /\* vec_print(ave_nuis_grad, stderr); *\/ */
+    /*   vec_free(avegrad_mc); */
+    /*   /\* vec_free(ave_nuis_grad_mc); *\/ */
+    /*   exit(0); */
+    /* } */
     
     
     vec_plus_eq(avegrad, kldgrad);

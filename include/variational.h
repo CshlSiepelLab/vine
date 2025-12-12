@@ -30,7 +30,6 @@
    algorithms */
 #define NSUBSAMPLES 256
 
-
 void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
                         int nminibatch, double learnrate, int nbatches_conv,
                         int min_nbatches, CovarData *data, FILE *logf);

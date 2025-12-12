@@ -53,6 +53,14 @@ TaylorData *tay_new(CovarData *data) {
   /* these will be set later */
   td->mmvn = NULL;
   td->mod = NULL;
+
+  /* scheduling directives */
+  td->iter = 0;
+  td->T_cache = 0.0;
+  td->siggrad_cache = NULL; /* will be allocated later */
+  td->warmup = 20; /* number of iterations before updates begin */
+  td->period = 15; /* update period */
+  td->beta = 0.3;  
   
   return td;
 }
@@ -66,6 +74,9 @@ void tay_free(TaylorData *td) {
   vec_free(td->tmp_dD);
   vec_free(td->tmp_dy);
   vec_free(td->tmp_extra);
+  if (td->siggrad_cache != NULL)
+    vec_free(td->siggrad_cache);
+  vec_free(td->y);
   sfree(td);
 }
 
@@ -77,9 +88,10 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   double ll;
 
   /* make sure mmvn and mod are accessible from TaylorData */
-  data->taylor->mmvn = mmvn;
-  data->taylor->mod = mod;
-  assert(mod->tree->nnodes - 1 == data->taylor->nbranches);
+  TaylorData *td = data->taylor;
+  td->mmvn = mmvn;
+  td->mod = mod;
+  assert(mod->tree->nnodes - 1 == td->nbranches);
   
   /* first calculate log likelihood at the mean */
   vec_zero(grad);
@@ -87,7 +99,6 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   Vector *mu_std = vec_new(mmvn->n * mmvn->d);
   mmvn_save_mu(mmvn, mu); /* express mean as a single vector */
   mmvn_rederive_std(mmvn, mu, mu_std); /* rederive associated standard normal variate */
-  /* CHECK: not sure mu_std is really needed here */
 
   ll = nj_compute_model_grad(mod, mmvn, mu, mu_std,
                              grad, data, NULL, migll);
@@ -109,18 +120,10 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
     vec_zero(nuis_grad);
     nj_update_nuis_grad(mod, data, nuis_grad);
   }
-
-  /* build Jacobians Jbx and JbxT once at the mean point */
-  tay_prep_jacobians(data->taylor, mod, mu);
- 
   
   /* note that there is no first-order term in the Taylor approximation
      because we are expanding around the mean */
   
-  /* CHECK: do we need to propagate gradients wrt to the variance
-     terms through to the migll?  how about nuisance params? */
-  /* CHECK: are there also second order terms to consider for the log prior? */
-
   /* now add the second-order terms for the Taylor expansion.  These
      terms are equal to 1/2 tr(H Sigma), where H is the Hessian of the
      ELBO.  But we can simplify this expression by considering the
@@ -136,31 +139,58 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
  
   /* we will approximate tr(H S) using a Hutchinson trace estimator */
   
-  /* CHECK: should we consider the curvature of the flows? */
+  /* CHECK: need to consider curvature of the flows? */
+  /* CHECK: do we need to propagate gradients wrt to the variance
+     terms through to the migll?  how about nuisance params? */
+  /* CHECK: are there also second order terms to consider for the log prior? */
 
   int sigdim = grad->size - data->taylor->fulld; /* number of covariance parameters */
-  Vector *grad_sigma = vec_new(sigdim); /* FIXME: get sigdim correctly */
-  vec_zero(grad_sigma);
-
-  /* Compute scalar T and its covariance gradient */
-  double T = hutch_tr_plus_grad(tay_HVP, tay_SVP, tay_JTfun, tay_Sigmafun,
-                                tay_SigmaGradfun, data->taylor,
-                                data->taylor->nbranches, data->taylor->fulld,
-                                NHUTCH_SAMPLES, grad_sigma);
-
-  /* add 1/2 T to log likelihood and scale gradient by 1/2 */
-  ll += 0.5 * T;
-  vec_scale(grad_sigma, 0.5);
+  if (td->siggrad_cache == NULL) /* set up first time */
+    td->siggrad_cache = vec_new(sigdim);
   
+  /* decide whether and how to update trace and derivatives.  This is expensive
+     so we only do it intermittently */
+  int do_refresh = (td->iter >= td->warmup) && ((td->iter - td->warmup) % td->period == 0);
+
+  if (do_refresh) {
+    Vector *grad_sigma = vec_new(sigdim);
+    vec_zero(grad_sigma);
+
+    /* build Jacobians Jbx and JbxT once at the mean point */
+    tay_prep_jacobians(data->taylor, mod, mu);
+  
+    /* Compute scalar T and its covariance gradient */
+    double T = hutch_tr_plus_grad(tay_HVP, tay_SVP, tay_JTfun, tay_Sigmafun,
+                           tay_SigmaGradfun, data->taylor,
+                           data->taylor->nbranches, data->taylor->fulld,
+                           NHUTCH_SAMPLES, grad_sigma);
+
+    if (td->iter == td->warmup) {
+      td->T_cache = T; /* initialize on first update */
+      vec_copy(td->siggrad_cache, grad_sigma);
+    }
+    else {
+      td->T_cache = (1.0 - td->beta) * td->T_cache + td->beta * T;
+      for (int j = 0; j < sigdim; j++) {
+        double old = vec_get(td->siggrad_cache, j);
+        double nw  = vec_get(grad_sigma, j);
+        vec_set(td->siggrad_cache, j, (1.0 - td->beta)*old + td->beta*nw);
+      }
+    }
+    vec_free(grad_sigma);
+  }
+  td->iter++;
+  
+  /* add 1/2 T to log likelihood and scale gradient by 1/2; always used cached versions */
+  ll += 0.5 * td->T_cache;
   /* add covariance part of gradient into grad */
-  int offset = data->taylor->fulld; /* CHECK */
-  for (int j = 0; j < grad_sigma->size; j++)
+  int offset = data->taylor->fulld; 
+  for (int j = 0; j < sigdim; j++)
     vec_set(grad, offset + j, vec_get(grad, offset + j)
-                              + vec_get(grad_sigma, j));
+                              + 0.5 * vec_get(td->siggrad_cache, j));
   
   /* free everything and return */
   vec_free(mu); vec_free(mu_std);
-  vec_free(grad_sigma);
  
   return ll; 
 }
@@ -220,11 +250,12 @@ void tay_HVP(Vector *out, Vector *v, void *dat)
   /* Compute baseline gradient g0 at current b */
   /* FIXME: compare this to base_grad already stored in tay_data.  If
      base_grad is sufficient we can avoid this extra call */
-  Vector *g0 = vec_new(tay_data->nbranches);
-  if (data->crispr_mod != NULL)
-    cpr_compute_log_likelihood(data->crispr_mod, g0);
-  else
-    nj_compute_log_likelihood(mod, data, g0);
+  Vector *g0 = tay_data->base_grad;
+  /* vec_new(tay_data->nbranches); */
+  /* if (data->crispr_mod != NULL) */
+  /*   cpr_compute_log_likelihood(data->crispr_mod, g0); */
+  /* else */
+  /*   nj_compute_log_likelihood(mod, data, g0); */
 
   /* Pick an eps that is local relative to v */
   double maxabs = 0.0;
@@ -252,7 +283,7 @@ void tay_HVP(Vector *out, Vector *v, void *dat)
   tr_restore_branch_lengths(mod->tree, origbl);
 
   vec_free(origbl);
-  vec_free(g0);
+  /* vec_free(g0); */
 }
 
 /* Compute S_b * v, where S_b = Jbx * Sigma_x * Jbx^T.

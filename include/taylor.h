@@ -21,7 +21,7 @@
 #include <multi_mvn.h>
 #include <nj.h>
 
-#define NHUTCH_SAMPLES 1000  /* number of probe vectors for Hutchinson's
+#define NHUTCH_SAMPLES 20  /* number of probe vectors for Hutchinson's
                               estimator of trace of Hessian */
 
 typedef struct taylor_data {
@@ -53,6 +53,14 @@ typedef struct taylor_data {
   struct neigh_struc *nb;
   multi_MVN *mmvn;
   TreeModel *mod;
+
+  /* scheduling */
+  double T_cache;
+  Vector *siggrad_cache;   /* size = nsigma (or full grad layout if you include mu) */
+  int iter;    /* current iteration */
+  int warmup;  /* number of warmup iterations */
+  int period;  /* period between updates */
+  double beta; /* for averaging of T estimates */
 } TaylorData;
 
 TaylorData *tay_new(struct cvdat *data);
@@ -61,7 +69,6 @@ void tay_free(TaylorData *td);
 
 double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, struct cvdat *data,
                       Vector *grad, Vector *nuis_grad, double *lprior, double *migll);
-
 
 void tay_HVP(Vector *out, Vector *v, void *data_vd);
 

@@ -157,17 +157,25 @@ void mvn_update_type(MVN *mvn) {
   /* note that MVN_LOWR will never be used by this function; has to be set separately */
 }
 
+/* Global RNG control for MVN sampling */
+static int mvn_rng_initialized = 0;
+
+/* Explicitly seed MVN RNG */
+void mvn_seed(unsigned int seed) {
+  srandom(seed);
+  mvn_rng_initialized = 1;
+}
+
 /* Sample a vector from a standard multivariate normal distribution,
    with zero mean and identity covariance.  */
 void mvn_sample_std(Vector *retval) {
   int i;
-  static int seeded = 0;
   double u1, u2, z1, z2;
-  
-  if (!seeded) {
+
+  if (!mvn_rng_initialized) {
     srandom((unsigned int)time(NULL));
-    seeded = 1;
-  }
+    mvn_rng_initialized = 1;
+  }  
 
   /* draw indep samples from standard normal using Box-Muller transform */
   for (i = 0; i < retval->size; i += 2) {
