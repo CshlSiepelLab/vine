@@ -87,6 +87,8 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
       fprintf(logf, "prior\t");
     else
       fprintf(logf, "kld\t");
+    if (data->taylor)
+      fprintf(logf, "half_trHS\t");
     if (data->var_reg != 0)
       fprintf(logf, "penalty\t");
     if (data->crispr_mod == NULL)
@@ -321,6 +323,8 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
         fprintf(logf, "%f\t", ave_lprior);
       else
         fprintf(logf, "%f\t", kld);
+      if (data->taylor)
+        fprintf(logf, "%f\t", 0.5 * data->taylor->T_cache);
       if (data->var_reg != 0)
         fprintf(logf, "%f\t", data->var_pen);
       if (data->crispr_mod == NULL)

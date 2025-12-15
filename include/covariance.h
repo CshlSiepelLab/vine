@@ -34,7 +34,7 @@
 
 /* initialization of lambda, which is scale factor for covariance
    matrix in DIST and CONST parameterizations */
-#define LAMBDA_INIT 1
+#define LAMBDA_INIT 1.0e-2
 
 /* types of parameterization for covariance matrix: constant (and
    diagonal), diagonal with free variances, proportional to Laplacian
@@ -110,5 +110,7 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
 void nj_dump_covar_data(CovarData *data, FILE *F);
 
 void nj_laplacian_pinv(CovarData *data);
+
+unsigned int nj_var_at_floor(multi_MVN *mmvn, CovarData *data);
 
 #endif

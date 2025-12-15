@@ -21,7 +21,7 @@
 #include <multi_mvn.h>
 #include <nj.h>
 
-#define NHUTCH_SAMPLES 20  /* number of probe vectors for Hutchinson's
+#define NHUTCH_SAMPLES 10  /* number of probe vectors for Hutchinson's
                               estimator of trace of Hessian */
 
 typedef struct taylor_data {

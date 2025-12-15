@@ -51,7 +51,11 @@ void nj_update_covariance(multi_MVN *mmvn, CovarData *data) {
     }
   }
   else if (data->type == DIST) {
-    data->lambda = VARFLOOR + exp(vec_get(sigma_params, 0));
+    data->lambda = exp(vec_get(sigma_params, 0));
+    if (!isfinite(data->lambda) || data->lambda < VARFLOOR) {
+      data->lambda = VARFLOOR;
+      vec_set(sigma_params, 0, log(VARFLOOR)); 
+    }
     mat_copy(mmvn->mvn->sigma, data->Lapl_pinv);
     mat_scale(mmvn->mvn->sigma, data->lambda);
 
@@ -251,3 +255,34 @@ void nj_laplacian_pinv(CovarData *data) {
   vec_scale(data->Lapl_pinv_evals, data->nseqs / trace);
 }
 
+/* chck whether all variance parameters are at floor */
+unsigned int nj_var_at_floor(multi_MVN *mmvn, CovarData *data) {
+  int i;
+  
+  if (data->type == CONST || data->type == DIST) {
+    double lambda = exp(vec_get(data->params, 0));
+    return (lambda <= VARFLOOR + 1e-10);
+  }
+  else if (data->type == DIAG) {
+    for (i = 0; i < data->params->size; i++) {
+      double lambda_i = exp(vec_get(data->params, i));
+      if (lambda_i > VARFLOOR + 1e-10)
+        return FALSE;
+    }
+    return TRUE;
+  }
+  else { 
+    assert (data->type == LOWR);
+
+    /* in this case, the analog is to use the
+       eigenvalues of the embedded low-rank matrix */
+    MVN *Rmvn = mmvn->mvn->lowRmvn;
+    assert(Rmvn->evals != NULL);
+    for (i = 0; i < Rmvn->dim; i++) {
+      double eval_i = vec_get(Rmvn->evals, i);
+      if (eval_i > VARFLOOR + 1e-10)
+        return FALSE;
+    }
+    return TRUE;
+  }
+}

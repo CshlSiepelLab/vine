@@ -58,8 +58,8 @@ TaylorData *tay_new(CovarData *data) {
   td->iter = 0;
   td->T_cache = 0.0;
   td->siggrad_cache = NULL; /* will be allocated later */
-  td->warmup = 20; /* number of iterations before updates begin */
-  td->period = 15; /* update period */
+  td->warmup = 50; /* number of iterations before updates begin */
+  td->period = 30; /* update period */
   td->beta = 0.3;  
   
   return td;
@@ -81,7 +81,9 @@ void tay_free(TaylorData *td) {
 }
 
 /* estimate key components of the ELBO by a Taylor approximation
-   around the mean.  Returns the expected log likelihood */
+   around the mean.  Returns the expected log likelihood.  If
+   non-NULL, &half_tr will be populated with 1/2 tr(H S), which is the
+   second-order term in the Taylor expansion. */
 double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
                       Vector *grad, Vector *nuis_grad, double *lprior,
                       double *migll) {
@@ -141,7 +143,7 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   
   /* CHECK: need to consider curvature of the flows? */
   /* CHECK: do we need to propagate gradients wrt to the variance
-     terms through to the migll?  how about nuisance params? */
+     terms through to the migll?  */
   /* CHECK: are there also second order terms to consider for the log prior? */
 
   int sigdim = grad->size - data->taylor->fulld; /* number of covariance parameters */
@@ -152,6 +154,13 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
      so we only do it intermittently */
   int do_refresh = (td->iter >= td->warmup) && ((td->iter - td->warmup) % td->period == 0);
 
+  /* if variance has hit its floor, there's no sense in updating the trace */
+  if (do_refresh && nj_var_at_floor(mmvn, data)) {
+    td->T_cache = 0.0;
+    vec_zero(td->siggrad_cache);
+    do_refresh = FALSE;
+  }
+  
   if (do_refresh) {
     Vector *grad_sigma = vec_new(sigdim);
     vec_zero(grad_sigma);
@@ -191,7 +200,7 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   
   /* free everything and return */
   vec_free(mu); vec_free(mu_std);
- 
+
   return ll; 
 }
 
@@ -247,15 +256,8 @@ void tay_HVP(Vector *out, Vector *v, void *dat)
   Vector *origbl = vec_new(tay_data->nbranches);
   tr_save_branch_lengths(mod->tree, origbl);
 
-  /* Compute baseline gradient g0 at current b */
-  /* FIXME: compare this to base_grad already stored in tay_data.  If
-     base_grad is sufficient we can avoid this extra call */
+  /* retrieve baseline gradient g0 at current b */
   Vector *g0 = tay_data->base_grad;
-  /* vec_new(tay_data->nbranches); */
-  /* if (data->crispr_mod != NULL) */
-  /*   cpr_compute_log_likelihood(data->crispr_mod, g0); */
-  /* else */
-  /*   nj_compute_log_likelihood(mod, data, g0); */
 
   /* Pick an eps that is local relative to v */
   double maxabs = 0.0;
