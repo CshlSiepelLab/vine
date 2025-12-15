@@ -567,7 +567,8 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   if (data->taylor != NULL) {
     vec_copy(data->taylor->y, y);
     vec_copy(data->taylor->base_grad, dL_dt);
-    nj_copy_neighbors(data->taylor->nb, nb);
+    if (nb != NULL) /* not needed for UPGMA case */
+      nj_copy_neighbors(data->taylor->nb, nb);
   }
   
   /* finally multiply by dD/dy to obtain gradient wrt y.  This part is
