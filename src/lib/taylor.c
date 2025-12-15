@@ -98,15 +98,10 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   /* first calculate log likelihood at the mean */
   vec_zero(grad);
   Vector *mu = vec_new(mmvn->n * mmvn->d);
-  Vector *mu_std = vec_new(mmvn->n * mmvn->d);
   mmvn_save_mu(mmvn, mu); /* express mean as a single vector */
-  mmvn_rederive_std(mmvn, mu, mu_std); /* rederive associated standard normal variate */
 
-  ll = nj_compute_model_grad(mod, mmvn, mu, mu_std,
+  ll = nj_compute_model_grad(mod, mmvn, mu, NULL,
                              grad, data, NULL, migll);
-  /* CHECK: is handling of mean correct in this case?  several terms
-     reduce to zero but maybe ok.  Maybe variance is wrong here
-     however? */
 
   /* also handle log prior and nuisance gradient if needed */
   if (data->treeprior != NULL) {
@@ -147,46 +142,51 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   /* CHECK: are there also second order terms to consider for the log prior? */
 
   int sigdim = grad->size - data->taylor->fulld; /* number of covariance parameters */
-  if (td->siggrad_cache == NULL) /* set up first time */
+  if (td->siggrad_cache == NULL)   /* set up first time */
     td->siggrad_cache = vec_new(sigdim);
+
+  if (td->iter == 0) {
+    vec_zero(td->siggrad_cache);
+    td->T_cache = 0.0;
+  }
   
   /* decide whether and how to update trace and derivatives.  This is expensive
      so we only do it intermittently */
   int do_refresh = (td->iter >= td->warmup) && ((td->iter - td->warmup) % td->period == 0);
 
   /* if variance has hit its floor, there's no sense in updating the trace */
-  if (do_refresh && nj_var_at_floor(mmvn, data)) {
-    td->T_cache = 0.0;
-    vec_zero(td->siggrad_cache);
-    do_refresh = FALSE;
-  }
+  unsigned int at_floor = nj_var_at_floor(mmvn, data); 
   
   if (do_refresh) {
-    Vector *grad_sigma = vec_new(sigdim);
-    vec_zero(grad_sigma);
-
-    /* build Jacobians Jbx and JbxT once at the mean point */
-    tay_prep_jacobians(data->taylor, mod, mu);
-  
-    /* Compute scalar T and its covariance gradient */
-    double T = hutch_tr_plus_grad(tay_HVP, tay_SVP, tay_JTfun, tay_Sigmafun,
-                           tay_SigmaGradfun, data->taylor,
-                           data->taylor->nbranches, data->taylor->fulld,
-                           NHUTCH_SAMPLES, grad_sigma);
-
-    if (td->iter == td->warmup) {
-      td->T_cache = T; /* initialize on first update */
-      vec_copy(td->siggrad_cache, grad_sigma);
-    }
+    if (at_floor)  /* set T equal to zero but allow gradient to stay negative */
+      td->T_cache = 0.0;
     else {
-      td->T_cache = (1.0 - td->beta) * td->T_cache + td->beta * T;
-      for (int j = 0; j < sigdim; j++) {
-        double old = vec_get(td->siggrad_cache, j);
-        double nw  = vec_get(grad_sigma, j);
-        vec_set(td->siggrad_cache, j, (1.0 - td->beta)*old + td->beta*nw);
+      Vector *grad_sigma = vec_new(sigdim);
+      vec_zero(grad_sigma);
+
+      /* build Jacobians Jbx and JbxT once at the mean point */
+      tay_prep_jacobians(data->taylor, mod, mu);
+  
+      /* Compute scalar T and its covariance gradient */
+      double T = hutch_tr_plus_grad(tay_HVP, tay_SVP, tay_JTfun, tay_Sigmafun,
+                                    tay_SigmaGradfun, data->taylor,
+                                    data->taylor->nbranches, data->taylor->fulld,
+                                    NHUTCH_SAMPLES, grad_sigma);
+
+      if (td->iter == td->warmup) {
+        td->T_cache = T; /* initialize on first update */
+        vec_copy(td->siggrad_cache, grad_sigma);
       }
+      else {
+        td->T_cache = (1.0 - td->beta) * td->T_cache + td->beta * T;
+        for (int j = 0; j < sigdim; j++) {
+          double old = vec_get(td->siggrad_cache, j);
+          double nw  = vec_get(grad_sigma, j);
+          vec_set(td->siggrad_cache, j, (1.0 - td->beta)*old + td->beta*nw);
+        }
+      }
+      vec_free(grad_sigma);
     }
-    vec_free(grad_sigma);
   }
   td->iter++;
   
@@ -199,7 +199,7 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
                               + 0.5 * vec_get(td->siggrad_cache, j));
   
   /* free everything and return */
-  vec_free(mu); vec_free(mu_std);
+  vec_free(mu); 
 
   return ll; 
 }

@@ -27,7 +27,9 @@
 /* compute the gradient of the log likelihood for a tree model with
    respect to the free parameters of the MVN averaging distribution,
    starting from a given MVN sample (points). Returns log likelihood
-   of current model, which is computed as a by-product.  */
+   of current model, which is computed as a by-product.  Set
+   points_std == NULL to avoid setting variance gradients (makes sense
+   with Taylor approx) */
 double nj_compute_model_grad(TreeModel *mod, multi_MVN *mmvn, Vector *points,
                              Vector *points_std, Vector *grad, CovarData *data,
                              double *nf_logdet,
@@ -75,41 +77,45 @@ double nj_compute_model_grad(TreeModel *mod, multi_MVN *mmvn, Vector *points,
          trick */
       vec_set(grad, pidx, vec_get(dL_dx, pidx));
 
-      /* the partial derivative wrt the variance parameter is more
-         complicated because of the reparameterization trick */      
-      if (data->type == CONST || data->type == DIST)
-        loglambda_grad += 0.5 * vec_get(dL_dx, pidx) * (porig - mmvn_get_mu_el(mmvn, pidx));
-      /* assumes log parameterization of scale factor lambda */
+      if (points_std != NULL) { /* only do this if updating variance parameters */
+        
+        /* the partial derivative wrt the variance parameter is more
+           complicated because of the reparameterization trick */      
+        if (data->type == CONST || data->type == DIST)
+          loglambda_grad += 0.5 * vec_get(dL_dx, pidx) * (porig - mmvn_get_mu_el(mmvn, pidx));
+        /* assumes log parameterization of scale factor lambda */
       
-      else if (data->type == DIAG) 
-        /* in the DIAG case, the partial derivative wrt the
-           corresponding variance parameter can be computed directly
-           based on a single point and coordinate */
-        vec_set(grad, (i+n)*d + k, 0.5 * vec_get(dL_dx, pidx) * (porig - mmvn_get_mu_el(mmvn, pidx))); 
-      
+        else if (data->type == DIAG) 
+          /* in the DIAG case, the partial derivative wrt the
+             corresponding variance parameter can be computed directly
+             based on a single point and coordinate */
+          vec_set(grad, (i+n)*d + k, 0.5 * vec_get(dL_dx, pidx) * (porig - mmvn_get_mu_el(mmvn, pidx))); 
+      }
     }
   }
-  if (data->type == CONST || data->type == DIST)  /* in this case, need to update the final
+  if (points_std != NULL) {
+    if (data->type == CONST || data->type == DIST)  /* in this case, need to update the final
                                                       gradient component corresponding to the
                                                       lambda parameter */
-    vec_set(grad, dim, loglambda_grad);
+      vec_set(grad, dim, loglambda_grad);
 
-  else if (data->type == LOWR) { /* in this case have to sum across
-                                    dimensions because there is a
-                                    many-to-many relationship with the
-                                    variance parameters */
-    for (i = 0; i < n; i++) 
-      for (j = 0; j < data->lowrank; j++) 
-        for (k = 0; k < d; k++) 
-          vec_set(grad, dim + i*data->lowrank + j, vec_get(grad, dim + i*data->lowrank + j) +
-                  vec_get(grad, i*d + k) * vec_get(points_std, j*d + k));
-          /* update for parameter corresponding to element R[i, j],
-             which has index in grad of dim + (i*data->lowrank) + j.
-             The gradient is a dot product of dL/dx and dx/dp, where L
-             is the log likelihood, x is the point, and p is the
-             variance parameter.  In this case, dxj/dp is simply zj, the
-             corresponding standardized variable.
-          */
+    else if (data->type == LOWR) { /* in this case have to sum across
+                                      dimensions because there is a
+                                      many-to-many relationship with the
+                                      variance parameters */
+      for (i = 0; i < n; i++) 
+        for (j = 0; j < data->lowrank; j++) 
+          for (k = 0; k < d; k++) 
+            vec_set(grad, dim + i*data->lowrank + j, vec_get(grad, dim + i*data->lowrank + j) +
+                    vec_get(grad, i*d + k) * vec_get(points_std, j*d + k));
+      /* update for parameter corresponding to element R[i, j],
+         which has index in grad of dim + (i*data->lowrank) + j.
+         The gradient is a dot product of dL/dx and dx/dp, where L
+         is the log likelihood, x is the point, and p is the
+         variance parameter.  In this case, dxj/dp is simply zj, the
+         corresponding standardized variable.
+      */
+    }
   }
 
   vec_free(dL_dx);
