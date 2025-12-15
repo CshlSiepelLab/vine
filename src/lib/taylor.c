@@ -103,6 +103,13 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   ll = nj_compute_model_grad(mod, mmvn, mu, NULL,
                              grad, data, NULL, migll);
 
+  if (!isfinite(ll)) { /* this can happen in the CRISPR case */
+    data->no_zero_br = TRUE; /* prohibit zero branch lengths and try again */
+    ll = nj_compute_model_grad(mod, mmvn, mu, NULL, grad, data, NULL, migll);
+    if (!isfinite(ll))
+      die("Fatal error: log likelihood at mean is not finite even with no zero branch lengths\n");
+  }
+  
   /* also handle log prior and nuisance gradient if needed */
   if (data->treeprior != NULL) {
     Vector *prior_grad = vec_new(grad->size);
