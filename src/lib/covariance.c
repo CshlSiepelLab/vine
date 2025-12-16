@@ -194,6 +194,28 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
   return (retval);
 }
 
+void nj_free_covar_data(CovarData *data) {
+  if (data->dist != NULL)
+    mat_free(data->dist);
+  if (data->Lapl_pinv != NULL)
+    mat_free(data->Lapl_pinv);
+  if (data->Lapl_pinv_evals != NULL)
+    vec_free(data->Lapl_pinv_evals);
+  if (data->Lapl_pinv_evecs != NULL)
+    mat_free(data->Lapl_pinv_evecs);
+  if (data->R != NULL)
+    mat_free(data->R);
+  if (data->params != NULL)
+    vec_free(data->params);
+  if (data->rf != NULL)
+    rf_free(data->rf);
+  if (data->pf != NULL)
+    pf_free(data->pf);
+  if (data->taylor != NULL)
+    tay_free(data->taylor);
+  free(data);
+}
+
 void nj_dump_covar_data(CovarData *data, FILE *F) {
   fprintf(F, "CovarData\nnseqs: %d\ndim: %d\nlambda: %f\n", data->nseqs, data->dim, data->lambda);
   fprintf(F, "distance matrix:\n");

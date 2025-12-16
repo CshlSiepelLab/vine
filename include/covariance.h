@@ -107,6 +107,8 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
                              TreePrior *treeprior, MigTable *mtable,
                              unsigned int use_taylor);
 
+void nj_free_covar_data(CovarData *data);
+
 void nj_dump_covar_data(CovarData *data, FILE *F);
 
 void nj_laplacian_pinv(CovarData *data);

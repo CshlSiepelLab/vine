@@ -507,6 +507,7 @@ int main(int argc, char *argv[]) {
           mig_sample_states(t, migtable, crispr_mod, states);
           lst_push_ptr(migstates_lst, states); /* mark end of sample */
         }
+        tr_free(t);
       }
 
       /* output sampled cell states if needed */
@@ -531,6 +532,37 @@ int main(int argc, char *argv[]) {
 
     mat_print(D, outdistfile);
   }
-    
+
+  /* free everything */
+  if (names != NULL) {
+    for (i = 0; i < ntips; i++)
+      sfree(names[i]);
+    sfree(names);
+  }
+  if (msa != NULL)
+    msa_free(msa);
+  if (crispr_muts != NULL)
+    cpr_free_table(crispr_muts);
+  if (crispr_mod != NULL)
+    cpr_free_model(crispr_mod);
+  if (mod != NULL)
+    tm_free(mod);
+  if (D != NULL)
+    mat_free(D);
+  if (covar_data != NULL)
+    nj_free_covar_data(covar_data);
+  if (mmvn != NULL)
+    mmvn_free(mmvn);
+  if (logfile != NULL)
+    fclose(logfile);
+  if (outdistfile != NULL)
+    fclose(outdistfile);
+  if (postmeanfile != NULL)
+    fclose(postmeanfile);
+  if (graphsfile != NULL)
+    fclose(graphsfile);
+  if (nexusfile != NULL)
+    fclose(nexusfile);
+  
   return (0);
 }

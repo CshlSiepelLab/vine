@@ -700,6 +700,10 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
     nj_free_neighbors(nb);
   if (migbranchgrad != NULL) vec_free(migbranchgrad);
 
+  /* have to free the last tree separately because it's stored in mod */
+  tr_free(mod->tree);
+  mod->tree = NULL;
+  
   return ll_base;  
 }
 
