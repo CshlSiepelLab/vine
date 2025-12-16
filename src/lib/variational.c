@@ -474,7 +474,12 @@ double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
     vec_free(nuis_grad);
   if (data->treeprior != NULL)
     vec_free(prior_grad);
- 
+
+  /* we also have to free the last tree in the tree model to avoid a
+     memory leak */
+  tr_free(mod->tree);
+  mod->tree = NULL;
+  
   return avell;
 }
 

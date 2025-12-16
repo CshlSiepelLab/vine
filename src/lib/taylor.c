@@ -93,8 +93,7 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   TaylorData *td = data->taylor;
   td->mmvn = mmvn;
   td->mod = mod;
-  assert(mod->tree->nnodes - 1 == td->nbranches);
-  
+
   /* first calculate log likelihood at the mean */
   vec_zero(grad);
   Vector *mu = vec_new(mmvn->n * mmvn->d);
@@ -102,6 +101,9 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
 
   ll = nj_compute_model_grad(mod, mmvn, mu, NULL,
                              grad, data, NULL, migll);
+
+  /* do after calling nj_compute_model_grad so tree is defined */
+  assert(mod->tree->nnodes - 1 == td->nbranches);  
 
   if (!isfinite(ll)) { /* this can happen in the CRISPR case */
     data->no_zero_br = TRUE; /* prohibit zero branch lengths and try again */
@@ -206,8 +208,13 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
                               + 0.5 * vec_get(td->siggrad_cache, j));
   
   /* free everything and return */
-  vec_free(mu); 
+  vec_free(mu);
 
+  /* we also have to free the last tree in the tree model to avoid a
+     memory leak */
+  tr_free(mod->tree);
+  mod->tree = NULL;
+  
   return ll; 
 }
 
