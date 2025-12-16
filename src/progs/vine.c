@@ -534,11 +534,6 @@ int main(int argc, char *argv[]) {
   }
 
   /* free everything */
-  if (names != NULL) {
-    for (i = 0; i < ntips; i++)
-      sfree(names[i]);
-    sfree(names);
-  }
   if (msa != NULL)
     msa_free(msa);
   if (crispr_muts != NULL)
@@ -547,8 +542,6 @@ int main(int argc, char *argv[]) {
     cpr_free_model(crispr_mod);
   if (mod != NULL)
     tm_free(mod);
-  if (D != NULL)
-    mat_free(D);
   if (covar_data != NULL)
     nj_free_covar_data(covar_data);
   if (mmvn != NULL)
