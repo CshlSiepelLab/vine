@@ -65,7 +65,10 @@ double nj_compute_log_likelihood(TreeModel *mod, CovarData *data, Vector *branch
   Vector *this_deriv_gtr = NULL;
   static Vector *tuplecdf = NULL;
   static Vector *tuplecounts = NULL;
-
+  unsigned int first_time = TRUE; /* first-time through loop over
+                                     sites; trigger for certain
+                                     initializations */
+  
   if (msa->ss->tuple_size != 1)
     die("ERROR nj_compute_log_likelihood: need tuple size 1, got %i\n",
 	msa->ss->tuple_size);
@@ -209,10 +212,10 @@ double nj_compute_log_likelihood(TreeModel *mod, CovarData *data, Vector *branch
           vec_set(lscale, n->id, vec_get(lscale, n->id) + 2 * lscaling_threshold);
         
         /* TEMPORARY: check nonzero */
-        double checksum = 0.0;
-        for (i = 0; i < nstates; i++)
-          checksum += pL[i][n->id];
-        assert(checksum > 0.0);
+        /* double checksum = 0.0; */
+        /* for (i = 0; i < nstates; i++) */
+        /*   checksum += pL[i][n->id]; */
+        /* assert(checksum > 0.0); */
       }
     }
   
@@ -225,9 +228,8 @@ double nj_compute_log_likelihood(TreeModel *mod, CovarData *data, Vector *branch
     ll += (log(total_prob) + vec_get(lscale, mod->tree->id)) * vec_get(tuplecounts, tupleidx);
 
     if (!isfinite(ll))
-      assert(0);
-      /* break; */ /* can happen with zero-length branches;
-                                 make calling code deal with it */
+      break;  /* can happen with zero-length branches;
+                 make calling code deal with it */
 
     /* to compute gradients efficiently, need to make a second pass
        across the tree to compute "outside" probabilities */
@@ -326,7 +328,7 @@ double nj_compute_log_likelihood(TreeModel *mod, CovarData *data, Vector *branch
           /* calculate derivative analytically */
           deriv = 0;
           /* only do this first time through */
-          if (tupleidx == 0) {
+          if (first_time == TRUE) {
             if (mod->subst_mod == JC69)
               tm_grad_JC69(mod, grad_mat[n->id], n->dparent);
             else if (mod->subst_mod == HKY85)
@@ -362,19 +364,21 @@ double nj_compute_log_likelihood(TreeModel *mod, CovarData *data, Vector *branch
            they have to be aggregated across all branches */
         if (mod->subst_mod == HKY85) {
           double this_deriv_kappa = 0;
-          if (tupleidx == 0)
-            tm_grad_HKY_dkappa(mod, grad_mat_HKY[n->id], data->hky_kappa, n->dparent);
+          if (first_time == TRUE)  /* first time only */
+            tm_grad_HKY_dkappa(mod, grad_mat_HKY[n->id], data->hky_kappa,
+                               n->dparent);
           for (i = 0; i < nstates; i++) 
             for (j = 0; j < nstates; j++) 
               this_deriv_kappa += tmp[i] * pLbar[i][par->id] * pL[j][n->id] *
                 mat_get(grad_mat_HKY[n->id], i, j);
 
           /* adjust for all relevant scale terms */
-          this_deriv_kappa *= exp(expon);        
-          data->deriv_hky_kappa += (this_deriv_kappa * vec_get(tuplecounts, tupleidx));
+          this_deriv_kappa *= exp(expon);
+          data->deriv_hky_kappa +=
+            (this_deriv_kappa * vec_get(tuplecounts, tupleidx));
         }
         else if (mod->subst_mod == REV) {
-          if (tupleidx == 0) /* first time only */
+          if (first_time == TRUE)  /* first time only */
             tm_grad_REV_dr(mod, grad_mat_REV[n->id], n->dparent);
           /* loop over rate parameters */
           for (int pidx = 0; pidx < data->gtr_params->size; pidx++) {
@@ -394,6 +398,7 @@ double nj_compute_log_likelihood(TreeModel *mod, CovarData *data, Vector *branch
         }
       }
     }
+    first_time = FALSE; /* after first processed tuple (some are skipped) */
   }
   
   for (j = 0; j < nstates; j++)
