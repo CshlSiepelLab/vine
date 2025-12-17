@@ -55,7 +55,7 @@ double nj_compute_log_likelihood(TreeModel *mod, CovarData *data, Vector *branch
   List *traversal;
   double **pL = NULL, **pLbar = NULL;
   Vector *lscale, *lscale_o; /* inside and outside versions */
-  double scaling_threshold = DBL_MIN * 1.0e10;  /* need some padding */
+  double scaling_threshold = sqrt(DBL_MIN) * 1.0e15;  /* need some padding */
   double lscaling_threshold = log(scaling_threshold), ll = 0;
   double tmp[nstates];
   Matrix **grad_mat, **grad_mat_HKY;
@@ -177,33 +177,42 @@ double nj_compute_log_likelihood(TreeModel *mod, CovarData *data, Vector *branch
         MarkovMatrix *lsubst_mat = mod->P[n->lchild->id][rcat];
         MarkovMatrix *rsubst_mat = mod->P[n->rchild->id][rcat];
 
-        double maxP = 0;
-        for (i = 0; i < nstates; i++) {
-          double totl = 0, totr = 0;
-          for (j = 0; j < nstates; j++)
-            totl += pL[j][n->lchild->id] *
-              mm_get(lsubst_mat, i, j);
-          
-          for (k = 0; k < nstates; k++)
-            totr += pL[k][n->rchild->id] *
-              mm_get(rsubst_mat, i, k);
-
-          pL[i][n->id] = totl * totr;
-          if (maxP < pL[i][n->id])
-            maxP = pL[i][n->id];
-        }
+        /* set values in one or two passes, depending on whether
+           rescaling is needed */
         rescale = FALSE;
-        if (maxP > 0 && maxP < scaling_threshold)
-          rescale = TRUE;
- 
+        for (int pass = 0; pass == 0 || rescale; pass++) {
+          for (i = 0; i < nstates; i++) {
+            double totl = 0.0, totr = 0.0;
+            for (j = 0; j < nstates; j++)
+              totl += pL[j][n->lchild->id] *
+                mm_get(lsubst_mat, i, j);
+          
+            for (k = 0; k < nstates; k++)
+              totr += pL[k][n->rchild->id] *
+                mm_get(rsubst_mat, i, k);
+
+            if (pass == 0 && totl > 0.0 && totr > 0.0 &&
+                (totl < scaling_threshold || totr < scaling_threshold)) 
+              rescale = TRUE; /* will trigger second pass */
+            
+            if (pass == 1)  /* second pass: do rescaling */
+              pL[i][n->id] = (totl / scaling_threshold) * (totr / scaling_threshold); 
+            else
+              pL[i][n->id] = totl * totr;
+          }
+        }
+
         /* deal with nodewise scaling */
         vec_set(lscale, n->id, vec_get(lscale, n->lchild->id) +
                 vec_get(lscale, n->rchild->id));
-        if (rescale == TRUE) { /* have to rescale for all states */
-          vec_set(lscale, n->id, vec_get(lscale, n->id) + lscaling_threshold);
-          for (i = 0; i < nstates; i++) 
-            pL[i][n->id] /= scaling_threshold;
-        }
+        if (rescale == TRUE)  /* have to rescale for all states */
+          vec_set(lscale, n->id, vec_get(lscale, n->id) + 2 * lscaling_threshold);
+        
+        /* TEMPORARY: check nonzero */
+        double checksum = 0.0;
+        for (i = 0; i < nstates; i++)
+          checksum += pL[i][n->id];
+        assert(checksum > 0.0);
       }
     }
   
@@ -215,7 +224,9 @@ double nj_compute_log_likelihood(TreeModel *mod, CovarData *data, Vector *branch
     
     ll += (log(total_prob) + vec_get(lscale, mod->tree->id)) * vec_get(tuplecounts, tupleidx);
 
-    if (!isfinite(ll)) break; /* can happen with zero-length branches;
+    if (!isfinite(ll))
+      assert(0);
+      /* break; */ /* can happen with zero-length branches;
                                  make calling code deal with it */
 
     /* to compute gradients efficiently, need to make a second pass
@@ -237,33 +248,42 @@ double nj_compute_log_likelihood(TreeModel *mod, CovarData *data, Vector *branch
           MarkovMatrix *par_subst_mat = mod->P[n->id][rcat];
           MarkovMatrix *sib_subst_mat = mod->P[sibling->id][rcat];
 
-          double maxP = 0;
-          for (j = 0; j < nstates; j++) { /* parent state */
-            tmp[j] = 0;
-            for (k = 0; k < nstates; k++)  /* sibling state */
-              tmp[j] += pLbar[j][n->parent->id] *
-                pL[k][sibling->id] * mm_get(sib_subst_mat, j, k);
-          }
-          
-          for (i = 0; i < nstates; i++) { /* child state */
-            pLbar[i][n->id] = 0;
-            for (j = 0; j < nstates; j++) { /* parent state */
-              pLbar[i][n->id] +=
-                tmp[j] * mm_get(par_subst_mat, j, i);
-            }
-            if (maxP < pLbar[i][n->id])
-              maxP = pLbar[i][n->id];
-          }
           rescale = FALSE;
-          if (maxP > 0 && maxP < scaling_threshold)
-            rescale = TRUE;
+
+          /* set values in one or two passes, depending on whether rescaling is needed */
+          for (int pass = 0; pass == 0 || rescale; pass++) {
+    
+            for (j = 0; j < nstates; j++) { /* parent state */
+              tmp[j] = 0.0;
+              for (k = 0; k < nstates; k++) {  /* sibling state */
+                double a = pLbar[j][n->parent->id];
+                double b = pL[k][sibling->id];
+
+                if (pass == 0 && a > 0.0 && b > 0.0 &&
+                    (a < scaling_threshold || b < scaling_threshold))
+                  rescale = TRUE;
+
+                if (pass == 1)  /* safe: divide by t twice */
+                  tmp[j] += (a / scaling_threshold) * (b / scaling_threshold) *
+                    mm_get(sib_subst_mat, j, k);
+                else
+                  tmp[j] += a * b * mm_get(sib_subst_mat, j, k);
+              }
+            }
+          
+            for (i = 0; i < nstates; i++) { /* child state */
+              pLbar[i][n->id] = 0.0;
+              for (j = 0; j < nstates; j++) { /* parent state */
+                pLbar[i][n->id] +=
+                  tmp[j] * mm_get(par_subst_mat, j, i);
+              }
+            }
+          } /* end passes */
           
           vec_set(lscale_o, n->id, vec_get(lscale_o, n->parent->id) +
                   vec_get(lscale, sibling->id));
           if (rescale == TRUE) { /* rescale for all states */
-            vec_set(lscale_o, n->id, vec_get(lscale_o, n->id) + lscaling_threshold);
-            for (i = 0; i < nstates; i++)
-              pLbar[i][n->id] /= scaling_threshold;     
+            vec_set(lscale_o, n->id, vec_get(lscale_o, n->id) + 2*lscaling_threshold);
           }
         }
       }
