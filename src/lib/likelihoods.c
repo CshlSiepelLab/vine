@@ -55,7 +55,7 @@ double nj_compute_log_likelihood(TreeModel *mod, CovarData *data, Vector *branch
   List *traversal;
   double **pL = NULL, **pLbar = NULL;
   Vector *lscale, *lscale_o; /* inside and outside versions */
-  double scaling_threshold = sqrt(DBL_MIN) * 1.0e15;  /* need some padding */
+  double scaling_threshold = sqrt(DBL_MIN) * 1.0e10;  /* need some padding */
   double lscaling_threshold = log(scaling_threshold), ll = 0;
   double tmp[nstates];
   Matrix **grad_mat, **grad_mat_HKY;
@@ -209,13 +209,7 @@ double nj_compute_log_likelihood(TreeModel *mod, CovarData *data, Vector *branch
         vec_set(lscale, n->id, vec_get(lscale, n->lchild->id) +
                 vec_get(lscale, n->rchild->id));
         if (rescale == TRUE)  /* have to rescale for all states */
-          vec_set(lscale, n->id, vec_get(lscale, n->id) + 2 * lscaling_threshold);
-        
-        /* TEMPORARY: check nonzero */
-        /* double checksum = 0.0; */
-        /* for (i = 0; i < nstates; i++) */
-        /*   checksum += pL[i][n->id]; */
-        /* assert(checksum > 0.0); */
+          vec_set(lscale, n->id, vec_get(lscale, n->id) + 2 * lscaling_threshold);        
       }
     }
   
@@ -265,7 +259,7 @@ double nj_compute_log_likelihood(TreeModel *mod, CovarData *data, Vector *branch
                     (a < scaling_threshold || b < scaling_threshold))
                   rescale = TRUE;
 
-                if (pass == 1)  /* safe: divide by t twice */
+                if (pass == 1)  /* safe: divide by scaling_threshold twice */
                   tmp[j] += (a / scaling_threshold) * (b / scaling_threshold) *
                     mm_get(sib_subst_mat, j, k);
                 else
