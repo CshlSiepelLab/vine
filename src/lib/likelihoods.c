@@ -183,7 +183,7 @@ double nj_compute_log_likelihood(TreeModel *mod, CovarData *data, Vector *branch
         /* set values in one or two passes, depending on whether
            rescaling is needed */
         rescale = FALSE;
-        for (int pass = 0; pass == 0 || rescale; pass++) {
+        for (int pass = 0; pass < 2 && (pass == 0 || rescale); pass++) {
           for (i = 0; i < nstates; i++) {
             double totl = 0.0, totr = 0.0;
             for (j = 0; j < nstates; j++)
@@ -250,10 +250,10 @@ double nj_compute_log_likelihood(TreeModel *mod, CovarData *data, Vector *branch
           MarkovMatrix *par_subst_mat = mod->P[n->id][rcat];
           MarkovMatrix *sib_subst_mat = mod->P[sibling->id][rcat];
 
+          /* set values in one or two passes, depending on whether
+             rescaling is needed */
           rescale = FALSE;
-
-          /* set values in one or two passes, depending on whether rescaling is needed */
-          for (int pass = 0; pass == 0 || rescale; pass++) {
+          for (int pass = 0; pass < 2 && (pass == 0 || rescale); pass++) {
     
             for (j = 0; j < nstates; j++) { /* parent state */
               tmp[j] = 0.0;
