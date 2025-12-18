@@ -538,8 +538,6 @@ int main(int argc, char *argv[]) {
     msa_free(msa);
   if (crispr_muts != NULL)
     cpr_free_table(crispr_muts);
-  if (crispr_mod != NULL)
-    cpr_free_model(crispr_mod);
   if (mod != NULL)
     tm_free(mod);
   if (covar_data != NULL)
