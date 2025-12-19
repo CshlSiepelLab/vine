@@ -416,48 +416,87 @@ double cpr_compute_log_likelihood(CrisprMutModel *cprmod, Vector *branchgrad) {
           child_states = cpr_get_state_set(ancsets, n, nstates);
           sib_states = cpr_get_state_set(ancsets, sibling, nstates);
 
-          /* set values in one or two passes, depending on whether
-             rescaling is needed */
-          rescale = FALSE;
-          for (int pass = 0; pass < 2 && (pass == 0 || rescale); pass++) {
-            
-            for (j = 0; j < lst_size(par_states); j++) { /* parent state */
+          /* here rescaling is a bit different: we only need to
+             rescale the tiny factors from the parent and sibling
+             nodes, not all states at once */
+          int did_scale = 0;
+          for (j = 0; j < lst_size(par_states); j++) {        /* parent state */
+            pstate = lst_get_int(par_states, j);
+            tmp[pstate] = 0.0;
+
+            for (k = 0; k < lst_size(sib_states); k++) {      /* sibling state */
+              sstate = lst_get_int(sib_states, k);
+
+              double a = pLbar[pstate][n->parent->id];
+              double b = pL[sstate][sibling->id];
+
+              /* scale only the tiny factor(s) */
+              if (a > 0.0 && a < scaling_threshold) { a /= scaling_threshold; did_scale |= 1; }
+              if (b > 0.0 && b < scaling_threshold) { b /= scaling_threshold; did_scale |= 2; }
+
+              tmp[pstate] += a * b * mm_get(sib_subst_mat, pstate, sstate);
+            }
+          }
+
+          for (i = 0; i < lst_size(child_states); i++) {      /* child state */
+            cstate = lst_get_int(child_states, i);
+            pLbar[cstate][n->id] = 0.0;
+            for (j = 0; j < lst_size(par_states); j++) {      /* parent state */
               pstate = lst_get_int(par_states, j);
-              tmp[pstate] = 0.0;
-              for (k = 0; k < lst_size(sib_states); k++) { /* sibling state */
-                sstate = lst_get_int(sib_states, k);
-
-
-                double a = pLbar[pstate][n->parent->id];
-                double b = pL[sstate][sibling->id];
-
-                if (pass == 0 && a > 0.0 && b > 0.0 &&
-                    (a < scaling_threshold || b < scaling_threshold))
-                  rescale = TRUE;
-
-                if (pass == 1)  /* safe: divide by scaling_threshold twice */
-                  tmp[pstate] += (a / scaling_threshold) * (b / scaling_threshold) *
-                    mm_get(sib_subst_mat, pstate, sstate);
-                else
-                  tmp[pstate] += a * b * mm_get(sib_subst_mat, pstate, sstate);
-              }
+              pLbar[cstate][n->id] += tmp[pstate] * mm_get(par_subst_mat, pstate, cstate);
             }
+          }
+
+          /* bookkeeping for scaling */
+          vec_set(lscale_o, n->id,
+                  vec_get(lscale_o, n->parent->id) + vec_get(lscale, sibling->id));
+          if (did_scale) {
+            int nd = ((did_scale & 1) ? 1 : 0) + ((did_scale & 2) ? 1 : 0);
+            vec_set(lscale_o, n->id, vec_get(lscale_o, n->id) + nd * lscaling_threshold);
+          }
+
+          /* /\* set values in one or two passes, depending on whether */
+          /*    rescaling is needed *\/ */
+          /* rescale = FALSE; */
+          /* for (int pass = 0; pass < 2 && (pass == 0 || rescale); pass++) { */
+            
+          /*   for (j = 0; j < lst_size(par_states); j++) { /\* parent state *\/ */
+          /*     pstate = lst_get_int(par_states, j); */
+          /*     tmp[pstate] = 0.0; */
+          /*     for (k = 0; k < lst_size(sib_states); k++) { /\* sibling state *\/ */
+          /*       sstate = lst_get_int(sib_states, k); */
+
+
+          /*       double a = pLbar[pstate][n->parent->id]; */
+          /*       double b = pL[sstate][sibling->id]; */
+
+          /*       if (pass == 0 && a > 0.0 && b > 0.0 && */
+          /*           (a < scaling_threshold || b < scaling_threshold)) */
+          /*         rescale = TRUE; */
+
+          /*       if (pass == 1)  /\* safe: divide by scaling_threshold twice *\/ */
+          /*         tmp[pstate] += (a / scaling_threshold) * (b / scaling_threshold) * */
+          /*           mm_get(sib_subst_mat, pstate, sstate); */
+          /*       else */
+          /*         tmp[pstate] += a * b * mm_get(sib_subst_mat, pstate, sstate); */
+          /*     } */
+          /*   } */
           
-            for (i = 0; i < lst_size(child_states); i++) { /* child state */
-              cstate = lst_get_int(child_states, i);
-              pLbar[cstate][n->id] = 0;
-              for (j = 0; j < lst_size(par_states); j++) { /* parent state */
-                pstate = lst_get_int(par_states, j);
-                pLbar[cstate][n->id] +=
-                  tmp[pstate] * mm_get(par_subst_mat, pstate, cstate);
-              }
-            }
-          } /* end passes */
+          /*   for (i = 0; i < lst_size(child_states); i++) { /\* child state *\/ */
+          /*     cstate = lst_get_int(child_states, i); */
+          /*     pLbar[cstate][n->id] = 0; */
+          /*     for (j = 0; j < lst_size(par_states); j++) { /\* parent state *\/ */
+          /*       pstate = lst_get_int(par_states, j); */
+          /*       pLbar[cstate][n->id] += */
+          /*         tmp[pstate] * mm_get(par_subst_mat, pstate, cstate); */
+          /*     } */
+          /*   } */
+          /* } /\* end passes *\/ */
 
-          vec_set(lscale_o, n->id, vec_get(lscale_o, n->parent->id) +
-                  vec_get(lscale, sibling->id));
-          if (rescale == TRUE)  /* rescale for all states */
-            vec_set(lscale_o, n->id, vec_get(lscale_o, n->id) + 2*lscaling_threshold);
+          /* vec_set(lscale_o, n->id, vec_get(lscale_o, n->parent->id) + */
+          /*         vec_get(lscale, sibling->id)); */
+          /* if (rescale == TRUE)  /\* rescale for all states *\/ */
+          /*   vec_set(lscale_o, n->id, vec_get(lscale_o, n->id) + 2*lscaling_threshold); */
         }
       }
 
