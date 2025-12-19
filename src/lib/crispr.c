@@ -513,8 +513,11 @@ double cpr_compute_log_likelihood(CrisprMutModel *cprmod, Vector *branchgrad) {
             pstate = lst_get_int(par_states, i);
             for (j = 0; j < lst_size(child_states); j++) {
               cstate = lst_get_int(child_states, j);
-              deriv +=  tmp[pstate] * pLbar[pstate][par->id] * pL[cstate][n->id] *
-                mat_get(grad_mat, pstate, cstate);
+              assert(isfinite(tmp[pstate]) && isfinite(pLbar[pstate][par->id]) &&
+                     isfinite(pL[cstate][n->id]) &&
+                     isfinite(mat_get(grad_mat, pstate, cstate)));
+              deriv += tmp[pstate] * pLbar[pstate][par->id] *
+                       pL[cstate][n->id] * mat_get(grad_mat, pstate, cstate);
             }
           }
 
