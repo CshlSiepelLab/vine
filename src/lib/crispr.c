@@ -429,10 +429,10 @@ double cpr_compute_log_likelihood(CrisprMutModel *cprmod, Vector *branchgrad) {
                   rescale = TRUE;
 
                 if (pass == 1)  /* safe: divide by scaling_threshold twice */
-                  tmp[j] += (a / scaling_threshold) * (b / scaling_threshold) *
+                  tmp[pstate] += (a / scaling_threshold) * (b / scaling_threshold) *
                     mm_get(sib_subst_mat, pstate, sstate);
                 else
-                  tmp[j] += a * b * mm_get(sib_subst_mat, pstate, sstate);
+                  tmp[pstate] += a * b * mm_get(sib_subst_mat, pstate, sstate);
               }
             }
           
