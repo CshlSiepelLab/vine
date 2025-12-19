@@ -245,6 +245,13 @@ double cpr_compute_log_likelihood(CrisprMutModel *cprmod, Vector *branchgrad) {
         pL[i][nodeidx] = 0;
     }
 
+    /* same for pLbar if needed */
+    if (branchgrad != NULL) {
+      for (nodeidx = 0; nodeidx < cprmod->mod->tree->nnodes; nodeidx++) 
+        for (i = 0; i < nstates; i++)
+          pLbar[i][nodeidx] = 0.0;
+    }
+    
     /* also reset scale */
     vec_zero(lscale); vec_zero(lscale_o);
 
