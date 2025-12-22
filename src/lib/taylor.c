@@ -393,10 +393,10 @@ void tay_dx_from_dt(Vector *dL_dt, Vector *dL_dx, TreeModel *mod,
 
   /* Branch lengths → distances (reverse) */
 
-  if (tay_data->nb != NULL)
-    nj_dL_dD_from_neighbors(tay_data->nb, dL_dt, dL_dD);
-  else
+  if (data->ultrametric)
     upgma_dL_dD_from_tree(mod->tree, dL_dt, dL_dD);
+  else
+    nj_dL_dD_from_neighbors(tay_data->nb, dL_dt, dL_dD);
 
   /* Distances → embedding y  (reverse) */
 

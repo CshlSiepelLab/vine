@@ -184,7 +184,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
       if (data->type == LOWR) 
         nj_set_entropy_grad_LOWR(kldgrad, mmvn);
     }
-    
+
     /* can also pre-compute variance penalty */
     vec_zero(sparsitygrad);
     nj_compute_variance_penalty(sparsitygrad, mmvn, data);
@@ -243,7 +243,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
 
     if (data->subsample == TRUE)  /* rescale ll if subsampling */
       avell *= subsamp_rescale;
-
+    
     /* store parameters if best yet */
     elb = avell + ave_lprior - kld + penalty + avemigll;
     if (elb > bestelb && (sd->full_grad_now || data->crispr_mod != NULL)) {
@@ -288,13 +288,14 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
       vhatj = vec_get(v, j) / (1.0 - pow(ADAM_BETA2, t));
 
       /* update mu or sigma, depending on parameter index */
-      if (j < fulld)
-        mmvn_set_mu_el(mmvn, j, mmvn_get_mu_el(mmvn, j) +
-                               sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS)); 
-      else {
-        vec_set(sigmapar, j-fulld, vec_get(sigmapar, j-fulld) +
-                sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS));
-      }
+      if (j < fulld) 
+        mmvn_set_mu_el(mmvn, j,
+                       mmvn_get_mu_el(mmvn, j) +
+                           sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS));
+      else 
+        vec_set(sigmapar, j - fulld,
+                vec_get(sigmapar, j - fulld) +
+                    sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS));
     }
     nj_update_covariance(mmvn, data);
     
