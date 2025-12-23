@@ -333,3 +333,31 @@ void mmvn_set_mu_el(multi_MVN *mmvn, int i, double val) {
     vec_set(mmvn->mu[d], taxon, val);   
   }
 }
+
+/* compute "center" of multi MVN and store in c.  The center is
+   defined as a d-dimensional vector such that the ith element is
+   equal to the mean of the ith vector mu_i.  If mmvn is used to
+   represent the points in d-dimensional space, this point represents
+   their d-dimensional center of mass */
+void mmvn_get_center(Vector *c, multi_MVN *mmvn) {
+  int dim = c->size;
+
+  if (mmvn->type == MVN_GEN || mmvn->type == MVN_LOWR) {
+    assert(dim == mmvn->d);
+    for (int d = 0; d < mmvn->d; d++) {
+      double mean_d = vec_sum(mmvn->mu[d]) / mmvn->n;
+      vec_set(c, d, mean_d);
+    }
+  }
+  else { /* in this case have to pull out the coordinate axes separately */
+    int n = mmvn->n / dim;
+    assert(dim * n == mmvn->n);
+    for (int d = 0; d < dim; d++) {
+      double sum = 0.0;
+      for (int i = 0; i < n; i++)
+        sum += vec_get(mmvn->mvn->mu, i * dim + d);
+      double mean_d = sum / n;
+      vec_set(c, d, mean_d);
+    }
+  }
+}

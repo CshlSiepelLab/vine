@@ -49,7 +49,8 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
      variational distribution */
   int n_nuisance_params = nj_get_num_nuisance_params(mod, data);
   Vector *ave_nuis_grad = NULL, *m_nuis = NULL, *v_nuis = NULL,
-         *m_nuis_prev = NULL, *v_nuis_prev = NULL, *best_nuis_params = NULL;
+    *m_nuis_prev = NULL, *v_nuis_prev = NULL, *best_nuis_params = NULL,
+    *center = NULL;
   double lastelb = 0.0;
   
   if (mmvn->d * mmvn->n != dim * n)
@@ -78,6 +79,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
   mmvn_save_mu(mmvn, best_mu);
   best_sigmapar = vec_new(sigmapar->size);
   vec_copy(best_sigmapar, sigmapar);
+  center = vec_new(dim);
 
   /* set up log file */
   if (logf != NULL) {
@@ -103,6 +105,9 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
       fprintf(logf, "%s\t", nj_get_nuisance_param_name(mod, data, j));
 
     /* TEMPORARY */
+    fprintf(logf, "mu2\t");
+    for (j = 0; j < center->size; j++) 
+      fprintf(logf, "c%d\t", j);
     fprintf(logf, "dot\tcos\tdelta_elb");
     fprintf(logf, "\n");
   }
@@ -323,8 +328,11 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
       parnorm += diff * diff;
     }
     graddot += vec_get(avegrad, fulld) * (vec_get(sigmapar, 0) - old_sigmapar);
-    double gradcos = graddot / sqrt(gnorm * parnorm + 1e-20);      
-    
+    double gradcos = graddot / sqrt(gnorm * parnorm + 1e-20);
+    double mu2 = mmvn_mu2(mmvn);
+    mmvn_get_center(center, mmvn);
+
+
     /* same thing for nuisance params, if necessary */
     for (j = 0; j < n_nuisance_params; j++) {   
       double mhatj_nuis, vhatj_nuis, g = vec_get(ave_nuis_grad, j);
@@ -363,6 +371,9 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
         fprintf(logf, "%f\t", nj_nuis_param_get(mod, data, j));
 
       /* TEMPORARY: debugging info */
+      fprintf(logf, "%f\t", mu2);
+      for (j = 0; j < center->size; j++)
+        fprintf(logf, "%f\t", vec_get(center, j));
       fprintf(logf, "%f\t%f\t%f", graddot, gradcos, elb - lastelb);
       
       fprintf(logf, "\n");
@@ -406,6 +417,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
   vec_free(sparsitygrad); vec_free(m);
   vec_free(m_prev); vec_free(v); vec_free(v_prev); vec_free(best_mu); vec_free(best_sigmapar);
   sfree(s); sfree(st); sfree(sd); sfree(sm);
+  vec_free(center);
   
   if (n_nuisance_params > 0) {
     vec_free(ave_nuis_grad); vec_free(m_nuis); vec_free(v_nuis);

@@ -171,10 +171,7 @@ void cpr_renumber_states(CrisprMutTable *M) {
 #define CPR_PFLOOR 1.0e-300
 static inline double mm_get_floor(MarkovMatrix *M, int i, int j) {
   double p = mm_get(M, i, j);
-  return p + CPR_PFLOOR;
-  /* return (p == 0.0 ? CPR_PFLOOR : p); */  /* prohibit exact zeros;
-                                          everything else goes
-                                          through */
+  return p + CPR_PFLOOR; /* note derivative still same as orig */
 }
 
 /* Compute and return the log likelihood of a tree model with respect

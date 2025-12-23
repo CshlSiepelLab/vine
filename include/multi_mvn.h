@@ -72,4 +72,6 @@ double mmvn_get_mu_el(multi_MVN *mmvn, int i);
 
 void mmvn_set_mu_el(multi_MVN *mmvn, int i, double val);
 
+void mmvn_get_center(Vector *c, multi_MVN *mmvn);
+
 #endif
