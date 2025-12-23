@@ -171,7 +171,8 @@ void cpr_renumber_states(CrisprMutTable *M) {
 #define CPR_PFLOOR 1.0e-300
 static inline double mm_get_floor(MarkovMatrix *M, int i, int j) {
   double p = mm_get(M, i, j);
-  return (p == 0.0 ? CPR_PFLOOR : p);  /* prohibit exact zeros;
+  return p + CPR_PFLOOR;
+  /* return (p == 0.0 ? CPR_PFLOOR : p); */  /* prohibit exact zeros;
                                           everything else goes
                                           through */
 }
@@ -418,7 +419,7 @@ double cpr_compute_log_likelihood(CrisprMutModel *cprmod, Vector *branchgrad) {
       int rstate = lst_get_int(par_states, i);
       total_prob += root_eqfreqs[rstate] * pL[rstate][cprmod->mod->tree->id];
     }
-    if (total_prob == 0.0)
+    if (total_prob == 0.0) 
       total_prob = CPR_PFLOOR;
 
     ll += (log(total_prob) + vec_get(lscale, cprmod->mod->tree->id));
@@ -556,6 +557,17 @@ double cpr_compute_log_likelihood(CrisprMutModel *cprmod, Vector *branchgrad) {
           }
         }
 
+        /* adjust for all relevant scale terms; do everything in log space */
+        expon = -vec_get(lscale, cprmod->mod->tree->id)
+          + vec_get(lscale, sibling->id) + vec_get(lscale_o, par->id)
+          + vec_get(lscale, n->id) - log(base_prob);
+        /* note division by base_prob because we need deriv of log P */
+
+        /* avoid overflow */
+        if (expon > 700.0) expon = 700.0;
+        if (expon < -745.0)
+          expon = -745.0;
+          
         if (n != cprmod->mod->tree->rchild) { /* skip this for right branch from root because unrooted */
           /* calculate derivative analytically */
           deriv = 0;
@@ -571,40 +583,30 @@ double cpr_compute_log_likelihood(CrisprMutModel *cprmod, Vector *branchgrad) {
               deriv += tmp[pstate] * pLbar[pstate][par->id] *
                        pL[cstate][n->id] * mat_get(grad_mat, pstate, cstate);
             }
-          }
-
-          /* adjust for all relevant scale terms; do everything in log space */
-          expon = -vec_get(lscale, cprmod->mod->tree->id)
-            + vec_get(lscale, sibling->id) + vec_get(lscale_o, par->id)
-            + vec_get(lscale, n->id) - log(base_prob);
-          /* note division by base_prob because we need deriv of log P */
-
-          /* avoid overflow */
-          if (expon > 700.0) expon = 700.0;
-          if (expon < -745.0) expon = -745.0;
+          }       
           
           deriv *= exp(expon);
           assert(isfinite(deriv));
           vec_set(branchgrad, n->id, vec_get(branchgrad, n->id) + deriv);
-        }
         
-        /* now do the same for the derivative wrt the silent
-           rate; has to be aggregated across branches */
-        this_deriv_sil = 0;
-        cpr_silent_rate_grad(grad_mat, n->dparent, cprmod->sil_rate,
-                             lst_get_ptr(cprmod->sitewise_mutrates, site));
-        for (i = 0; i < lst_size(par_states); i++) {
-          pstate = lst_get_int(par_states, i);
-          for (j = 0; j < lst_size(child_states); j++) {
-            cstate = lst_get_int(child_states, j);
-            this_deriv_sil +=  tmp[pstate] * pLbar[pstate][par->id] * pL[cstate][n->id] *
-              mat_get(grad_mat, pstate, cstate);
+          /* now do the same for the derivative wrt the silent
+             rate; has to be aggregated across branches */
+          this_deriv_sil = 0;
+          cpr_silent_rate_grad(grad_mat, n->dparent, cprmod->sil_rate,
+                               lst_get_ptr(cprmod->sitewise_mutrates, site));
+          for (i = 0; i < lst_size(par_states); i++) {
+            pstate = lst_get_int(par_states, i);
+            for (j = 0; j < lst_size(child_states); j++) {
+              cstate = lst_get_int(child_states, j);
+              this_deriv_sil +=  tmp[pstate] * pLbar[pstate][par->id] * pL[cstate][n->id] *
+                mat_get(grad_mat, pstate, cstate);
+            }
           }
-        }
 
-        /* adjust for all relevant scale terms */
-        this_deriv_sil *= exp(expon);
-        cprmod->deriv_sil += this_deriv_sil;        
+          /* adjust for all relevant scale terms */
+          this_deriv_sil *= exp(expon);
+          cprmod->deriv_sil += this_deriv_sil;
+        } /* end skip right branch case */
       } /* end node loop */
 
       /* also compute gradient for leading branch */

@@ -48,9 +48,9 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
      by stochastic gradient descent but are not fully sampled via the
      variational distribution */
   int n_nuisance_params = nj_get_num_nuisance_params(mod, data);
-  Vector *ave_nuis_grad = NULL, *m_nuis = NULL,
-    *v_nuis = NULL, *m_nuis_prev = NULL, *v_nuis_prev = NULL,
-    *best_nuis_params = NULL;
+  Vector *ave_nuis_grad = NULL, *m_nuis = NULL, *v_nuis = NULL,
+         *m_nuis_prev = NULL, *v_nuis_prev = NULL, *best_nuis_params = NULL;
+  double lastelb = 0.0;
   
   if (mmvn->d * mmvn->n != dim * n)
     die("ERROR in nj_variational_inf: bad dimensions\n");
@@ -101,6 +101,9 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
       fprintf(logf, "sigma.%d\t", j);
     for (j = 0; j < n_nuisance_params; j++)
       fprintf(logf, "%s\t", nj_get_nuisance_param_name(mod, data, j));
+
+    /* TEMPORARY */
+    fprintf(logf, "dot\tcos\tdelta_elb");
     fprintf(logf, "\n");
   }
 
@@ -243,8 +246,9 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
 
     if (data->subsample == TRUE)  /* rescale ll if subsampling */
       avell *= subsamp_rescale;
-    
+
     /* store parameters if best yet */
+    lastelb = elb;
     elb = avell + ave_lprior - kld + penalty + avemigll;
     if (elb > bestelb && (sd->full_grad_now || data->crispr_mod != NULL)) {
       bestelb = elb;
@@ -279,6 +283,13 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
 
     /* Adam updates; see Kingma & Ba, arxiv 2014 */
     t++;
+    data->variational_iter = t; /* useful for debugging in other routines */
+
+    /* TEMPORARY: save previous parameters for debugging */
+    Vector *old_mu = vec_new(fulld);
+    mmvn_save_mu(mmvn, old_mu);
+    double old_sigmapar = vec_get(sigmapar, 0); /* assume only one for now */
+      
     for (j = 0; j < rescaledgrad->size; j++) {   
       double mhatj, vhatj, g = vec_get(rescaledgrad, j);
       
@@ -302,6 +313,18 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
     vec_copy(m_prev, m);
     vec_copy(v_prev, v);
 
+
+    /* TEMPORARY: debugging stats */
+    double graddot = 0.0, gnorm = 0.0, parnorm = 0.0;;
+    for (j = 0; j < fulld; j++) {
+      double diff = mmvn_get_mu_el(mmvn, j) - vec_get(old_mu, j);
+      graddot += diff * vec_get(avegrad, j);
+      gnorm += vec_get(avegrad, j) * vec_get(avegrad, j);
+      parnorm += diff * diff;
+    }
+    graddot += vec_get(avegrad, fulld) * (vec_get(sigmapar, 0) - old_sigmapar);
+    double gradcos = graddot / sqrt(gnorm * parnorm + 1e-20);      
+    
     /* same thing for nuisance params, if necessary */
     for (j = 0; j < n_nuisance_params; j++) {   
       double mhatj_nuis, vhatj_nuis, g = vec_get(ave_nuis_grad, j);
@@ -337,7 +360,11 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn,
       for (j = 0; j < sigmapar->size; j++)
         fprintf(logf, "%f\t", vec_get(sigmapar, j));
       for (j = 0; j < n_nuisance_params; j++)
-        fprintf(logf, "%f\t", nj_nuis_param_get(mod, data, j)); 
+        fprintf(logf, "%f\t", nj_nuis_param_get(mod, data, j));
+
+      /* TEMPORARY: debugging info */
+      fprintf(logf, "%f\t%f\t%f", graddot, gradcos, elb - lastelb);
+      
       fprintf(logf, "\n");
     }
     
@@ -415,31 +442,12 @@ double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
     points_std = vec_new(fulld);
   
   for (int i = 0; i < nminibatch; i++) {
-    int bail = 0;
     migll = 0;
+    vec_zero(grad);
 
-    do {
-      /* do this in a way that keeps track of the original standard
-         normal variable (points_std) for use in computing
-         gradients.  Also use antithetic sampling to reduce
-         variance */
-      nj_sample_points(mmvn, points, points_std);
-
-      vec_zero(grad);
-      ll = nj_compute_model_grad(mod, mmvn, points, points_std, grad, data, NULL, &migll);
-       
-      if (++bail > 10 && !isfinite(ll)) {
-        fprintf(stderr, "WARNING: repeatedly sampling zero-probability trees. Prohibiting zero-length branches.\n");
-        data->no_zero_br = TRUE;
-        assert(bail < 15); /* prohibit infinite loop */
-      }
-    } while (!isfinite(ll));  /* in certain cases under the
-                                 irreversible CRISPR model, trees
-                                 can have likelihoods of zero; we'll
-                                 try to just keep sampling if that
-                                 happens and if necessary constrain
-                                 the tree structure */
-
+    nj_sample_points(mmvn, points, points_std);
+    ll = nj_compute_model_grad(mod, mmvn, points, points_std, grad, data, NULL, &migll);
+    assert(isfinite(ll));
  
     avell += ll;
     (*avemigll) += migll;

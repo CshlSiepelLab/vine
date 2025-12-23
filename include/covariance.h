@@ -92,8 +92,9 @@ typedef struct cvdat {
   int tree_diam_leaf2;
   int *seq_to_node_map; /* mapping from sequence indices to leaf node
                            ids, used with leaf1 and leaf2 */
-  struct taylor_data *taylor;   /* auxiliary data for Taylor approximation to
-                                   ELBO (or NULL) */
+  struct taylor_data *taylor; /* auxiliary data for Taylor approximation to
+                                 ELBO (or NULL) */
+  int variational_iter; /* current iteration of variational inference */
 } CovarData;
 
 void nj_update_covariance(multi_MVN *mmvn, CovarData *data);

@@ -407,10 +407,6 @@ double nj_dL_dt_num(Vector *dL_dt, TreeModel *mod, CovarData *data) {
   else
     ll_base = nj_compute_log_likelihood(mod, data, NULL);
 
-  if (!isfinite(ll_base)) /* can happen with crispr; force calling
-                             code to deal with it */
-    return ll_base;
-  
   /* perturb each branch and recompute likelihood */
   traversal = mod->tree->nodes;
   assert(dL_dt->size == lst_size(traversal) - 1); 
@@ -445,7 +441,7 @@ double nj_dL_dt_num(Vector *dL_dt, TreeModel *mod, CovarData *data) {
    intended for validation of the analytical version */
 void nj_dt_dD_num(Matrix *dt_dD, Matrix *D, TreeModel *mod, CovarData *data) {
   TreeNode *tree, *orign, *node;
-  int i, j, n = data->msa->nseqs, nodeidx;
+  int i, j, n = data->nseqs, nodeidx;
   List *trav_tree, *trav_orig;
   
   /* perturb each pairwise distance and measure effect on each branch */
@@ -455,7 +451,7 @@ void nj_dt_dD_num(Matrix *dt_dD, Matrix *D, TreeModel *mod, CovarData *data) {
     for (j = i+1; j < n; j++) {
       double orig_d = mat_get(D, i, j);
       mat_set(D, i, j, orig_d + DERIV_EPS);
-      tree = nj_inf(D, data->msa->names, NULL, NULL, data);
+      tree = nj_inf(D, data->names, NULL, NULL, data);
 
       /* compare the trees, branch by branch */
       /* we will assume the same topology although that will
@@ -490,7 +486,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   int n = data->nseqs, nbranches = 2*n-2,  /* have to work with the rooted tree here */
     ndist = n * (n-1) / 2, ndim = data->nseqs * data->dim;
   Vector *dL_dt = vec_new(nbranches);
-  /* Matrix *dt_dD = mat_new(nbranches, ndist); */
+  /* Matrix *dt_dD = mat_new(nbranches, ndist);  */
   Vector *dL_dD = vec_new(ndist);
   Vector *dL_dy = vec_new(dL_dx->size);
   Vector *migbranchgrad = data->migtable != NULL ?
@@ -510,7 +506,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   
    /* set up baseline objects */
   nj_points_to_distances(y, data);
-  /* tree = nj_inf(data->dist, data->names, dt_dD, nb, data); */
+  /* tree = nj_inf(data->dist, data->names, dt_dD, nb, data);  */
   tree = nj_inf(data->dist, data->names, NULL, nb, data);
   nj_reset_tree_model(mod, tree);
 
@@ -531,14 +527,25 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   if (!isfinite(ll_base)) /* can happen with crispr; force calling
                              code to deal with it */
     return ll_base;
-  
+
   /* TEMPORARY: compare dL_dt to numerical version */
-  /* fprintf(stdout, "dL_dt (analytical):\n"); */
-  /* vec_print(dL_dt, stdout); */
-  /* nj_dL_dt_num(dL_dt, mod, data); */
-  /* fprintf(stdout, "dL_dt (numerical):\n"); */
-  /* vec_print(dL_dt, stdout); */
-  /* exit(0); */
+  /* if (data->variational_iter > 200) { */
+  /*   Vector *dL_dt_num = vec_new(dL_dt->size); */
+  /*   nj_dL_dt_num(dL_dt_num, mod, data); */
+  /*   int testdiff = FALSE; */
+  /*   for (i = 0; i < dL_dt->size; i++) { */
+  /*     double v1 = vec_get(dL_dt, i); */
+  /*     double v2 = vec_get(dL_dt_num, i); */
+  /*     if (fabs(v1 - v2)/max(fabs(v1), fabs(v2)) > 0.1) { */
+  /*       testdiff = TRUE; */
+  /*       fprintf(stderr, "Discrepancy in dL_dt at index %d: %f vs %f\n", */
+  /*               i, v1, v2); */
+  /*     } */
+  /*   } */
+  /*   if (!testdiff) */
+  /*     fprintf(stderr, "Iteration %d: dL_dt analytical and numerical match.\n", data->variational_iter); */
+  /*   vec_free(dL_dt_num); */
+  /* } */
 
   /* also get migration log likelihood if needed */
   if (data->migtable != NULL) {
@@ -551,9 +558,10 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
 
   /* for now, keep old and new versions of this calculation for
      cross-checking */
-  
+
   /* old version using mat_vec_mult */
-  /* mat_vec_mult_transp(dL_dD, dt_dD, dL_dt);  */
+  /* Vector *dL_dD_old = vec_new(ndist); */
+  /* mat_vec_mult_transp(dL_dD_old, dt_dD, dL_dt); */
   /* (note taking transpose of both vector and matrix and expressing
      result as column vector) */
 
@@ -563,6 +571,18 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   else /* UPGMA case can be done in post-processing */
     upgma_dL_dD_from_tree(mod->tree, dL_dt, dL_dD);
 
+  /* TEMPORARY: compare dL_dD to Jacobian version */
+  /* for (int idx = 0; idx < ndist; idx++) { */
+  /*   double v1 = vec_get(dL_dD, idx); */
+  /*   double v2 = vec_get(dL_dD_old, idx); */
+  /*   if (fabs(v1 - v2) > 1e-6) { */
+  /*     fprintf(stderr, "Discrepancy in dL_dD at index %d: %f vs %f\n", */
+  /*             idx, v1, v2); */
+  /*   } */
+  /* } */
+  /* mat_free(dt_dD); */
+  /* vec_free(dL_dD_old); */
+  
   /* save info for Taylor approximation if needed */
   if (data->taylor != NULL) {
     vec_copy(data->taylor->y, y);
