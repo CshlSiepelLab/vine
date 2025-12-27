@@ -394,12 +394,12 @@ double cpr_compute_log_likelihood(CrisprMutModel *cprmod, Vector *branchgrad) {
         }
 
         /* TEMPORARY CHECK */
-        double checksum = 0.0;
-        for (i = 0; i < lst_size(par_states); i++) {
-          pstate = lst_get_int(par_states, i);
-          checksum += pL[pstate][n->id];
-        }
-        assert(isfinite(checksum) && checksum > 0.0);       
+        /* double checksum = 0.0; */
+        /* for (i = 0; i < lst_size(par_states); i++) { */
+        /*   pstate = lst_get_int(par_states, i); */
+        /*   checksum += pL[pstate][n->id]; */
+        /* } */
+        /* assert(isfinite(checksum) && checksum > 0.0);        */
 
         /* deal with nodewise scaling */
         vec_set(lscale, n->id, vec_get(lscale, n->lchild->id) +

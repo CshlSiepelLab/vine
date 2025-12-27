@@ -3,22 +3,31 @@
 # List your library sources here (mirror what your Makefile uses)
 add_library(vine_core STATIC
     adam_scheduler.c
-    multiDAG.c
-    sparse_matrix.c
+    backprop.c
     bitset.c
-    mvn.c
-    sparse_vector.c
+    covariance.c
     crispr.c
-    nj.c
-    tree_prior.c
+    geometry.c
+    gradients.c
     heap.c
-    planar_flow.c
-    upgma.c
+    hutchinson.c
+    likelihoods.c
     migration.c
-    radial_flow.c
-    var_resampling.c
     multi_mvn.c
+    multiDAG.c
+    mvn.c
+    nj.c
+    nuisance.c
+    planar_flow.c
+    radial_flow.c
     rf.c
+    sparse_matrix.c
+    sparse_vector.c
+    taylor.c
+    tree_prior.c
+    upgma.c
+    var_resampling.c
+    variational.c
 )
 
 set_target_properties(vine_core PROPERTIES
