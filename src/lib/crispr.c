@@ -1063,6 +1063,11 @@ void cpr_prep_model(CrisprMutModel *cprmod) {
   else {
     /* no need to alter the mutation table in this case; just build
        global eq freqs */
+    /* however, we do need a dummy sitewise_nstates array */
+    cprmod->mut->sitewise_nstates = smalloc(cprmod->nsites * sizeof(int));
+    for (j = 0; j < cprmod->nsites; j++)
+      cprmod->mut->sitewise_nstates[j] = cprmod->nstates;
+    
     cprmod->mutrates = cpr_estim_mutrates(cprmod->mut,
                                           cprmod->mutrates_type);
 
