@@ -507,7 +507,7 @@ int main(int argc, char *argv[]) {
           mig_sample_states(t, migtable, crispr_mod, states);
           lst_push_ptr(migstates_lst, states); /* mark end of sample */
         }
-        tr_free(t);
+        /* tr_free(t); */  /* can't do this if migration graph */
       }
 
       /* output sampled cell states if needed */
