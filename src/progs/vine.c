@@ -707,7 +707,7 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Sampling cell states...\n");
 
           if (migstates_lst == NULL) migstates_lst = lst_new_ptr(nsamples);
-          List *states = lst_new_ptr(t->nnodes);
+          List *states = lst_new_ptr(t->nnodes + 1); /* +1 for the origin node state */
           mig_sample_states(t, migtable, crispr_mod, states);
           lst_push_ptr(migstates_lst, states); /* mark end of sample */
         }

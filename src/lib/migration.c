@@ -625,14 +625,13 @@ void mig_sample_states(TreeNode *tree, MigTable *mg,
   double **pL = NULL;
   double scaling_threshold = sqrt(DBL_MIN) * 1.0e10;  /* need some padding */
   double lscaling_threshold = log(scaling_threshold);
-  double root_eqfreqs[nstates];
   MarkovMatrix *par_subst_mat, *leading_Pt, *lsubst_mat, *rsubst_mat; ;
   Vector *lscale; /* inside and outside versions */
   unsigned int rescale;
 
   /* initialize state_samples */
   lst_clear(state_samples);
-  for (i = 0; i < tree->nnodes; i++)
+  for (i = 0; i < tree->nnodes + 1; i++)
     lst_push_int(state_samples, -1);
   
   /* set up "inside" probability matrices */
@@ -651,26 +650,8 @@ void mig_sample_states(TreeNode *tree, MigTable *mg,
     cpr_build_seq_idx(cprmod->mod, cprmod->mut);
 
   traversal = tr_postorder(tree);
-    
-  /* this model allows a leading branch to the root of the tree but
-     forces the unedited state at the start of that branch.  We can
-     simulate this behavior by setting the root eq freqs equal to
-     the conditional distribution at the end of the branch given the
-     unedited state at the start */
-  leading_Pt = lst_get_ptr(mg->Pt, tree->id);
 
-  if (mg->primary_state != -1) { /* force primary state at root */
-    for (i = 0; i < nstates; i++)
-      root_eqfreqs[i] = mm_get_floor(leading_Pt, mg->primary_state, i);
-  }
-  else { /* sum over root states */
-    for (i = 0; i < nstates; i++) { /* pseudo root */
-      root_eqfreqs[i] = 0;
-      for (j = 0; j < nstates; j++) /* actual root */
-        root_eqfreqs[i] += vec_get(mg->backgd_freqs, j) *
-          mm_get_floor(leading_Pt, j, i);
-    }
-  }
+  leading_Pt = lst_get_ptr(mg->Pt, tree->id);
 
   for (nodeidx = 0; nodeidx < lst_size(traversal); nodeidx++) {
     n = lst_get_ptr(traversal, nodeidx);
@@ -740,10 +721,40 @@ void mig_sample_states(TreeNode *tree, MigTable *mg,
     n = lst_get_ptr(pre_trav, nodeidx);
 
     if (n->parent == NULL) { /* base case */
-      for (i = 0; i < nstates; i++)
-        sampdens[i] = root_eqfreqs[i] * pL[i][n->id];
-      state = mig_sample_state(sampdens, nstates);
-      lst_set_int(state_samples, n->id, state);
+        int sampled_primary_state;
+        int origin_idx = tree->nnodes;
+
+        if (mg->primary_state != -1) {
+            /* Use the forced primary state at the origin node */
+            sampled_primary_state = mg->primary_state;  
+        }
+        else {
+            double *startdens = smalloc(nstates * sizeof(double));
+
+            /* Sample the origin state from its posterior given the subtree data */
+            for (j = 0; j < nstates; j++) {
+                startdens[j] = 0.0;
+                for (i = 0; i < nstates; i++) {
+                    startdens[j] += vec_get(mg->backgd_freqs, j) *
+                                    mm_get_floor(leading_Pt, j, i) *
+                                    pL[i][n->id];
+                }
+            }
+
+            sampled_primary_state = mig_sample_state(startdens, nstates);
+            sfree(startdens);
+        }
+
+        lst_set_int(state_samples, origin_idx, sampled_primary_state);
+
+        /* Sample the root state from its posterior given the origin state
+          and the subtree data (via inside likelihood pL) */
+        for (i = 0; i < nstates; i++)
+            sampdens[i] = mm_get_floor(leading_Pt, sampled_primary_state, i) *
+                          pL[i][n->id];
+
+        state = mig_sample_state(sampdens, nstates);
+        lst_set_int(state_samples, n->id, state);
     }
     else if (n->lchild == NULL)  /* leaf: already handled */
       continue;
@@ -768,7 +779,11 @@ void mig_sample_states(TreeNode *tree, MigTable *mg,
 }
 
 /* based on a tree and list of states at all nodes, obtain a
-   multigraph representing migration events and their times */
+   multigraph representing migration events and their times.
+   
+   TODO: Record the origin branch height in the times and the
+   state transition if the origin state != root state.
+   */
 struct mdag *mig_get_graph(TreeNode *tree, MigTable *mg, List *state_samples) {
   MultiDAG *g = mdag_new(mg);
 
@@ -892,7 +907,10 @@ void mig_print_labeled_nexus(TreeNode *tree, FILE *outf, MigTable *mg,
 
 /* Print a NEXUS file with a single header and multiple TREE lines,
    where each node in each tree is labeled with its sampled state using
-   BEAST-style notation embedded in the node labels. */
+   BEAST-style notation embedded in the node labels. 
+   
+   TODO: Print the origin node state, but unsure how this works with 
+   standard NEXUS format */
 void mig_print_set_labeled_nexus(List *tree_lst, FILE *outf, MigTable *mg,
                                  List *statesamps_lst) {
   assert(lst_size(tree_lst) == lst_size(statesamps_lst));
@@ -1015,6 +1033,7 @@ void mig_print_set_edgewise_csv(List *tree_lst, FILE *outf, MigTable *mg,
   for (i = 0; i < ntrees; i++) {
     TreeNode *tree = lst_get_ptr(tree_lst, i);  /* Get the root of the i-th tree */
     List *state_samples = (List*)lst_get_ptr(statesamps_lst, i);  /* Get the list of states (tissues) for the i-th tree */
+    int origin_idx = tree->nnodes;
     int *pair_event_idx = smalloc(mg->nstates * mg->nstates * sizeof(int)); /* Initialize array to track event indices */
 
     /* Initialize event indices to zero */
@@ -1024,16 +1043,21 @@ void mig_print_set_edgewise_csv(List *tree_lst, FILE *outf, MigTable *mg,
     /* Iterate over all nodes in the tree */
     for (j = 0; j < tree->nnodes; j++) {
       TreeNode *n = lst_get_ptr(tree->nodes, j);
+      int parstate;
+      int childstate;
 
-      /* TODO: This check currently skips the origin branch, so we need to make it 
-      handle the known origin as the primary tissue in case there is a migration 
-      event on the origin branch to record in the consensus. */
-      if (n->parent == NULL)
-        continue;
+      /* Get the parent state (tissue) for the branch */
+      if (n->parent == NULL) {
+        /* Get the sampled state for the origin node on the leading branch */
+        parstate = lst_get_int(state_samples, origin_idx);
+      } 
+      else {
+        /* Get the sampled state for all other branches */
+        parstate = lst_get_int(state_samples, n->parent->id);
+      }
 
-      /* Get the states (tissues) for the branch */
-      int childstate = lst_get_int(state_samples, n->id);
-      int parstate = lst_get_int(state_samples, n->parent->id);
+      /* Get the sampled child state (tissue) for the branch */
+      childstate = lst_get_int(state_samples, n->id);
 
       /* Skip self migrations (same tissue) */
       if (childstate == parstate)
