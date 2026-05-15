@@ -1,4 +1,4 @@
-char HELP[15320] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
+char HELP[15462] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
 \n\
 USAGE: vine [OPTIONS] alignment.fa > trees.nwk\n\
 \n\
@@ -83,6 +83,10 @@ MAIN OPTIONS:\n\
 \n\
     --nsamples, -s <S>\n\
         Number of samples to output (default 100) after convergence.\n\
+\n\
+    --seed, -q <seed>\n\
+        Set the random number generator seed.  The default is -1, which\n\
+        selects a time-based seed.\n\
 \n\
     --nj-only, -0\n\
         Simply estimate and output a single tree using the neighbor-joining\n\

@@ -17,14 +17,6 @@
 #include <phast/tree_model.h>
 #include <covariance.h>
 
-/* for use with min-heap in fast nj algorithm */
-typedef struct NJHeapData {
-  double val;
-  int i, j; 
-  int rev_i, rev_j; // for lazy validation
-} NJHeapNode;
-
-
 /* these structs are used to record the choices of neighbors during
    a forward pass of the algorithm, to facilitate backpropagation
    afterward */
@@ -59,9 +51,6 @@ TreeNode *nj_infer_tree(Matrix *initD, char **names, Matrix *dt_dD,
 
 TreeNode *nj_fast_infer(Matrix *initD, char **names, Matrix *dt_dD,
                         Neighbors *nb);
-
-NJHeapNode* nj_heap_computeQ(int i, int j, int n, Matrix *D,
-                             Vector *sums, int *rev);
 
 double nj_compute_JC_dist(MSA *msa, int i, int j);
 

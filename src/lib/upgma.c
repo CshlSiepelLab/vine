@@ -17,7 +17,6 @@
 #include <phast/misc.h>
 #include <upgma.h>
 #include <backprop.h>
-#include <heap.h>
 
 void upgma_find_min(Matrix *D, Vector *active, int *u, int *v) {
   int i, j, n = D->nrows;
@@ -227,12 +226,90 @@ void upgma_set_dt_dD(TreeNode *tree, Matrix* dt_dD) {
   mat_free(H);
 }
 
-UPGMAHeapNode* upgma_heap_node(int i, int j, Matrix *D) {
-  UPGMAHeapNode *hn = malloc(sizeof(UPGMAHeapNode));
-  hn->i = i;
-  hn->j = j;
-  hn->val = (i < j) ? mat_get(D, i, j) : mat_get(D, j, i);
-  return hn;
+static double upgma_get_pair_dist(Matrix *D, int i, int j) {
+  return i < j ? mat_get(D, i, j) : mat_get(D, j, i);
+}
+
+static int upgma_pair_less(double d, int i, int j, double best_d,
+                           int best_i, int best_j) {
+  int tmp;
+
+  if (i > j) {
+    tmp = i;
+    i = j;
+    j = tmp;
+  }
+  if (best_i > best_j) {
+    tmp = best_i;
+    best_i = best_j;
+    best_j = tmp;
+  }
+
+  if (d < best_d)
+    return TRUE;
+  if (d > best_d)
+    return FALSE;
+  if (i < best_i)
+    return TRUE;
+  if (i > best_i)
+    return FALSE;
+  return j < best_j;
+}
+
+static void upgma_refresh_nearest(Matrix *D, Vector *active, int max_node,
+                                  int i, int *nearest,
+                                  double *nearest_dist) {
+  int j;
+
+  nearest[i] = -1;
+  nearest_dist[i] = INFINITY;
+
+  if (vec_get(active, i) == FALSE)
+    return;
+
+  for (j = 0; j <= max_node; j++) {
+    double d;
+    if (j == i || vec_get(active, j) == FALSE)
+      continue;
+
+    d = upgma_get_pair_dist(D, i, j);
+    if (nearest[i] < 0 ||
+        upgma_pair_less(d, i, j, nearest_dist[i], i, nearest[i])) {
+      nearest[i] = j;
+      nearest_dist[i] = d;
+    }
+  }
+}
+
+static void upgma_find_cached_min(Vector *active, int max_node,
+                                  int *nearest, double *nearest_dist,
+                                  int *u, int *v) {
+  int i;
+  double best = INFINITY;
+
+  *u = *v = -1;
+
+  for (i = 0; i <= max_node; i++) {
+    if (vec_get(active, i) == FALSE || nearest[i] < 0 ||
+        vec_get(active, nearest[i]) == FALSE)
+      continue;
+
+    if (*u < 0 || upgma_pair_less(nearest_dist[i], i, nearest[i],
+                                  best, *u, *v)) {
+      *u = i;
+      *v = nearest[i];
+      best = nearest_dist[i];
+    }
+  }
+
+  if (*u < 0 || *v < 0)
+    die("ERROR upgma_find_cached_min: fewer than two active taxa\n");
+
+  if (*u > *v) {
+    int tmp = *u;
+    *u = *v;
+    *v = tmp;
+  }
 }
 
 TreeNode* upgma_fast_infer(Matrix *initD, char **names, Matrix *dt_dD) {
@@ -243,8 +320,8 @@ TreeNode* upgma_fast_infer(Matrix *initD, char **names, Matrix *dt_dD) {
   Vector *active, *sizes, *heights;
   List *nodes;
   TreeNode *node_u, *node_v, *node_w, *root;
-  HeapNode *heap = NULL;
-  UPGMAHeapNode *hn, *newhn;
+  int *nearest;
+  double *nearest_dist;
   double hw;
 
   if (initD->nrows != initD->ncols || n < 2)
@@ -255,6 +332,8 @@ TreeNode* upgma_fast_infer(Matrix *initD, char **names, Matrix *dt_dD) {
   sizes = vec_new(N); vec_zero(sizes);
   heights = vec_new(N+1);
   nodes = lst_new_ptr(N);
+  nearest = smalloc(N * sizeof(int));
+  nearest_dist = smalloc(N * sizeof(double));
   vec_zero(heights);
   tr_reset_id();
 
@@ -269,23 +348,16 @@ TreeNode* upgma_fast_infer(Matrix *initD, char **names, Matrix *dt_dD) {
     for (j = i+1; j < n; j++) {
       double d = mat_get(initD, i, j);
       mat_set(D, i, j, d);
-      hn = upgma_heap_node(i, j, D);
-      heap = hp_insert(heap, hn->val, hn);
     }
   }
+
+  for (i = 0; i < n; i++)
+    upgma_refresh_nearest(D, active, n-1, i, nearest, nearest_dist);
   
   /* main loop, over internal nodes w */
   for (w = n; w < N; w++) {
-    /* Extract minimum from heap */
-    while (TRUE) {
-      heap = hp_delete_min(heap, (void**)&hn);
-      if (vec_get(active, hn->i) == TRUE && vec_get(active, hn->j) == TRUE) break;
-      free(hn);
-    }
-
     /* join u and v; w is the new node */
-    u = hn->i;
-    v = hn->j;
+    upgma_find_cached_min(active, w-1, nearest, nearest_dist, &u, &v);
     upgma_updateD(D, u, v, w, active, sizes, heights);
     node_w = tr_new_node();
     lst_push_ptr(nodes, node_w);
@@ -303,15 +375,20 @@ TreeNode* upgma_fast_infer(Matrix *initD, char **names, Matrix *dt_dD) {
     vec_set(active, v, FALSE);
     vec_set(active, w, TRUE);
 
-    /* Insert new distances into heap */
+    upgma_refresh_nearest(D, active, w, w, nearest, nearest_dist);
     for (i = 0; i < w; i++) {
       if (vec_get(active, i)) {
-        newhn = upgma_heap_node(i, w, D);
-        heap = hp_insert(heap, newhn->val, newhn);
+        double dnew = mat_get(D, i, w);
+        if (nearest[i] == u || nearest[i] == v || nearest[i] < 0 ||
+            vec_get(active, nearest[i]) == FALSE) {
+          upgma_refresh_nearest(D, active, w, i, nearest, nearest_dist);
+        }
+        else if (upgma_pair_less(dnew, i, w, nearest_dist[i], i, nearest[i])) {
+          nearest[i] = w;
+          nearest_dist[i] = dnew;
+        }
       }
     }
-
-    free(hn);
   }
 
   /* Final join */
@@ -347,13 +424,8 @@ TreeNode* upgma_fast_infer(Matrix *initD, char **names, Matrix *dt_dD) {
   if (dt_dD != NULL)
     upgma_set_dt_dD(root, dt_dD);  // Postprocess
 
-  /* drain heap so each UPGMAHeapNode is freed */
-  while (heap != NULL) {
-    heap = hp_delete_min(heap, (void **)&hn);
-    free(hn);
-  }
-  
-  hp_free(heap);
+  sfree(nearest);
+  sfree(nearest_dist);
   lst_free(nodes);
   vec_free(active);
   vec_free(sizes);

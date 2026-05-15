@@ -85,7 +85,7 @@ int main(int argc, char *argv[]) {
                   batchsize = DEFAULT_BATCHSIZE,
                   niter_conv = DEFAULT_NITER_CONV, min_iter = DEFAULT_MIN_ITER,
                   rank = DEFAULT_RANK, nthreads = 1, dgamma_cats = 1,
-                  mcmc_thin = DEFAULT_MCMC_THIN;
+                  mcmc_thin = DEFAULT_MCMC_THIN, seed = -1;
   unsigned int nj_only = FALSE, random_start = FALSE, hyperbolic = FALSE,
                dist_embedding = FALSE, mcmc = FALSE,
                natural_grad = FALSE, is_crispr = FALSE,
@@ -146,6 +146,7 @@ int main(int argc, char *argv[]) {
     {"labeled-trees", 1, 0, 'B'},
     {"consensus-graph", 1, 0, 'E'},
     {"nsamples", 1, 0, 's'},
+    {"seed", 1, 0, 'q'},
     {"learnrate", 1, 0, 'r'},
     {"random-start", 0, 0, 'R'},
     {"var-reg", 1, 0, 'v'},
@@ -174,7 +175,7 @@ int main(int argc, char *argv[]) {
     {0, 0, 0, 0}
   };
 
-  while ((c = getopt_long(argc, argv, "0:1:ab:B:c:d:D:E:egG:hHi:FZj:JkK:l:L:m:M:n:No:v:r:Rt:T:Vw:W:S:s:CY:yPp:Xx", long_opts, &opt_idx)) != -1) {
+  while ((c = getopt_long(argc, argv, "0:1:ab:B:c:d:D:E:egG:hHi:FZj:JkK:l:L:m:M:n:No:q:v:r:Rt:T:Vw:W:S:s:CY:yPp:Xx", long_opts, &opt_idx)) != -1) {
     switch (c) {
     case 'b':
       batchsize = atoi(optarg);
@@ -286,6 +287,9 @@ int main(int argc, char *argv[]) {
     case 'O':
       graphsfile = phast_fopen(optarg, "w");
       break;
+    case 'q':
+      seed = atoi(optarg);
+      break;
     case 'v':
       var_reg = atof(optarg);
       if (var_reg < 0)
@@ -382,6 +386,8 @@ int main(int argc, char *argv[]) {
 
   if (init_tree != NULL && indistfile != NULL)
     die("Cannot specify both --tree/-treemod and --distances\n");
+
+  set_seed(seed);
 
   if (hyperbolic == TRUE && (radial_flow == TRUE || planar_flow == TRUE))
     die("Cannot use --radial-flow or --planar-flow with --hyperbolic.\n");

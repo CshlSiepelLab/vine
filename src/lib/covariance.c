@@ -30,15 +30,14 @@ void nj_update_covariance(multi_MVN *mmvn, CovarData *data) {
   
   /* Note: variance parameters now stored as log values and must
      be exponentiated */
-  mat_zero(mmvn->mvn->sigma);
   if (data->type == CONST) {
-    mat_set_identity(mmvn->mvn->sigma);
     data->lambda = exp(vec_get(sigma_params, 0));
     if (!isfinite(data->lambda) || data->lambda < VARFLOOR) {
       data->lambda = VARFLOOR;
       vec_set(sigma_params, 0, log(VARFLOOR)); /* keeps param from running away */
     }
-    mat_scale(mmvn->mvn->sigma, data->lambda);
+    for (i = 0; i < mmvn->mvn->sigma->nrows; i++)
+      mat_set(mmvn->mvn->sigma, i, i, data->lambda);
   }
   else if (data->type == DIAG) {
     for (i = 0; i < sigma_params->size; i++) {
@@ -94,8 +93,6 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
                              unsigned int radial_flow, unsigned int planar_flow,
                              TreePrior *treeprior, MigTable *mtable,
                              unsigned int use_taylor) {
-  static int seeded = 0;
-  
   CovarData *retval = smalloc(sizeof(CovarData));
   retval->type = covar_param;
   retval->msa = msa;
@@ -175,10 +172,6 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
     /* initialization is tricky; we want variances on the order of
        0.01 and expected covariances of 0 but we want to avoid
        orthogonality; initialize randomly with appropriate distrib */
-    if (!seeded) {
-      srandom((unsigned int)time(NULL));
-      seeded = 1;
-    }
     sdev = sqrt((double)LAMBDA_INIT / retval->lowrank); /* yields expected variance
                                                    of LAMBDA_INIT and expected
                                                    covariances of 0 */

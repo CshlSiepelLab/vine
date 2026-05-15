@@ -9,7 +9,6 @@ add_library(vine_core STATIC
     crispr.c
     geometry.c
     gradients.c
-    heap.c
     hutchinson.c
     likelihoods.c
     migration.c
@@ -37,7 +36,9 @@ set_target_properties(vine_core PROPERTIES
 )
 
 target_compile_options(vine_core PUBLIC
-    -g -fno-inline -Wall -fno-strict-aliasing
+    -Wall 
+    -fno-strict-aliasing
+    $<$<CONFIG:Debug>:-g -fno-inline>
 )
 
 target_include_directories(vine_core

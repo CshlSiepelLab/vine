@@ -84,6 +84,10 @@ MAIN OPTIONS:
     --nsamples, -s <S>
         Number of samples to output (default 100) after convergence.
 
+    --seed, -q <seed>
+        Set the random number generator seed.  The default is -1, which
+        selects a time-based seed.
+
     --nj-only, -0
         Simply estimate and output a single tree using the neighbor-joining
         algorithm; do not follow with variational inference. If

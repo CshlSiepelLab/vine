@@ -17,6 +17,7 @@
 #include <assert.h>
 #include <float.h>
 #include <phast/vector.h>
+#include <phast/misc.h>
 #include <mvn.h>
 #include <hutchinson.h>
 
@@ -61,7 +62,7 @@ double hutch_tr(HVP_fun   Hfun,
 }
 
 static inline double rademacher(void) {
-  return (rand() >= RAND_MAX / 2) ? 1.0 : -1.0;
+  return (unif_rand() >= 0.5) ? 1.0 : -1.0;
 }
 
 /* soft clipping function for below */
