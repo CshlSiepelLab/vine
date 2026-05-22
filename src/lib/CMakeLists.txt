@@ -43,7 +43,8 @@ target_compile_options(vine_core PUBLIC
 
 target_include_directories(vine_core
     PUBLIC
-        "${VINE_INCLUDE_DIR}"     
+        "$<BUILD_INTERFACE:${VINE_INCLUDE_DIR}>"
+        "$<INSTALL_INTERFACE:include>"
 )
 
 target_link_libraries(vine_core
@@ -56,8 +57,11 @@ if(OpenMP_C_FOUND)
   target_compile_definitions(vine_core PUBLIC VINE_HAS_OPENMP)
 endif()
 
-# Install the library
+# Install the library and tag it for the exported CMake package so that
+# downstream projects (e.g. EMBARG) can consume it via find_package(vine CONFIG).
 install(TARGETS vine_core
+  EXPORT vineTargets
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
+  INCLUDES DESTINATION include
 )

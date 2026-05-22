@@ -1,0 +1,21 @@
+@PACKAGE_INIT@
+
+# vine's public library target links phast (and optionally OpenMP) as PUBLIC
+# dependencies, so consumers must be able to resolve them transitively.
+include(CMakeFindDependencyMacro)
+
+# Allow the consumer to point at the phast prefix the same way vine itself does.
+if(PHAST_ROOT)
+  list(PREPEND CMAKE_PREFIX_PATH "${PHAST_ROOT}")
+endif()
+find_dependency(phast CONFIG)
+
+# Only require OpenMP if vine was built against it (the exported target
+# references OpenMP::OpenMP_C only in that case).
+if(@VINE_BUILT_WITH_OPENMP@)
+  find_dependency(OpenMP)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/vineTargets.cmake")
+
+check_required_components(vine)

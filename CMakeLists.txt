@@ -40,3 +40,37 @@ install(DIRECTORY "${VINE_INCLUDE_DIR}/"
         DESTINATION include
         FILES_MATCHING PATTERN "*.h")
 
+# ---- Exported CMake package (so downstream projects can find_package(vine)) ---
+include(CMakePackageConfigHelpers)
+
+# Record whether vine_core ended up linking OpenMP, for the generated config.
+# OpenMP is detected inside src/lib (a subdirectory), so its result variables
+# are not visible in this scope; re-run the (cached, idempotent) detection here
+# to learn whether the exported vine::vine_core target references OpenMP.
+find_package(OpenMP)
+if(OpenMP_C_FOUND)
+  set(VINE_BUILT_WITH_OPENMP TRUE)
+else()
+  set(VINE_BUILT_WITH_OPENMP FALSE)
+endif()
+
+install(EXPORT vineTargets
+        FILE vineTargets.cmake
+        NAMESPACE vine::
+        DESTINATION lib/cmake/vine)
+
+configure_package_config_file(
+  "${CMAKE_SOURCE_DIR}/cmake/vineConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/vineConfig.cmake"
+  INSTALL_DESTINATION lib/cmake/vine)
+
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/vineConfigVersion.cmake"
+  VERSION "${PROJECT_VERSION}"
+  COMPATIBILITY SameMajorVersion)
+
+install(FILES
+  "${CMAKE_CURRENT_BINARY_DIR}/vineConfig.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/vineConfigVersion.cmake"
+  DESTINATION lib/cmake/vine)
+
