@@ -351,14 +351,22 @@ TreeNode* nj_fast_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *n
     }
   }
 
-  /* set up backprop data */
+  /* set up backprop data.  The Jk/Jnext sparse-matrix scratch is
+     cached across calls to avoid per-iteration spmat_new/free, but
+     when the problem size changes (multi-MSA process, mixture model
+     with per-component taxon count, etc.) the cached matrix has the
+     wrong dimensions and the old assert would just abort.  Detect a
+     size change and rebuild instead. */
   if (dt_dD != NULL) {
-    if (Jk == NULL) { /* first call */
+    if (Jk != NULL && (Jk->nrows != Npairs || Jk->ncols != npairs)) {
+      spmat_free(Jk);
+      spmat_free(Jnext);
+      Jk = Jnext = NULL;
+    }
+    if (Jk == NULL) { /* first call (or after a size change) */
       Jk = spmat_new(Npairs, npairs, 100);
       Jnext = spmat_new(Npairs, npairs, 100);
     }
-    else
-      assert(Npairs == Jk->nrows && npairs == Jk->ncols);
 
     nj_backprop_init_sparse(Jk, n);
     mat_zero(dt_dD);
