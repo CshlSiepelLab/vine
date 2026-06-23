@@ -107,26 +107,19 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   Vector *mu = vec_new(mmvn->n * mmvn->d);
   mmvn_save_mu(mmvn, mu); /* express mean as a single vector */
 
+  /* Prior contribution is routed via dL_dt inside nj_compute_model_grad
+     and its nuisance grads (relclock_sig_grad, nodetimes_grad) are read
+     out via nj_update_nuis_grad below. */
   ll = nj_compute_model_grad(mod, mmvn, mu, NULL,
-                             grad, data, NULL, migll);
+                             grad, data, NULL, migll, lprior);
 
   /* do after calling nj_compute_model_grad so tree is defined */
-  assert(mod->tree->nnodes - 1 == td->nbranches);  
+  assert(mod->tree->nnodes - 1 == td->nbranches);
 
   if (!isfinite(ll)) {
     vec_free(mu);
     return ll;  /* let caller handle via zero_likl recovery */
   }
-
-  /* also handle log prior and nuisance gradient if needed */
-  if (data->treeprior != NULL) {
-    Vector *prior_grad = vec_new(grad->size);
-    *lprior = tp_compute_log_prior(mod, data, prior_grad);
-    vec_plus_eq(grad, prior_grad);
-    vec_free(prior_grad);
-  }
-  else 
-    *lprior = 0.0;
 
   if (nuis_grad != NULL) {
     vec_zero(nuis_grad);
@@ -841,31 +834,20 @@ double nj_elbo_hybrid(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   Vector *mu = vec_new(fulld);
   mmvn_save_mu(mmvn, mu);
 
+  /* Prior contribution is routed via dL_dt inside nj_compute_model_grad
+     (mean block of dL_dx).  Its nuisance grads (relclock_sig_grad,
+     nodetimes_grad) are picked up below by nj_update_nuis_grad. */
   ll_mu = nj_compute_model_grad(mod, mmvn,
                                 mu,
                                 NULL,        /* points_std == NULL → no variance grads */
                                 grad,
                                 data,
                                 NULL,
-                                migll);
+                                migll, lprior);
 
   if (!isfinite(ll_mu)) {
     vec_free(mu);
     return ll_mu;  /* let caller handle via zero_likl recovery */
-  }
-
-  /* Prior + nuisance gradient.  Only add the mean block (first fulld
-     elements) here; the sigma block of the prior gradient will come
-     from the MC cache to avoid double-counting. */
-  if (data->treeprior != NULL) {
-    Vector *prior_grad = vec_new(grad->size);
-    *lprior = tp_compute_log_prior(mod, data, prior_grad);
-    for (int j = 0; j < fulld; j++)
-      vec_set(grad, j, vec_get(grad, j) + vec_get(prior_grad, j));
-    vec_free(prior_grad);
-  }
-  else {
-    *lprior = 0.0;
   }
 
   if (nuis_grad != NULL) {
@@ -923,12 +905,13 @@ double nj_elbo_hybrid(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
      * 3. Cache + smooth MC correction
      * --------------------------------------- */
 
-    /* Δ = E_q[ll + migll] − (ll(mu) + migll(mu))
+    /* Δ = E_q[ll + migll + lprior] − (ll(mu) + migll(mu) + lprior(mu))
        We store T ≈ 2Δ so that 0.5*T ≈ Δ
-       Including migration here means the caller's separate addition
-       of *migll cancels with the −*migll inside T, leaving E_q[migll].
-    */
-    double T = 2.0 * ((mc_ll + mc_migll) - (ll_mu + *migll));
+       Including migration / prior here means the caller's separate
+       addition of *migll and *lprior cancels with the corresponding
+       subtractions inside T, leaving E_q[migll] and E_q[lprior]. */
+    double T = 2.0 * ((mc_ll + mc_migll + mc_lprior) -
+                      (ll_mu + *migll + *lprior));
 
     if (isfinite(T)) {
       /* When the migration-active state changes (typically the
@@ -964,13 +947,17 @@ double nj_elbo_hybrid(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
     if (nuis_grad != NULL && mc_nuis != NULL)
       vec_copy(nuis_grad, mc_nuis);
 
-    /* Update ELBO bias correction.  The Taylor ELBO (ll_mu + 0.5*T)
-       and MC ELBO (mc_ll + mc_migll) estimate the same quantity but
-       differ due to higher-order terms and clamping.  Track the
-       discrepancy so we can debias the Taylor ELBO for parameter
-       selection by the caller. */
-    double taylor_elbo = ll_mu + 0.5 * td->T_cache;
-    double mc_elbo = mc_ll + mc_migll;
+    /* Update ELBO bias correction.  The Taylor and MC estimates of
+       E_q[ll + migll + lprior] should agree once T_cache equilibrates;
+       any residual discrepancy (higher-order terms, clamping, stale
+       cache) is captured here so the caller can debias.
+
+       The taylor side must include the migll(mu) and lprior(mu) terms
+       that the caller will add back via *migll and *lprior, otherwise
+       the bias EMA "cancels" them and they get double-counted in the
+       final ELBO. */
+    double taylor_elbo = ll_mu + 0.5 * td->T_cache + (*migll) + (*lprior);
+    double mc_elbo = mc_ll + mc_migll + mc_lprior;
     double bias = taylor_elbo - mc_elbo;
     if (isfinite(bias)) {
       /* Also reset the elbo_bias EMA when migration just turned on

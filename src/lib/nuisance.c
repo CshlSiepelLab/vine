@@ -118,12 +118,21 @@ char *nj_get_nuisance_param_name(TreeModel *mod, CovarData *data, int idx) {
     if (idx == 0)
       return "relclock_sig";
     idx -= 1;
-    if (idx < (mod->tree->nnodes + 1)/2 - 1) {
+    /* Use nodetimes->size when allocated (the loop calls
+       tp_compute_log_prior at least once, which initializes it).
+       The fallback to mod->tree handles the startup header print,
+       which happens before any tp_compute_log_prior call.  After
+       the variational loop mod->tree has been set to NULL by the
+       final nj_elbo_* call, so dereferencing it here would crash. */
+    int ninternal = data->treeprior->nodetimes != NULL
+                      ? data->treeprior->nodetimes->size
+                      : (mod->tree->nnodes + 1)/2 - 1;
+    if (idx < ninternal) {
       tmp = smalloc(25 * sizeof(char));
       snprintf(tmp, 25, "nodetime[%d]", idx);
       return tmp;
     }
-    idx -= data->treeprior->nodetimes->size;
+    idx -= ninternal;
   }
 
   if (data->migtable != NULL) {

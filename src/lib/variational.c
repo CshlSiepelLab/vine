@@ -489,17 +489,15 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
 double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
                           int nminibatch, Vector *avegrad, Vector *ave_nuis_grad,
                           double *ave_lprior, double *avemigll) {
-  Vector *grad = vec_new(avegrad->size), *prior_grad = NULL, *nuis_grad = NULL, *points, *points_std;
-  double ll, migll = 0, avell = 0;
+  Vector *grad = vec_new(avegrad->size), *nuis_grad = NULL, *points, *points_std;
+  double ll, migll = 0, lprior = 0, avell = 0;
   int n = data->nseqs, dim = data->dim, fulld = n*dim;
-  
+
   vec_zero(avegrad);
   if (ave_nuis_grad != NULL) {
     nuis_grad = vec_new(ave_nuis_grad->size);
     vec_zero(ave_nuis_grad);
   }
-  if (data->treeprior != NULL) 
-    prior_grad = vec_new(avegrad->size);  
 
   *ave_lprior = *avemigll = 0;
 
@@ -509,25 +507,25 @@ double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
     points_std = vec_new(data->lowrank * dim);
   else
     points_std = vec_new(fulld);
-  
+
   for (int i = 0; i < nminibatch; i++) {
     migll = 0;
+    lprior = 0;
     vec_zero(grad);
 
     nj_sample_points(mmvn, points, points_std);
-    ll = nj_compute_model_grad(mod, mmvn, points, points_std, grad, data, NULL, &migll);
+    /* Prior contribution to grad is routed inside nj_compute_model_grad
+       via dL_dt -> Jacobian -> dL_dx; the prior's nuisance grads
+       (relclock_sig_grad, nodetimes_grad) are then picked up below by
+       nj_update_nuis_grad. */
+    ll = nj_compute_model_grad(mod, mmvn, points, points_std, grad, data,
+                               NULL, &migll, &lprior);
     assert(isfinite(ll));
- 
+
     avell += ll;
     (*avemigll) += migll;
+    (*ave_lprior) += lprior;
     vec_plus_eq(avegrad, grad);
-
-    /* calculate prior if needed; add gradient of branches */
-    if (data->treeprior != NULL) {
-      vec_zero(prior_grad);
-      (*ave_lprior) += tp_compute_log_prior(mod, data, prior_grad);
-      vec_plus_eq(avegrad, prior_grad);
-    }
 
     if (ave_nuis_grad != NULL) {
       vec_zero(nuis_grad);
@@ -543,15 +541,13 @@ double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   (*avemigll) /= nminibatch;
 
   /* same for nuisance grad if needed */
-  if (ave_nuis_grad != NULL) 
+  if (ave_nuis_grad != NULL)
     vec_scale(ave_nuis_grad, 1.0 / nminibatch);
 
   /* free everything and return */
   vec_free(points); vec_free(points_std); vec_free(grad);
-  if (ave_nuis_grad != NULL) 
+  if (ave_nuis_grad != NULL)
     vec_free(nuis_grad);
-  if (data->treeprior != NULL)
-    vec_free(prior_grad);
 
   /* we also have to free the last tree in the tree model to avoid a
      memory leak */

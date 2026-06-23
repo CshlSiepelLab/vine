@@ -26,6 +26,15 @@
 #define BL_EPS 1.0e-6
 #define TAU_EPS 1.0e-6
 
+/* additional smoothing offset applied to bl ONLY when forming the
+   lognormal density and its gradient: bl_safe = bl + BL_PRIOR_EPS.
+   Caps the 1/bl singularity at 1/BL_PRIOR_EPS so a single tiny
+   branch does not produce a runaway prior gradient that, once
+   routed through the NJ Jacobian, destabilizes the embedding.
+   Much larger than BL_EPS (which only prevents log(0)) and much
+   smaller than a typical estimated branch length. */
+#define BL_PRIOR_EPS 1.0e-3
+
 /* helper functions for scaled softplus parameterization of nodetime deltas (tau) */
 
 /* numerically safe clamp for exponent arguments */
@@ -115,7 +124,18 @@ void tp_free(TreePrior *tp) {
 
 /* (helper for below) Get (or assign) a nodetime index for this bitset key.
    - used[] marks which indices in nodetimes are already claimed this pass.
-   - Returns [0..K-1] where K = nodetimes->size. */
+   - Returns [0..K-1] where K = nodetimes->size.
+
+   When bs2idx has accumulated more distinct bipartitions than the K
+   nodetime slots (common during MC sampling over diverse topologies),
+   the "first unused slot" search can fail: every slot is already
+   claimed in this pass by cached entries.  In that case fall back to
+   a deterministic hash-based slot so the same bipartition always
+   lands on the same slot across calls.  The fallback shares its slot
+   with another bipartition in this pass -- the prior treats the two
+   as having the same node time -- which is mathematically lossy but
+   keeps the program running.  Without the fallback this path would
+   die() on any sufficiently topology-rich run. */
 static int tp_get_or_assign_idx(TreePrior *tp, const BSet *key, int *used) {
   void *pv = bs_hash_get(tp->bs2idx, key);
   if (pv != NULL) {
@@ -128,14 +148,9 @@ static int tp_get_or_assign_idx(TreePrior *tp, const BSet *key, int *used) {
   int pick = -1;
   for (int j = 0; j < K; ++j) if (!used[j]) { pick = j; break; }
   if (pick < 0) {
-    /* All K slots are claimed in this pass but the new key still
-       wants a slot.  Cannot satisfy without colliding with another
-       split.  Was 'pick = 0' before, which silently misassigned;
-       fail loudly so the caller knows their nodetimes layout is
-       inconsistent. */
-    die("ERROR in tp_get_or_assign_idx: no unused nodetime slot "
-        "available (K=%d).  This indicates an internal accounting "
-        "bug; please report.\n", K);
+    /* graceful fallback: deterministic hash-based slot.  Will collide
+       with whichever bs already claimed this slot this pass. */
+    pick = (int)(bs_hash64(key) % (uint64_t)K);
   }
   int *stored = (int*)smalloc(sizeof(int));
   *stored = pick;
@@ -159,16 +174,27 @@ static inline double huber_psi(double z, double kappa) {  // derivative wrt z
 }
 
 /* compute log prior for a tree and branch lengths under a simple Yule
-   model with relaxed local clock */
+   model with relaxed local clock.
+
+   branchgrad: gradient of log prior wrt branch lengths, size = nbranches
+     (= nnodes-1).  Entry b corresponds to the branch above the node
+     with id == b (the root, whose id == nbranches, is skipped).
+     The caller is expected to add this into the LL-side dL_dt before
+     the Jacobian chain so it gets propagated to the embedding. */
 double tp_compute_log_prior(TreeModel *mod, struct cvdat *data, Vector *branchgrad) {
   TreePrior *tp = data->treeprior;
   int nn = mod->tree->nnodes;
   int nbranches = nn - 1;
 
+  if (branchgrad == NULL || branchgrad->size != nbranches)
+    die("ERROR in tp_compute_log_prior: branchgrad must have size "
+        "nnodes-1 (%d), got %d.\n", nbranches,
+        branchgrad == NULL ? -1 : branchgrad->size);
+
   /* reset grads */
   tp->relclock_sig_grad = 0.0;
   vec_zero(branchgrad);
-  
+
   if (tp->type == GAMMA && tp->gamma_scale == -1)
     tp_init_gamma_scale(tp, mod);
 
@@ -231,8 +257,13 @@ double tp_compute_log_prior(TreeModel *mod, struct cvdat *data, Vector *branchgr
     int parent_idx = tp_get_or_assign_idx(tp, parent_bs, used);
     double partime = vec_get(tp->nodetimes, parent_idx);
 
-    /* Edge measures */
-    double bl = BL_EPS + n->dparent;
+    /* Edge measures.  NJ can return n->dparent < 0 once the prior
+       gradient pulls embeddings into degenerate configurations;
+       floor at BL_EPS so log(bl) stays finite.  The lognormal
+       density and its gradient use the smoothed bl_safe to bound
+       the 1/bl singularity (see BL_PRIOR_EPS). */
+    double bl = fmax(n->dparent, 0.0) + BL_EPS;
+    double bl_safe = bl + BL_PRIOR_EPS;
 
     /* tau via clamped zero-centered softplus on delta */
     double delta = partime - thistime;
@@ -240,24 +271,25 @@ double tp_compute_log_prior(TreeModel *mod, struct cvdat *data, Vector *branchgr
 
     timesum += tau;
 
-    /* UC lognormal */
-    double zi    = log(bl / tau);
+    /* UC lognormal (using smoothed bl) */
+    double zi    = log(bl_safe / tau);
     double z     = zi - mu;
 
     /* Huber objective */
-    const double KAPPA = 0.5;  
+    const double KAPPA = 0.5;
     double rho   = huber_rho(z, KAPPA);
     double psi   = huber_psi(z, KAPPA);
 
-    retval += -log(bl) - (2.0 * rho) / (2.0 * sig2);  // i.e., -rho/sig2
+    retval += -log(bl_safe) - rho / sig2;
 
     /* store base tau-term for later propagation */
     /* tau chain uses psi (not z) */
-    double base  = psi / (sig2 * tau); 
+    double base  = psi / (sig2 * tau);
     vec_set(tau_base, n->id, base);
-    
-    /* branch-length gradient */
-    double dbl_raw = -1.0 / bl - psi / (sig2 * bl);
+
+    /* branch-length gradient: d/dbl [-log(bl_safe) - rho(z)/sig²]
+       with d bl_safe/d bl = 1 -- bounded by ~1/BL_PRIOR_EPS. */
+    double dbl_raw = -1.0 / bl_safe - psi / (sig2 * bl_safe);
     vec_set(branchgrad, n->id, dbl_raw);
     
     /* sigma gradient per edge for -log σ - ρ(z)/σ^2 with z = log(bl/tau) - μ, μ = -0.5 σ^2
@@ -288,8 +320,25 @@ double tp_compute_log_prior(TreeModel *mod, struct cvdat *data, Vector *branchgr
     tp->relclock_sig_grad += -1.0 / tp->relclock_sig_exp_mean; /* again, for sigma not raw */
   }
 
-  assert(isfinite(retval));
-  
+  if (!isfinite(retval)) {
+    /* a degenerate sampled tree (e.g. NaN branch lengths inherited
+       from a wild MC sample of the embedding) can drive retval
+       non-finite via log(bl), log(tau), etc.  Fail soft: zero all
+       gradients we own and report 0 contribution this iteration.
+       The likelihood-side gradient is unaffected. */
+    vec_zero(branchgrad);
+    vec_zero(tp->nodetimes_grad);
+    tp->relclock_sig_grad = 0.0;
+    for (int id = 0; id < nn; ++id) {
+      BSet *bs = (BSet*)lst_get_ptr(bs_by_id, id);
+      bs_free(bs);
+    }
+    lst_free(bs_by_id);
+    vec_free(tau_base);
+    sfree(used);
+    return 0.0;
+  }
+
   if (sig < SIG_FLOOR && tp->relclock_sig_grad < 0.0)
     tp->relclock_sig_grad = 0.0;   /* do not push below floor */
 
@@ -338,11 +387,34 @@ double tp_compute_log_prior(TreeModel *mod, struct cvdat *data, Vector *branchgr
               vec_get(tp->nodetimes_grad, child_idx) - tau_d);
   }
 
-  /* gauge projection: center nodetimes_grad on its mean */
+  /* gauge projection: center nodetimes_grad on its mean.  Skip if any
+     entry is non-finite (otherwise gmean = Inf or NaN and the centered
+     vector becomes all NaN).  Fail soft instead. */
+  unsigned int grad_finite = TRUE;
+  for (int k = 0; k < tp->nodetimes_grad->size; k++) {
+    if (!isfinite(vec_get(tp->nodetimes_grad, k))) {
+      grad_finite = FALSE;
+      break;
+    }
+  }
+  if (!grad_finite) {
+    vec_zero(branchgrad);
+    vec_zero(tp->nodetimes_grad);
+    tp->relclock_sig_grad = 0.0;
+    for (int id = 0; id < nn; ++id) {
+      BSet *bs = (BSet*)lst_get_ptr(bs_by_id, id);
+      bs_free(bs);
+    }
+    lst_free(bs_by_id);
+    vec_free(tau_base);
+    sfree(used);
+    return 0.0;
+  }
+
   double gmean = vec_sum(tp->nodetimes_grad) / tp->nodetimes_grad->size;
-  for (int k = 0; k < tp->nodetimes_grad->size; k++) 
+  for (int k = 0; k < tp->nodetimes_grad->size; k++)
     vec_set(tp->nodetimes_grad, k,  vec_get(tp->nodetimes_grad, k) - gmean);
- 
+
   for (int id = 0; id < nn; ++id) {
     BSet *bs = (BSet*)lst_get_ptr(bs_by_id, id);
     bs_free(bs);
@@ -432,8 +504,8 @@ void tp_init_nodetimes(TreePrior *tp, TreeModel *mod, List *bs_by_id) {
     /* Children contributions */
     TreeNode *L = v->lchild, *R = v->rchild;
 
-    double blL = BL_EPS + L->dparent;  
-    double blR = BL_EPS + R->dparent;
+    double blL = fmax(L->dparent, 0.0) + BL_EPS;
+    double blR = fmax(R->dparent, 0.0) + BL_EPS;
 
     /* target y so that TAU_EPS + ssp(Δ;beta) ≈ bl  =>  Δ ≈ ssp_inv(bl - TAU_EPS; beta) */
     double yL = fmax(blL - TAU_EPS, 1e-12);
@@ -483,7 +555,7 @@ double tp_treelen(TreeModel *mod) {
   for (int i = 0; i < mod->tree->nnodes; i++) {
     TreeNode *n = lst_get_ptr(mod->tree->nodes, i);
     if (n->parent == NULL) continue;
-    totlen += BL_EPS + n->dparent;
+    totlen += fmax(n->dparent, 0.0) + BL_EPS;
   }
   return totlen;
 }

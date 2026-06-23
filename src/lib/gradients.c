@@ -26,6 +26,7 @@
 #include <crispr.h>
 #include <phast/dgamma.h>
 #include <migration.h>
+#include <tree_prior.h>
 
 /* Helper for CHECK_FLOW diagnostic: recompute L = log_lik(D, y(x)) +
    log|det J_f(x)| through the full forward pipeline at the current x.
@@ -61,14 +62,14 @@ static double check_flow_pipeline_L(Vector *x_local, TreeModel *mod,
 double nj_compute_model_grad(TreeModel *mod, multi_MVN *mmvn, Vector *points,
                              Vector *points_std, Vector *grad, CovarData *data,
                              double *nf_logdet,
-                             double *migll) {
+                             double *migll, double *lprior) {
   int n = data->nseqs; /* number of taxa */
   int d = mmvn->n * mmvn->d / n; /* dimensionality; have to accommodate diagonal case */
   int dim = n*d; /* full dimension of point vector */
   int i, j, k;
   double porig, ll_base, loglambda_grad;
   Vector *dL_dx = vec_new(dim);
-  
+
   if (grad->size != dim + data->params->size)
     die("ERROR in nj_compute_model_grad: bad gradient dimension.\n");
   
@@ -78,7 +79,8 @@ double nj_compute_model_grad(TreeModel *mod, multi_MVN *mmvn, Vector *points,
     die("ERROR in nj_compute_model_grad: low-rank matrix R required in LOWR case.\n");
   
   /* obtain gradient with respect to points, dL/dx */
-  ll_base = nj_dL_dx_smartest(points, dL_dx, mod, data, nf_logdet, migll);
+  ll_base = nj_dL_dx_smartest(points, dL_dx, mod, data, nf_logdet, migll,
+                              lprior);
 
   if (!isfinite(ll_base)) /* can happen with crispr model; force calling code to deal with it */
     return ll_base;
@@ -502,13 +504,16 @@ void nj_dt_dD_num(Matrix *dt_dD, Matrix *D, TreeModel *mod, CovarData *data) {
    for each component.  Fastest but most complicated and error-prone
    version. */
 double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
-                         CovarData *data, double *nf_logdet, double *migll) {
+                         CovarData *data, double *nf_logdet, double *migll,
+                         double *lprior) {
   int n = data->nseqs, nbranches = 2*n-2,  /* have to work with the rooted tree here */
     ndist = n * (n-1) / 2, ndim = data->nseqs * data->dim;
   Vector *dL_dt = vec_new(nbranches);
   Vector *dL_dD = vec_new(ndist);
   Vector *dL_dy = vec_new(dL_dx->size);
   Vector *migbranchgrad = data->migtable != NULL ?
+    vec_new(nbranches) : NULL;
+  Vector *priorbranchgrad = data->treeprior != NULL ?
     vec_new(nbranches) : NULL;
   Vector *y = vec_new(x->size);
   TreeNode *tree;
@@ -518,8 +523,9 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
 /* set up Neighbors tape for this NJ run; use NJ backprop unless
      using UPGMA (ultrametric) inference */
   Neighbors *nb = data->ultrametric ? NULL : nj_new_neighbors(n);
-  
+
   *migll = 0.0;
+  if (lprior != NULL) *lprior = 0.0;
   
   /* convert x to y using normalizing flows if available */
   nj_apply_normalizing_flows(y, x, data, nf_logdet);
@@ -545,6 +551,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
     vec_free(y);
     if (nb != NULL) nj_free_neighbors(nb);
     if (migbranchgrad != NULL) vec_free(migbranchgrad);
+    if (priorbranchgrad != NULL) vec_free(priorbranchgrad);
     return ll_base;
   }
 
@@ -623,6 +630,16 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
         mig_compute_log_likelihood(mod, mg, data->crispr_mod, migbranchgrad);
       }
     }
+  }
+
+  /* fold tree-prior gradient (per branch) into dL_dt so it flows
+     through the same Jacobian chain as the LL gradient.  The prior
+     also writes to its own nuisance grads (nodetimes_grad,
+     relclock_sig_grad), which are read out via nj_update_nuis_grad. */
+  if (data->treeprior != NULL) {
+    double lp = tp_compute_log_prior(mod, data, priorbranchgrad);
+    vec_plus_eq(dL_dt, priorbranchgrad);
+    if (lprior != NULL) *lprior = lp;
   }
 
   /* apply chain rule to get dL/dD gradient (a vector of dim ndist) */
@@ -907,6 +924,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   if (nb != NULL)
     nj_free_neighbors(nb);
   if (migbranchgrad != NULL) vec_free(migbranchgrad);
+  if (priorbranchgrad != NULL) vec_free(priorbranchgrad);
 
   return ll_base;
 }
