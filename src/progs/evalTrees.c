@@ -44,7 +44,9 @@ int main(int argc, char *argv[]) {
   String *line = str_new(STR_VERY_LONG_LEN);
   int opt_idx, lineno = 0, i, j, nleaves = 0, npairs = 0;
   CovarData *data;
-  char c;
+  int c;  /* getopt_long returns int; storing in char makes EOF (-1)
+             alias to 255 on platforms where char is unsigned, so the
+             option loop never terminates. */
   FILE *treefile, *msafile = NULL;
   MarkovMatrix *rmat;
   msa_format_type format;
