@@ -58,15 +58,19 @@ void spvec_copy(SparseVector *dest, SparseVector *src) {
 void spvec_set(SparseVector *svec, int idx, double val) {
   int lidx = -1;
   assert(idx >= 0 && idx < svec->dim);
-  if (val == 0)
-    return;
-  
+
   /* find the insertion point */
   if (spvec_bsearch_idx(svec, idx, &lidx) == TRUE) {
-    SparseVectorElement *el = lst_get(svec->elementlist, lidx); /* found; update val */
-    el->val = val;
+    if (val == 0) {     /* clear an existing entry */
+      lst_delete_idx(svec->elementlist, lidx);
+      svec->nnonzero--;
+    }
+    else {              /* found; update val */
+      SparseVectorElement *el = lst_get(svec->elementlist, lidx);
+      el->val = val;
+    }
   }
-  else {   /* otherwise insert it at the correct place */
+  else if (val != 0) {  /* otherwise insert it at the correct place */
     SparseVectorElement newel = {idx, val};
     lst_insert_idx(svec->elementlist, lidx, &newel);
     svec->nnonzero++;
