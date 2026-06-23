@@ -149,8 +149,11 @@ TreeNode* upgma_infer_tree(Matrix *initD, char **names, Matrix *dt_dD) {
   hw = mat_get(D, u, v) / 2.0;
   node_u->dparent = hw - vec_get(heights, u);
   node_v->dparent = hw - vec_get(heights, v);
-  vec_set(heights, root->id, hw);
- 
+  /* heights is sized N = 2n-2 (counts of joined nodes during the main
+     loop) and is only read for u, v < N; root->id == N here would
+     write one past the end.  No reader needs the root's height, so
+     simply skip the store. */
+
   root->nnodes = N+1;
   tr_reset_nnodes(root);
 
