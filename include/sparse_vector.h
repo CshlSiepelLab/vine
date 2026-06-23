@@ -16,6 +16,8 @@
 #define SPARSE_VECTOR_H
 
 #include <stdlib.h>
+#include <assert.h>            /* used by static inline helpers below */
+#include <phast/lists.h>       /* List, lst_size, lst_cpy_fast */
 
 typedef struct {
   List *elementlist;

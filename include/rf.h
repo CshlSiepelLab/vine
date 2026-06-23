@@ -14,6 +14,9 @@
 #define RF_H
 
 #include <stdio.h>
+#include <stdint.h>            /* uint64_t */
+#include <phast/lists.h>       /* List */
+#include <phast/trees.h>       /* TreeNode */
 
 /* bitset for up to many thousands of leaves */
 typedef struct {

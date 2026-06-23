@@ -17,11 +17,13 @@
 #include <phast/msa.h>
 #include <phast/trees.h>
 #include <phast/tree_model.h>
+#include <phast/vector.h>      /* Vector */
 #include <nj.h>
 #include <mvn.h>
 #include <multi_mvn.h>
 #include <sparse_matrix.h>
 #include <crispr.h>
+#include <covariance.h>        /* CovarData */
 #include <phast/misc.h>
 #include <radial_flow.h>
 #include <planar_flow.h>

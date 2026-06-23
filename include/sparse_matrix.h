@@ -17,6 +17,7 @@
 #define SPARSE_MATRIX_H
 
 #include <stdlib.h>
+#include <assert.h>            /* used by static inline helpers below */
 #include <sparse_vector.h>
 #include <phast/lists.h>
 
