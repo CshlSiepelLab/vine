@@ -129,9 +129,6 @@ double cpr_compute_pw_dist_parsimony(CrisprMutTable *M, int i, int j);
 double cpr_compute_pw_dist_nopriv(CrisprMutTable *M, int i, int j,
                                    int **state_counts);
 
-void cpr_set_subst_matrices(TreeModel *mod, double silent_rate,
-                            List *Pt, Vector *mutrates);
-
 void cpr_set_branch_matrix(MarkovMatrix *P, double t, double silent_rate,
                            Vector *mutrates);
 
@@ -172,8 +169,6 @@ void cpr_prep_model(CrisprMutModel *cprmod);
 void cpr_print_model(CrisprMutModel *cprmod, FILE *F);
 
 void cpr_free_model(CrisprMutModel *cprmod);
-
-void cpr_update_model(CrisprMutModel *cprmod);
 
 void cpr_check_dedup_tables(CrisprMutTable *M, struct mgtab *mg,
                             const char *stage);

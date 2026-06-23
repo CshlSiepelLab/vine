@@ -35,7 +35,6 @@ int main(int argc, char *argv[]) {
 
   cprmod = cpr_new_model(newM, mod, SITEWISE, UNIF);
   cpr_prep_model(cprmod);
-  cpr_update_model(cprmod);
 
 
   /* compute likelihood and output */
