@@ -192,7 +192,11 @@ List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
       if (nsamp >= nsamples)
         keep_sampling = FALSE;
 
-      if (nsamp % (nsamples / 5) == 0 && !silent) 
+      /* progress line every fifth of the run; clamp the divisor to >=1
+         so --nsamples<5 does not modulo-by-zero (SIGFPE) */
+      int prog_every = nsamples / 5;
+      if (prog_every < 1) prog_every = 1;
+      if (nsamp % prog_every == 0 && !silent)
         fprintf(stderr, "Collected %d/%d samples...\n", nsamp, nsamples);
     }
 
