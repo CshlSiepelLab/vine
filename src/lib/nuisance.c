@@ -363,10 +363,12 @@ void nj_nuis_param_pluseq(TreeModel *mod, CovarData *data, int idx, double inc) 
     }
     if (idx == 0) {
       data->rf->a += inc;
+      rf_update(data->rf);
       return;
     }
     if (idx == 1) {
       data->rf->b += inc;
+      rf_update(data->rf);
       return;
     }
     idx -= 2;
