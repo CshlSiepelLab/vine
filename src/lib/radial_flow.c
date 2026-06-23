@@ -152,10 +152,13 @@ void rf_backprop(RadialFlow *rf, Vector *x, Vector *newgrad, Vector *origgrad) {
 
     beta_grad += h * u_dot_g + (rf->ndim - 1) * h / A + (h + h_prime * r) / B;
 
-    /* coord-wise gradients for center */
+    /* coord-wise gradients for center.  The path term carries an
+       explicit 1/r_med factor from drhat/dctr = -u[d]/(r*r_med); the
+       log-det term already folds 1/r_med into dF_dr (line 135). */
     for (d = 0; d < rf->ndim; d++) {
       int idx = i*rf->ndim + d;
-      double ctrg = -rf->beta * h * vec_get(origgrad, idx) + rf->beta * h2/r * u_dot_g * u[d]
+      double ctrg = -rf->beta * h * vec_get(origgrad, idx)
+        + rf->beta * h2 / (r * rf->r_med) * u_dot_g * u[d]
         - dF_dr / r * u[d];
       vec_set(rf->ctr_grad, d, vec_get(rf->ctr_grad, d) + ctrg);
     }

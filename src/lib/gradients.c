@@ -736,6 +736,9 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
         double num = (Lp - Lm) / (2 * eps);
         double ana = vec_get(dL_dx, idim);
         double diff = fabs(num - ana);
+        if (getenv("CHECK_FLOW_VERBOSE") != NULL)
+          fprintf(stderr, "  x[%d]: ana=%+.6e num=%+.6e diff=%.3e\n",
+                  idim, ana, num, diff);
         if (diff > max_diff_x) { max_diff_x = diff; worst_x = idim; }
       }
       fprintf(stderr,
