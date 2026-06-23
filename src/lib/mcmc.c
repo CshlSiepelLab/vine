@@ -29,9 +29,14 @@ List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
                          CovarData *data, TreeModel *mod, FILE *logf,
                          unsigned int silent) {
 
+  if (thin <= 0)
+    die("ERROR in nj_var_sample_mcmc: --thin must be >= 1 (got %d).\n",
+        thin);
+
   int n = data->nseqs, dim = data->dim, fulld = n * dim;
   int niters = 0, naccept = 0, last_naccept = 0, nsamp = 0;
   unsigned int keep_sampling = TRUE, burnin = TRUE, accept = FALSE;
+  unsigned int first_iter = TRUE;  /* MH always accepts the first proposal */
   /* rho chosen so thinned samples have ~50% autocorrelation, giving
    * ESS >= n/3.  Target: (1 - alpha*(1-rho))^thin = 0.5, solved for rho.
    * For small thin this may be 0 (independence sampler). */
@@ -118,9 +123,10 @@ List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
         NULL);
     }
     
-    double alpha = lastlnl == 0 ? 1 : fmin(1.0, exp(lnl - lastlnl));
+    double alpha = first_iter ? 1.0 : fmin(1.0, exp(lnl - lastlnl));
     if (unif_rand() < alpha) {
       accept = TRUE;
+      first_iter = FALSE;
       lastlnl = lnl;
       vec_copy(lastz, zprop);
       naccept++;
