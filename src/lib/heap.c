@@ -46,6 +46,8 @@ HeapNode* hp_insert(HeapNode *heap, double val, void *auxdata) {
   return hp_meld(heap, node);
 }
 
+/* Reference recursive implementation; use the iterative hp_meld_two_pass
+   below in production paths to avoid stack overflow on large heaps. */
 HeapNode* hp_meld_two_pass_recur(HeapNode *node) {
   if (node == NULL || node->sibling == NULL)
     return node;
@@ -57,7 +59,6 @@ HeapNode* hp_meld_two_pass_recur(HeapNode *node) {
   a->sibling = NULL;
   b->sibling = NULL;
   return hp_meld(hp_meld(a, b), hp_meld_two_pass(rest));
-  /* FIXME: better to do iteratively */
 }
 
 /* iterative version of two-pass meld, needed for larger heaps */

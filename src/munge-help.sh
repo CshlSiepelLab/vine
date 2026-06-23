@@ -1,4 +1,4 @@
-#!/bin/bash 
+#!/bin/bash
 
 # preprocess help files for inclusion in executables
 
@@ -7,14 +7,15 @@
 # assume wc, cut, and sed is in the path
 
 function mungehelp {
-  file=$1
+  local file="$1"
+  local numchar
   if [ "$2" ]; then
-     numchar=$2
-  else 
-     numchar=10000
+    numchar="$2"
+  else
+    numchar=10000
   fi
-  sed '/^#.*$/d ; s/\\$/\\\\/ ; s/$/\\n\\/ ; s/"/\\"/g ; s/%/%%/g ; 1s/^/char HELP['$numchar'] = "\\n/ ; $s/$/\n";/' $file
+  sed '/^#.*$/d ; s/\\$/\\\\/ ; s/$/\\n\\/ ; s/"/\\"/g ; s/%/%%/g ; 1s/^/char HELP['"$numchar"'] = "\\n/ ; $s/$/\n";/' "$file"
 }
 
-numchar=`mungehelp $1 | wc -c`
-mungehelp $1 $numchar
+numchar=$(mungehelp "$1" | wc -c)
+mungehelp "$1" "$numchar"

@@ -434,10 +434,6 @@ int main(int argc, char *argv[]) {
   if (consensusfile != NULL && migtable == NULL)
       die("--consensus-graph requires --migration\n");
 
-  if (use_taylor && batchsize != DEFAULT_BATCHSIZE && !silent)
-    fprintf(stderr,
-            "WARNING: --batchsize ignored when using Taylor approximation.\n");
-
   if (is_crispr == TRUE && dgamma_cats != 1)
     die("--dgamma-cats cannot be used with CRISPR.\n");
   

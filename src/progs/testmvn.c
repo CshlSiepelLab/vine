@@ -68,7 +68,7 @@ int main(int argc, char *argv[]) {
 
     mmvn_rederive_std(mmvn, x, x_std);
     vec_print(x_std, stdout);
-    /* note that, suprisingly, these two values of x_std are not
+    /* note that, surprisingly, these two values of x_std are not
        guaranteed to be identical because of differences in sign in
        eigenvectors. However, they must correspond to the same
        density */

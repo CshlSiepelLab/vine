@@ -1496,7 +1496,7 @@ double cpr_compute_log_likelihood(CrisprMutModel *cprmod, Vector *branchgrad) {
 
   /* if multiple threads are requested but OpenMP is not active, catch it here */
 #ifndef _OPENMP
-  if (cprmod->nthreads > 1)   /* FIXME: put this in cprmod also? */
+  if (cprmod->nthreads > 1)
     die("ERROR: Multithreading requested but OpenMP is not enabled.\n");
 #endif
   

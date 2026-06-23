@@ -524,7 +524,7 @@ double mig_compute_log_likelihood(TreeModel *mod, MigTable *mg,
       if (n != mod->tree->rchild) { /* skip branch to right of root because unrooted */
         /* calculate derivative analytically */
         deriv = 0;
-        mig_grad_REV_dt(mg, grad_mat[n->id], n->dparent); /* FIXME: customize */
+        mig_grad_REV_dt(mg, grad_mat[n->id], n->dparent);
 
         for (i = 0; i < nstates; i++)
           for (j = 0; j < nstates; j++)
@@ -538,7 +538,7 @@ double mig_compute_log_likelihood(TreeModel *mod, MigTable *mg,
 
       /* we need partial derivatives for migration rates also;
          they have to be aggregated across all branches */
-      mig_grad_REV_dr(mg, grad_mat_P[n->id], n->dparent);  /* FIXME: customize */
+      mig_grad_REV_dr(mg, grad_mat_P[n->id], n->dparent);
       /* loop over rate parameters */
       for (int pidx = 0; pidx < mg->gtr_params->size; pidx++) {
         double pderiv = 0; /* partial deriv wrt this param */
@@ -740,7 +740,7 @@ void mig_sample_states(TreeNode *tree, MigTable *mg,
     }
   }
 
-  /* Now pass from root to leaves and sample notes based on smpled parent and
+  /* Now pass from root to leaves and sample nodes based on sampled parent and
      inside probabilities */
   pre_trav = tr_preorder(tree);
   double *sampdens = smalloc(nstates * sizeof(double));

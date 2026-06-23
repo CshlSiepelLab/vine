@@ -91,7 +91,7 @@ TreeNode* upgma_infer_tree(Matrix *initD, char **names, Matrix *dt_dD) {
 
   D = mat_new(N, N); mat_zero(D);
   active = vec_new(N); vec_set_all(active, FALSE);
-  sizes = vec_new(N); vec_zero(sizes);  /* FIXME.  Use list of ints */
+  sizes = vec_new(N); vec_zero(sizes);
   heights = vec_new(N);
   nodes = lst_new_ptr(N);
   tr_reset_id();
@@ -101,7 +101,7 @@ TreeNode* upgma_infer_tree(Matrix *initD, char **names, Matrix *dt_dD) {
     snprintf(node_u->name, sizeof(node_u->name), "%s", names[i]);
     lst_push_ptr(nodes, node_u);
     vec_set(active, i, TRUE);
-    vec_set(sizes, i, 1.0); /* FIXME */
+    vec_set(sizes, i, 1.0);
     for (j = i+1; j < n; j++)
       mat_set(D, i, j, mat_get(initD, i, j));
   }

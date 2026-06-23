@@ -29,7 +29,7 @@
 
 typedef struct taylor_data {
   struct cvdat *covar_data;
-  Vector *base_grad; /* base branch-length gradient; copmputed
+  Vector *base_grad; /* base branch-length gradient; computed
                         elsewhere but copy is stored here */
 
   /* dimensionality; these are redundant with covar_data but

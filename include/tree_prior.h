@@ -64,7 +64,7 @@ typedef struct {
                        parameterization of nodetimes; set from branch
                        lengths on initialization */
   BSHash *bs2idx; /* bitset hash used to index internal nodes by sets of
-                     descendant leaves; needed for persistance of
+                     descendant leaves; needed for persistence of
                      nodetimes as different trees are sampled */
 } TreePrior;
 

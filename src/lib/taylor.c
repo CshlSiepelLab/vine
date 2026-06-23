@@ -134,7 +134,7 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
      ELBO.  But we can simplify this expression by considering the
      chain of transformations from the standard normal to the
      phylogeny and likelihood.  The NJ transformation is linear up to
-     a choice of neighbors, the tranformation from z to x is linear.
+     a choice of neighbors, the transformation from z to x is linear.
      If we also assume the distances are locally linear, then all
      curvature comes from the phylogenetic likelihood function, and we
      can approximate tr(H Sigma) by tr(H S), where S is a square

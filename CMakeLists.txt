@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(vine
-  VERSION 0.2.0
+  VERSION 0.3.5
   LANGUAGES C)
 
 # Use C99 
@@ -14,21 +14,25 @@ if(POLICY CMP0144)
 endif()
 
 # ---- PHAST dependency --------------------------------------------------
-# Users/packagers provide -DPHAST_ROOT=/path/to/prefix (the install prefix)
+# Users/packagers can provide -DPHAST_ROOT=/path/to/prefix (the install prefix);
+# otherwise CMake tries its standard search paths (including those populated
+# by Homebrew, Conda, etc.).
 set(PHAST_ROOT "" CACHE PATH "PHAST install prefix (contains lib/cmake/phast)")
 
-if (NOT PHAST_ROOT)
-  message(FATAL_ERROR "PHAST_ROOT is not set. Configure with -DPHAST_ROOT=/path/to/phast-prefix")
+if (PHAST_ROOT)
+  list(PREPEND CMAKE_PREFIX_PATH "${PHAST_ROOT}")
 endif()
 
-# Tell CMake where to find phastConfig.cmake
-list(PREPEND CMAKE_PREFIX_PATH "${PHAST_ROOT}")
-
-find_package(phast CONFIG REQUIRED)
+find_package(phast CONFIG QUIET)
+if (NOT phast_FOUND)
+  message(FATAL_ERROR
+    "Could not find PHAST. Install it in a standard location, or configure "
+    "with -DPHAST_ROOT=/path/to/phast-prefix.")
+endif()
 
 # ---- Project layout ----------------------------------------------------
 
-# public headers 
+# public headers
 set(VINE_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/include")
 
 add_subdirectory(src/lib)
