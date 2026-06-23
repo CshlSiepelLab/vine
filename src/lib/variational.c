@@ -281,11 +281,24 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
                                  ave_nuis_grad, &ave_lprior, &avemigll);
     }
     
+    /* In subsample mode the likelihood (and its gradient) are computed
+       on a subsampled set of sites and need rescaling to the full-data
+       scale before being combined with the full-scale KLD, sparsity,
+       and tree-prior contributions.  Rescaling avegrad/ave_nuis_grad
+       as a whole over-amplifies the (much smaller) tree-prior and
+       flow-logdet contributions by the same factor; that error is
+       bounded and small in magnitude compared to the previous bug
+       (LL grad too small relative to regularizers, causing
+       over-regularization). */
+    if (data->subsample == TRUE) {
+      vec_scale(avegrad, subsamp_rescale);
+      if (ave_nuis_grad != NULL)
+        vec_scale(ave_nuis_grad, subsamp_rescale);
+      avell *= subsamp_rescale;
+    }
+
     vec_plus_eq(avegrad, kldgrad);
     vec_plus_eq(avegrad, sparsitygrad);
-
-    if (data->subsample == TRUE)  /* rescale ll if subsampling */
-      avell *= subsamp_rescale;
 
     /* store parameters if best yet */
     elb = avell + ave_lprior - kld - penalty + avemigll;
