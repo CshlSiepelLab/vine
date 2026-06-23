@@ -60,6 +60,7 @@ TaylorData *tay_new(CovarData *data) {
   /* scheduling directives */
   td->iter = 0;
   td->T_cache = 0.0;
+  td->mig_active_last_refresh = FALSE;
   td->elbo_bias = 0.0;
   td->siggrad_cache = NULL; /* will be allocated later */
   td->warmup = 50; /* number of iterations before updates begin */
@@ -880,6 +881,19 @@ double nj_elbo_hybrid(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
       (td->iter >= td->warmup) &&
       ((td->iter - td->warmup) % td->period == 0);
 
+  /* If we are in CRISPR+migration mode and the migration warmup just
+     ended (mig_warmup is FALSE this iter but the cached T_cache was
+     built while it was TRUE), force a refresh.  Otherwise T_cache
+     would keep using the warmup-era residual (with migll dropped)
+     for up to (period - 1) more iterations, mis-ranking 'best'
+     parameters that include the migration log-likelihood. */
+  unsigned int mig_active_now =
+      (data->crispr_mod != NULL && data->migtable != NULL &&
+       !data->crispr_mod->mig_warmup);
+  if (mig_active_now != td->mig_active_last_refresh) {
+    do_refresh = TRUE;
+  }
+
   if (do_refresh && nj_var_at_floor(mmvn, data))
     do_refresh = FALSE;
 
@@ -917,7 +931,13 @@ double nj_elbo_hybrid(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
     double T = 2.0 * ((mc_ll + mc_migll) - (ll_mu + *migll));
 
     if (isfinite(T)) {
-      if (td->iter == td->warmup) {
+      /* When the migration-active state changes (typically the
+         end-of-warmup transition), the cached T_cache reflects the
+         previous regime and EMA-blending would drag the new value in
+         too slowly; treat this refresh like the initial one. */
+      int reset = (td->iter == td->warmup) ||
+                  (mig_active_now != td->mig_active_last_refresh);
+      if (reset) {
         td->T_cache = T;
 
         if (td->siggrad_cache == NULL)
@@ -930,13 +950,14 @@ double nj_elbo_hybrid(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
       else {
         td->T_cache =
           (1.0 - td->beta) * td->T_cache + td->beta * T;
-        
+
         blend_variance_block(td->siggrad_cache,
                              mc_grad,
                              fulld,
                              td->beta);
       }
     }
+    td->mig_active_last_refresh = mig_active_now;
 
     /* on refresh iterations, use MC nuisance gradient (averaged over
        samples) instead of the single mean-point evaluation */
@@ -952,7 +973,11 @@ double nj_elbo_hybrid(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
     double mc_elbo = mc_ll + mc_migll;
     double bias = taylor_elbo - mc_elbo;
     if (isfinite(bias)) {
-      if (td->iter == td->warmup)
+      /* Also reset the elbo_bias EMA when migration just turned on
+         or off -- old bias estimate is stale for the new regime. */
+      int reset_bias = (td->iter == td->warmup) ||
+                       (mig_active_now != td->mig_active_last_refresh);
+      if (reset_bias)
         td->elbo_bias = bias;
       else
         td->elbo_bias = (1.0 - td->beta) * td->elbo_bias + td->beta * bias;

@@ -63,6 +63,13 @@ typedef struct taylor_data {
 
   /* scheduling */
   double T_cache;
+  unsigned int mig_active_last_refresh; /* whether migration was
+                                           active when T_cache was
+                                           last refreshed; if this
+                                           differs from the current
+                                           migration state we force
+                                           a refresh to avoid a stale
+                                           warmup-era residual */
   double elbo_bias;  /* EMA of (Taylor ELBO - MC ELBO), for debiasing */
   Vector *siggrad_cache;   /* size = nsigma (or full grad layout if you include mu) */
   int iter;    /* current iteration */
