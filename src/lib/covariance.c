@@ -19,6 +19,7 @@
 #include <covariance.h>
 #include <nj.h>
 #include <geometry.h>
+#include <tree_prior.h>
 #include <phast/eigen.h>
 #include <phast/markov_matrix.h>
 
@@ -217,6 +218,8 @@ void nj_free_covar_data(CovarData *data) {
     vec_free(data->tuplecdf);
   if (data->tuplecounts != NULL)
     vec_free(data->tuplecounts);
+  if (data->treeprior != NULL)
+    tp_free(data->treeprior);
   free(data);
 }
 

@@ -92,8 +92,25 @@ TreePrior *tp_new(enum tree_prior_type type, unsigned int relclock) {
 
   retval->gamma_shape = GAMMA_SHAPE;
   retval ->gamma_scale = -1; /* will be set later if needed */
-  
+
   return retval;
+}
+
+/* release a TreePrior and everything it owns */
+void tp_free(TreePrior *tp) {
+  if (tp == NULL) return;
+  if (tp->nodetimes != NULL)      vec_free(tp->nodetimes);
+  if (tp->nodetimes_grad != NULL) vec_free(tp->nodetimes_grad);
+  if (tp->bs2idx != NULL) {
+    /* free the value heap allocations (each is a single int*)
+       before tearing the table down */
+    BSHash *H = tp->bs2idx;
+    for (int s = 0; s < H->nslots; s++)
+      if (H->a[s].used && H->a[s].val != NULL)
+        sfree(H->a[s].val);
+    bs_hash_free(H, 0);
+  }
+  sfree(tp);
 }
 
 /* (helper for below) Get (or assign) a nodetime index for this bitset key.
@@ -111,8 +128,14 @@ static int tp_get_or_assign_idx(TreePrior *tp, const BSet *key, int *used) {
   int pick = -1;
   for (int j = 0; j < K; ++j) if (!used[j]) { pick = j; break; }
   if (pick < 0) {
-    /* Fallback: reuse 0 if all are marked (shouldn't happen if K==#internals) */
-    pick = 0;
+    /* All K slots are claimed in this pass but the new key still
+       wants a slot.  Cannot satisfy without colliding with another
+       split.  Was 'pick = 0' before, which silently misassigned;
+       fail loudly so the caller knows their nodetimes layout is
+       inconsistent. */
+    die("ERROR in tp_get_or_assign_idx: no unused nodetime slot "
+        "available (K=%d).  This indicates an internal accounting "
+        "bug; please report.\n", K);
   }
   int *stored = (int*)smalloc(sizeof(int));
   *stored = pick;

@@ -86,6 +86,8 @@ typedef struct {
 
 TreePrior *tp_new(enum tree_prior_type type, unsigned int relclock);
 
+void tp_free(TreePrior *tp);
+
 double tp_compute_log_prior(TreeModel *mod, struct cvdat *data, Vector *branchgrad);
 
 double tp_prior_noclock(TreeModel *mod, TreePrior *tp, Vector *branchgrad);
