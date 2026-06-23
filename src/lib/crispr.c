@@ -144,7 +144,7 @@ void cpr_free_table(CrisprMutTable *M) {
     str_free(lst_get_ptr(M->sitenames, i));
   for (i = 0; i < lst_size(M->cellnames); i++)
     str_free(lst_get_ptr(M->cellnames, i));
-  for (i = 0; i < lst_size(M->cellmuts); i++) 
+  for (i = 0; i < lst_size(M->cellmuts); i++)
     lst_free(lst_get_ptr(M->cellmuts, i));
   lst_free(M->sitenames);
   lst_free(M->cellnames);
@@ -160,6 +160,11 @@ void cpr_free_table(CrisprMutTable *M) {
     }
     free(M->dupnames);
   }
+
+  if (M->sitewise_nstates != NULL)
+    sfree(M->sitewise_nstates);
+
+  free(M); /* the struct itself was allocated by cpr_new_table */
 }
 
 void cpr_print_table(CrisprMutTable *M, FILE *F) {
@@ -1436,6 +1441,8 @@ void cpr_print_model(CrisprMutModel *cprmod, FILE *F) {
 /* free memory allocated by cpr_prep_model */
 void cpr_free_model(CrisprMutModel *cprmod) {
   int j;
+  if (cprmod == NULL) return;
+
   if (cprmod->model_type == SITEWISE && cprmod->sitewise_mutrates != NULL) {
     for (j = 0; j < cprmod->nsites; j++)
       vec_free(lst_get_ptr(cprmod->sitewise_mutrates, j));
@@ -1445,8 +1452,22 @@ void cpr_free_model(CrisprMutModel *cprmod) {
     vec_free(cprmod->mutrates);
   if (cprmod->sitewise_mutrates != NULL)
     lst_free(cprmod->sitewise_mutrates);
+  if (cprmod->Pt != NULL) {
+    for (j = 0; j < lst_size(cprmod->Pt); j++)
+      mm_free(lst_get_ptr(cprmod->Pt, j));
+    lst_free(cprmod->Pt);
+  }
   if (cprmod->ancsets != NULL)
     cpr_free_state_sets(cprmod->ancsets);
+
+  /* In SITEWISE mode cpr_prep_model replaces cprmod->mut with a new
+     sitewise copy allocated via cpr_new_sitewise_table; release that
+     copy here.  In GLOBAL mode mut is whatever the caller passed in
+     and is not owned by us. */
+  if (cprmod->model_type == SITEWISE && cprmod->mut != NULL)
+    cpr_free_table(cprmod->mut);
+
+  sfree(cprmod);
 }
 
 /* --- code for multithreading of likelihood calculations --- */

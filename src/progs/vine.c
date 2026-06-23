@@ -762,8 +762,14 @@ int main(int argc, char *argv[]) {
   /* free everything */
   if (msa != NULL)
     msa_free(msa);
+  if (crispr_mod != NULL)
+    cpr_free_model(crispr_mod);  /* releases SITEWISE copy of mut,
+                                    Pt, sitewise_mutrates, ancsets,
+                                    and the model struct itself */
   if (crispr_muts != NULL)
-    cpr_free_table(crispr_muts);
+    cpr_free_table(crispr_muts); /* the original mut table; the
+                                    SITEWISE copy is freed via
+                                    cpr_free_model above */
   if (mod != NULL)
     tm_free(mod);
   if (covar_data != NULL)

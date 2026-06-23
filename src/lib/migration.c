@@ -50,6 +50,25 @@ void mig_free(MigTable *M) {
   hsh_free(M->statehash);
   lst_free_strings(M->statenames);
   lst_free(M->statenames);
+  if (M->gtr_params != NULL) vec_free(M->gtr_params);
+  if (M->deriv_gtr  != NULL) vec_free(M->deriv_gtr);
+  if (M->backgd_freqs != NULL) vec_free(M->backgd_freqs);
+  if (M->rate_matrix != NULL) mm_free(M->rate_matrix);
+  if (M->Pt != NULL) {
+    for (int i = 0; i < lst_size(M->Pt); i++)
+      mm_free(lst_get_ptr(M->Pt, i));
+    lst_free(M->Pt);
+  }
+  if (M->rate_matrix_param_row != NULL) {
+    for (int p = 0; p < M->nparams; p++) {
+      if (M->rate_matrix_param_row[p] != NULL)
+        lst_free(M->rate_matrix_param_row[p]);
+      if (M->rate_matrix_param_col[p] != NULL)
+        lst_free(M->rate_matrix_param_col[p]);
+    }
+    sfree(M->rate_matrix_param_row);
+    sfree(M->rate_matrix_param_col);
+  }
   sfree(M);
 }
 
