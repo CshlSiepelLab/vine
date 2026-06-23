@@ -366,9 +366,11 @@ double mig_compute_log_likelihood(TreeModel *mod, MigTable *mg,
         vec_set(lscale, n->id,
                 vec_get(lscale, n->id) + log(maxv));
       }
-      else 
 
-      /* zero out tiny values to save time later */
+      /* zero out tiny values to save time later (runs every
+         iteration; the previous stray 'else' here accidentally
+         gated this flush on maxv == 0.0, which never reached the
+         post-normalization tail) */
       for (i = 0; i < nstates; i++)
         if (pL[i][n->id] < REL_CUTOFF)
           pL[i][n->id] = 0.0;
