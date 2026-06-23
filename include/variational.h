@@ -18,9 +18,16 @@
 #include <mvn.h>
 #include <multi_mvn.h>
 
-/* tuning parameters for Adam algorithm.  These will be kept at the
-   default values.  The learning rate (called alpha) will be passed in
-   as a parameter */
+/* tuning parameters for Adam algorithm.  The learning rate (called
+   alpha) will be passed in as a parameter.
+
+   ADAM_BETA2 is intentionally set to 0.9 (not the Kingma & Ba
+   default of 0.999): in variational phylogenetic inference the
+   gradient signal changes rapidly across iterations -- especially
+   when tree topology shifts -- so a shorter second-moment memory
+   gives more responsive step-size adaptation.  Verified deliberate
+   in git history (the 0.999 value is commented out in an earlier
+   revision). */
 #define ADAM_BETA1 0.9
 #define ADAM_BETA2 0.9
 #define ADAM_EPS 1e-8
