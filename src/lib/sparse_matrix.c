@@ -34,8 +34,12 @@ SparseMatrix *spmat_new(int nrows, int ncols, int colsize) {
 }
 
 void spmat_free(SparseMatrix *sm) {
+  /* honor SparseVector refcounts: a row that is currently shared
+     with another SparseMatrix via spmat_copy_shallow must only be
+     freed when its last referrer goes away.  spvec_release is the
+     ref-counted counterpart of spvec_free. */
   for (int i = 0; i < sm->nrows; i++)
-    spvec_free(sm->rows[i]);
+    spvec_release(sm->rows[i]);
   free(sm->rows);
   free(sm);
 }
