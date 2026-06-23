@@ -74,14 +74,22 @@ static BitMask *bm_clone(const BitMask *m) {
   return c;
 }
 
-/* canonicalize split (make it the smaller side). Returns NEW mask on heap. */
+/* canonicalize split (make it the smaller side). Returns NEW mask on heap.
+   For balanced splits (sz == other, only possible when nbits is even)
+   tie-break by keeping the half that contains taxon 0 so the same
+   split always maps to the same mask regardless of traversal order. */
 static BitMask *bm_canonical(const BitMask *m, int nbits) {
   int sz = bm_popcount(m);
   int other = nbits - sz;
   if (sz == 0 || other == 0) return NULL;            /* trivial */
   if (sz == 1 || other == 1) return NULL;            /* leaf edge; ignore */
 
-  if (sz <= other) {
+  int keep_m;
+  if (sz < other) keep_m = 1;
+  else if (sz > other) keep_m = 0;
+  else /* balanced */ keep_m = (m->w[0] & 1ULL) ? 1 : 0;
+
+  if (keep_m) {
     return bm_clone(m);
   } else {
     BitMask *c = bm_new(m->W);

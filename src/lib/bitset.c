@@ -66,6 +66,11 @@ void bs_set_bit(BSet *bs, int idx) {
   bs->w[idx >> 6] |= (1ULL << (idx & 63));
 }
 
+int bs_get_bit(const BSet *bs, int idx) {
+  assert(idx >= 0 && idx < bs->nbits);
+  return (bs->w[idx >> 6] >> (idx & 63)) & 1ULL ? 1 : 0;
+}
+
 void bs_or(BSet *dst, const BSet *a, const BSet *b) {
   assert(dst->nbits == a->nbits && a->nbits == b->nbits);
   for (int i = 0; i < dst->nwords; ++i) dst->w[i] = a->w[i] | b->w[i];

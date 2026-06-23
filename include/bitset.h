@@ -33,6 +33,7 @@ int     bs_equals(const BSet *a, const BSet *b);
 
 /* Bit operations */
 void bs_set_bit(BSet *bs, int idx);
+int  bs_get_bit(const BSet *bs, int idx);              /* 1 if set, else 0 */
 void bs_or(BSet *dst, const BSet *a, const BSet *b);   /* dst = a | b */
 void bs_and(BSet *dst, const BSet *a, const BSet *b);  /* dst = a & b */
 void bs_flip(BSet *bs);                                    /* invert all bits within nbits */

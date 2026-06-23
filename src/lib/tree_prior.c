@@ -498,9 +498,16 @@ List *tr_set_leaf_bitsets(TreeNode *tree) {
       bs_or(by_id[u->id], L, R);
     }
 
-    /* flip if more than half of leaves are set */
+    /* canonicalize: flip if more than half of leaves are set;
+       for a balanced split (ones == nleaves/2, only possible when
+       nleaves is even) tie-break by keeping the half that contains
+       leaf 0 so the same split always maps to the same bitset. */
     int ones = bs_popcount_words(by_id[u->id]);
-    if (ones > (nleaves >> 1)) 
+    int half = nleaves >> 1;
+    if (ones > half)
+      bs_flip(by_id[u->id]);
+    else if (ones == half && (nleaves & 1) == 0 &&
+             !bs_get_bit(by_id[u->id], 0))
       bs_flip(by_id[u->id]);
   }
 
