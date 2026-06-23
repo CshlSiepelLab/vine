@@ -52,7 +52,11 @@ typedef struct taylor_data {
   Vector *tmp_extra; /* fulld */
 
   /* additional auxiliary data */
-  Vector *y;  
+  Vector *y;          /* post-flow embedding at the mean (or just the
+                         mean if no flows are active) */
+  Vector *x;          /* pre-flow embedding at the mean (== y when no
+                         flows); needed by tay_dx_from_dt so the flow
+                         backprops get the correct input vector */
   struct neigh_struc *nb;
   multi_MVN *mmvn;
   TreeModel *mod;

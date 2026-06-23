@@ -50,6 +50,7 @@ TaylorData *tay_new(CovarData *data) {
 
   /* auxiliary data stored during gradient computation */
   td->y = vec_new(td->fulld);
+  td->x = vec_new(td->fulld);
   td->nb = nj_new_neighbors(td->nseqs);
 
   /* these will be set later */
@@ -80,6 +81,7 @@ void tay_free(TaylorData *td) {
   if (td->siggrad_cache != NULL)
     vec_free(td->siggrad_cache);
   vec_free(td->y);
+  vec_free(td->x);
   sfree(td);
 }
 
@@ -567,17 +569,25 @@ void tay_dx_from_dt(Vector *dL_dt, Vector *dL_dx, TreeModel *mod,
       }
     }
 
-    /* Backprop through flows: y → x */
+    /* Backprop through flows: y → x.  rf/pf_backprop expect the
+       pre-flow input, not y (which is post-flow); the pre-flow
+       embedding is saved alongside y by nj_dL_dx_smartest in
+       tay_data->x.  For the combined case the forward order is
+       x->rf->tmp->pf->y, so the reverse must visit planar first
+       (input was tmp = rf_forward(x)) and then radial (input was x). */
+    Vector *x_in = tay_data->x;
     if (data->rf != NULL && data->pf != NULL) {
       Vector *tmp = tay_data->tmp_extra;
-      rf_backprop(data->rf, y, tmp, dL_dy);
-      pf_backprop(data->pf, y, dL_dx, tmp);
+      Vector *dL_dtmp = tay_data->tmp_x1;
+      rf_forward(data->rf, tmp, x_in);
+      pf_backprop(data->pf, tmp, dL_dtmp, dL_dy);
+      rf_backprop(data->rf, x_in, dL_dx, dL_dtmp);
     }
     else if (data->rf != NULL) {
-      rf_backprop(data->rf, y, dL_dx, dL_dy);
+      rf_backprop(data->rf, x_in, dL_dx, dL_dy);
     }
     else if (data->pf != NULL) {
-      pf_backprop(data->pf, y, dL_dx, dL_dy);
+      pf_backprop(data->pf, x_in, dL_dx, dL_dy);
     }
     else {
       vec_copy(dL_dx, dL_dy);

@@ -584,6 +584,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   /* save info for Taylor approximation if needed */
   if (data->taylor != NULL) {
     vec_copy(data->taylor->y, y);
+    vec_copy(data->taylor->x, x);  /* needed by tay_dx_from_dt for flow backprop */
     vec_copy(data->taylor->base_grad, dL_dt);
     if (nb != NULL) /* not needed for UPGMA case */
       nj_copy_neighbors(data->taylor->nb, nb);
