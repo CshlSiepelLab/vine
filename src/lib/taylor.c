@@ -210,8 +210,17 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   /* add 1/2 T to log likelihood and scale gradient by 1/2; always used cached versions */
   ll += 0.5 * td->T_cache;
 
-  /* add covariance part of gradient into grad */
-  int offset = data->taylor->fulld; 
+  /* add covariance part of gradient into grad.
+
+     NOTE (O36): the 'data->lambda' factor here looks like a
+     double-multiplication.  td->siggrad_cache was filled from the
+     output of hutch_tr_plus_grad, whose tay_Sigmafun /
+     tay_sigma_vec_mult already apply data->lambda in the CONST/DIST
+     parameterizations (see tay_sigma_vec_mult).  This function
+     (nj_elbo_taylor) is currently DEAD CODE -- the active path goes
+     through nj_elbo_hybrid in variational.c -- so the issue is
+     latent; revisit if this entry point is ever re-enabled. */
+  int offset = data->taylor->fulld;
   for (int j = 0; j < sigdim; j++)
     vec_set(grad, offset + j, vec_get(grad, offset + j)
                               + 0.5 * data->lambda * vec_get(td->siggrad_cache, j));

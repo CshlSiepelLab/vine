@@ -166,9 +166,16 @@ SparseVectorElement* spvec_linsearch(SparseVector *svec, int idx) {
 unsigned int spvec_bsearch_idx(SparseVector *svec, int idx, int *lidx) {
   int l = 0;
   int r = lst_size(svec->elementlist) - 1;
-  SparseVectorElement *candidate = lst_get(svec->elementlist, 0);
+  SparseVectorElement *candidate;
 
-  if (r < 0 || idx < candidate->idx) {
+  /* empty list: no candidate read at all */
+  if (r < 0) {
+    *lidx = -1;
+    return FALSE;
+  }
+
+  candidate = lst_get(svec->elementlist, 0);
+  if (idx < candidate->idx) {
     *lidx = -1;
     return FALSE;
   }

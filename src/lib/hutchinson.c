@@ -110,7 +110,6 @@ double hutch_tr_plus_grad(
 
   Vector *q_lat  = vec_new(dim_lat);     /* Jᵀ z */
   Vector *p_lat = vec_new(dim_lat);      /* Jᵀ (H z) */
-  Vector *tmp    = vec_new(dim_lat);     /* Σ u_lat       */
   Vector *g_k    = NULL;                 /* per-probe gradient */
   
   if (grad_sigma != NULL) {
@@ -183,7 +182,6 @@ double hutch_tr_plus_grad(
   vec_free(Hz);
   vec_free(q_lat);
   vec_free(p_lat);
-  vec_free(tmp);
 
   /* return tr(H S) with soft clipping */
   return soft_clip(T_raw, HUTCH_PROBE_CAP);

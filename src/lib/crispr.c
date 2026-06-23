@@ -44,7 +44,7 @@
    long-running multi-model process). */
 
 CrisprMutTable *cpr_new_table() {
-  CrisprMutTable *retval = malloc(sizeof(CrisprMutTable));
+  CrisprMutTable *retval = smalloc(sizeof(CrisprMutTable)); /* aborts on OOM */
   retval->sitenames = lst_new_ptr(30); /* will resize as needed */
   retval->cellnames = lst_new_ptr(100);
   retval->cellmuts = lst_new_ptr(100);
