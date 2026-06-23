@@ -62,17 +62,28 @@ static int parse_laml_params(const char *fname, double *sil_rate,
   return 0;
 }
 
-/* read a Newick tree from a file that may have a [&R] prefix (LAML/BEAST) */
+/* read a Newick tree from a file that may have a [&R] prefix (LAML/BEAST).
+   Reads the whole file into a dynamically grown buffer so large trees
+   (>100KB) are not silently truncated as they were with the prior
+   fixed buffer. */
 static TreeNode *read_laml_tree(const char *fname) {
-  char buf[100000];
-  char *p;
   FILE *f = phast_fopen(fname, "r");
-  size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+  size_t cap = 16384, len = 0;
+  char *buf = smalloc(cap);
+  for (;;) {
+    if (len == cap - 1) {
+      cap *= 2;
+      buf = srealloc(buf, cap);
+    }
+    size_t n = fread(buf + len, 1, cap - 1 - len, f);
+    len += n;
+    if (n == 0) break;
+  }
   fclose(f);
-  buf[n] = '\0';
+  buf[len] = '\0';
 
   /* find the first '(' to skip any prefix like [&R] */
-  p = strchr(buf, '(');
+  char *p = strchr(buf, '(');
   if (p == NULL)
     die("ERROR: no Newick tree found in %s\n", fname);
 
@@ -84,7 +95,9 @@ static TreeNode *read_laml_tree(const char *fname) {
       *end-- = '\0';
   }
 
-  return tr_new_from_string(p);
+  TreeNode *t = tr_new_from_string(p);
+  sfree(buf);
+  return t;
 }
 
 int main(int argc, char *argv[]) {
