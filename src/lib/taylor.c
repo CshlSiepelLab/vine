@@ -82,6 +82,8 @@ void tay_free(TaylorData *td) {
     vec_free(td->siggrad_cache);
   vec_free(td->y);
   vec_free(td->x);
+  if (td->nb != NULL)
+    nj_free_neighbors(td->nb);
   sfree(td);
 }
 
