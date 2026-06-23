@@ -25,6 +25,32 @@
 #include <covariance.h>
 #include <crispr.h>
 #include <phast/dgamma.h>
+#include <migration.h>
+
+/* Helper for CHECK_FLOW diagnostic: recompute L = log_lik(D, y(x)) +
+   log|det J_f(x)| through the full forward pipeline at the current x.
+   Mutates data->dist and mod->tree (caller must restore by recalling
+   at the original x). */
+static double check_flow_pipeline_L(Vector *x_local, TreeModel *mod,
+                                    CovarData *data) {
+  Vector *y = vec_new(x_local->size);
+  double logdet = 0;
+  nj_apply_normalizing_flows(y, x_local, data, &logdet);
+  nj_points_to_distances(y, data);
+  TreeNode *tree = nj_inf(data->dist, data->names, NULL, NULL, data);
+  nj_reset_tree_model(mod, tree);
+  double ll;
+  if (data->crispr_mod != NULL)
+    ll = cpr_compute_log_likelihood(data->crispr_mod, NULL);
+  else
+    ll = nj_compute_log_likelihood(mod, data, NULL);
+  if (data->migtable != NULL &&
+      !(data->crispr_mod != NULL && data->crispr_mod->mig_warmup))
+    ll += mig_compute_log_likelihood(mod, data->migtable, data->crispr_mod,
+                                     NULL);
+  vec_free(y);
+  return ll + logdet;
+}
 
 /* compute the gradient of the log likelihood for a tree model with
    respect to the free parameters of the MVN averaging distribution,
@@ -676,11 +702,140 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
       rf_backprop(data->rf, x, dL_dx, dL_dy);
       /* note that the gradients wrt the parameters a, b, and ctr are
          computed as side-effects and stored inside rf */
-    else if (data->pf != NULL) 
+    else if (data->pf != NULL)
       pf_backprop(data->pf, x, dL_dx, dL_dy);
       /* similar for planar flow */
     else
       vec_copy(dL_dx, dL_dy);
+  }
+
+  /* optional one-shot numerical check of dL/dx and flow-parameter
+     gradients (set CHECK_FLOW=1).  Compares each analytical component
+     against a centered-difference of L = log_lik + log|det J_f|
+     through the full forward pipeline.  Mutates data->dist /
+     mod->tree during the sweep; restored to the original-x pipeline
+     state at the end. */
+  if ((data->rf != NULL || data->pf != NULL) &&
+      getenv("CHECK_FLOW") != NULL) {
+    static int check_done = 0;
+    if (!check_done) {
+      check_done = 1;
+      double eps = DERIV_EPS;
+      double max_diff_x = 0, max_diff_ctr = 0, max_diff_pf = 0;
+      int worst_x = -1, worst_ctr = -1, worst_pf = -1;
+      int idim;
+
+      /* dL/dx components */
+      for (idim = 0; idim < x->size; idim++) {
+        double orig = vec_get(x, idim);
+        vec_set(x, idim, orig + eps);
+        double Lp = check_flow_pipeline_L(x, mod, data);
+        vec_set(x, idim, orig - eps);
+        double Lm = check_flow_pipeline_L(x, mod, data);
+        vec_set(x, idim, orig);
+        double num = (Lp - Lm) / (2 * eps);
+        double ana = vec_get(dL_dx, idim);
+        double diff = fabs(num - ana);
+        if (diff > max_diff_x) { max_diff_x = diff; worst_x = idim; }
+      }
+      fprintf(stderr,
+              "[flow-check] dL/dx: max |anal-num| = %.6e at idx %d\n",
+              max_diff_x, worst_x);
+
+      /* radial flow: center, a, b */
+      if (data->rf != NULL) {
+        for (idim = 0; idim < data->rf->ctr->size; idim++) {
+          double orig = vec_get(data->rf->ctr, idim);
+          vec_set(data->rf->ctr, idim, orig + eps);
+          double Lp = check_flow_pipeline_L(x, mod, data);
+          vec_set(data->rf->ctr, idim, orig - eps);
+          double Lm = check_flow_pipeline_L(x, mod, data);
+          vec_set(data->rf->ctr, idim, orig);
+          double num = (Lp - Lm) / (2 * eps);
+          double ana = vec_get(data->rf->ctr_grad, idim);
+          double diff = fabs(num - ana);
+          if (diff > max_diff_ctr) { max_diff_ctr = diff; worst_ctr = idim; }
+        }
+        fprintf(stderr,
+                "[flow-check] rf->ctr_grad: max |anal-num| = %.6e at idx %d\n",
+                max_diff_ctr, worst_ctr);
+
+        /* a */
+        {
+          double orig = data->rf->a;
+          data->rf->a = orig + eps; rf_update(data->rf);
+          double Lp = check_flow_pipeline_L(x, mod, data);
+          data->rf->a = orig - eps; rf_update(data->rf);
+          double Lm = check_flow_pipeline_L(x, mod, data);
+          data->rf->a = orig; rf_update(data->rf);
+          double num = (Lp - Lm) / (2 * eps);
+          fprintf(stderr,
+                  "[flow-check] rf->a_grad: anal=%.6e num=%.6e diff=%.6e\n",
+                  data->rf->a_grad, num, fabs(num - data->rf->a_grad));
+        }
+        /* b */
+        {
+          double orig = data->rf->b;
+          data->rf->b = orig + eps; rf_update(data->rf);
+          double Lp = check_flow_pipeline_L(x, mod, data);
+          data->rf->b = orig - eps; rf_update(data->rf);
+          double Lm = check_flow_pipeline_L(x, mod, data);
+          data->rf->b = orig; rf_update(data->rf);
+          double num = (Lp - Lm) / (2 * eps);
+          fprintf(stderr,
+                  "[flow-check] rf->b_grad: anal=%.6e num=%.6e diff=%.6e\n",
+                  data->rf->b_grad, num, fabs(num - data->rf->b_grad));
+        }
+      }
+
+      /* planar flow: u, w, b */
+      if (data->pf != NULL) {
+        for (idim = 0; idim < data->pf->u->size; idim++) {
+          double orig = vec_get(data->pf->u, idim);
+          vec_set(data->pf->u, idim, orig + eps);
+          double Lp = check_flow_pipeline_L(x, mod, data);
+          vec_set(data->pf->u, idim, orig - eps);
+          double Lm = check_flow_pipeline_L(x, mod, data);
+          vec_set(data->pf->u, idim, orig);
+          double num = (Lp - Lm) / (2 * eps);
+          double ana = vec_get(data->pf->u_grad, idim);
+          double diff = fabs(num - ana);
+          if (diff > max_diff_pf) { max_diff_pf = diff; worst_pf = idim; }
+        }
+        for (idim = 0; idim < data->pf->w->size; idim++) {
+          double orig = vec_get(data->pf->w, idim);
+          vec_set(data->pf->w, idim, orig + eps);
+          double Lp = check_flow_pipeline_L(x, mod, data);
+          vec_set(data->pf->w, idim, orig - eps);
+          double Lm = check_flow_pipeline_L(x, mod, data);
+          vec_set(data->pf->w, idim, orig);
+          double num = (Lp - Lm) / (2 * eps);
+          double ana = vec_get(data->pf->w_grad, idim);
+          double diff = fabs(num - ana);
+          if (diff > max_diff_pf)
+            { max_diff_pf = diff; worst_pf = data->pf->u->size + idim; }
+        }
+        fprintf(stderr,
+                "[flow-check] pf u/w grad: max |anal-num| = %.6e at idx %d\n",
+                max_diff_pf, worst_pf);
+        {
+          double orig = data->pf->b;
+          data->pf->b = orig + eps;
+          double Lp = check_flow_pipeline_L(x, mod, data);
+          data->pf->b = orig - eps;
+          double Lm = check_flow_pipeline_L(x, mod, data);
+          data->pf->b = orig;
+          double num = (Lp - Lm) / (2 * eps);
+          fprintf(stderr,
+                  "[flow-check] pf->b_grad: anal=%.6e num=%.6e diff=%.6e\n",
+                  data->pf->b_grad, num, fabs(num - data->pf->b_grad));
+        }
+      }
+
+      /* restore data->dist and mod->tree to the analytical-pipeline
+         state at the original x */
+      check_flow_pipeline_L(x, mod, data);
+    }
   }
 
   vec_free(dL_dt);
@@ -690,8 +845,8 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   if (nb != NULL)
     nj_free_neighbors(nb);
   if (migbranchgrad != NULL) vec_free(migbranchgrad);
-  
-  return ll_base;  
+
+  return ll_base;
 }
 
 /* Efficiently compute dL/dD (for original n x n distances) from
