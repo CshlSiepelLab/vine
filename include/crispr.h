@@ -71,12 +71,17 @@ typedef struct {
                               zero migration gradients during warmup phase */
   int nthreads; /* number of threads to use in
                    parallel likelihood calculations */
+  struct cpr_anc_state_sets *ancsets; /* per-model ancestral-state-set
+                                         cache, lazily allocated by
+                                         cpr_compute_log_likelihood and
+                                         released by cpr_free_model;
+                                         opaque here, defined below */
 } CrisprMutModel;
 
 /* auxiliary data used to keep track of restricted ancestral state
    possibilities in likelihood calculation; allows for greatly
    accelerated algorithm */
-typedef struct {
+typedef struct cpr_anc_state_sets {
   int nnodes; /* total number of nodes in tree; root is included but
                  will be ignored */
   int NORESTRICT; /* code indicating no restrictions on state */

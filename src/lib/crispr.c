@@ -36,9 +36,12 @@
 /* for use in likelihood calculations to avoid underflow */
 #define REL_CUTOFF 1e-300
 
-/* auxiliary data used to keep track of restricted ancestral state
-   possibilities in likelihood calculation */
-static CrisprAncestralStateSets *ancsets = NULL;
+/* Note: the ancestral-state-sets cache is now stored per
+   CrisprMutModel (cprmod->ancsets), not as a global static.
+   A process-wide static let it leak at teardown and could serve a
+   stale value from a different model when multiple models were
+   created (a real risk for the mixture work and any future
+   long-running multi-model process). */
 
 CrisprMutTable *cpr_new_table() {
   CrisprMutTable *retval = malloc(sizeof(CrisprMutTable));
@@ -402,6 +405,7 @@ double cpr_ll_core(CrisprMutModel *cprmod, NJDerivs *derivs,
   int npre_trav = 0;
   double **pL = NULL, **pLbar = NULL;
   double ll = 0;
+  CrisprAncestralStateSets *ancsets = cprmod->ancsets; /* per-model cache */
   double tmp[cprmod->nstates+1], root_eqfreqs[cprmod->nstates+1];
   Vector *lscale, *lscale_o; /* inside and outside versions */
   CprBranchParams *branch_params = NULL;
@@ -1370,7 +1374,15 @@ CrisprMutModel *cpr_new_model(CrisprMutTable *M, TreeModel *mod,
   retval->mutrates = NULL;
   retval->sitewise_mutrates = NULL;
   retval->mutrates_type = mrtype;
+  retval->Pt = NULL;
   retval->nthreads = 1;
+  retval->deriv_sil = 0.0;
+  retval->deriv_leading_t = 0.0;
+  retval->zero_likl = FALSE;
+  retval->mig_warmup = FALSE;
+  retval->ancsets = NULL;  /* lazily allocated per model in
+                              cpr_compute_log_likelihood; freed in
+                              cpr_free_model */
   return retval;
 }
   
@@ -1433,6 +1445,8 @@ void cpr_free_model(CrisprMutModel *cprmod) {
     vec_free(cprmod->mutrates);
   if (cprmod->sitewise_mutrates != NULL)
     lst_free(cprmod->sitewise_mutrates);
+  if (cprmod->ancsets != NULL)
+    cpr_free_state_sets(cprmod->ancsets);
 }
 
 /* --- code for multithreading of likelihood calculations --- */
@@ -1452,14 +1466,14 @@ double cpr_compute_log_likelihood(CrisprMutModel *cprmod, Vector *branchgrad) {
   cprmod->mod->tree->dparent = cprmod->leading_t;
 
   /* also set up ancestral state sets if not already available */
-  if (ancsets == NULL)
-    ancsets = cpr_new_state_sets(cprmod->mod->tree->nnodes);
-  if (cprmod->mod->tree->nnodes > ancsets->nnodes) /* in case number of nodes grows */
-    cpr_state_sets_resize(ancsets, cprmod->mod->tree->nnodes);
+  if (cprmod->ancsets == NULL)
+    cprmod->ancsets = cpr_new_state_sets(cprmod->mod->tree->nnodes);
+  if (cprmod->mod->tree->nnodes > cprmod->ancsets->nnodes) /* in case number of nodes grows */
+    cpr_state_sets_resize(cprmod->ancsets, cprmod->mod->tree->nnodes);
 
   /* pre-populate cached state-set lists so they are read-only during
      parallel execution of cpr_ll_core */
-  cpr_prepopulate_state_sets(ancsets, cprmod->nstates + 1);
+  cpr_prepopulate_state_sets(cprmod->ancsets, cprmod->nstates + 1);
 
   tr_postorder(cprmod->mod->tree); /* ensure these are cached */
   tr_preorder(cprmod->mod->tree);
