@@ -690,12 +690,18 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
        need to move this call outside of 'else' if hyperbolic support
        is added */
     if (data->rf != NULL && data->pf != NULL) {
-      /* apply both; need temporary vector */
+      /* forward order is x -> rf -> tmp -> pf -> y, so the reverse
+         must be dL/dy -> pf_backprop (input was tmp) -> dL/dtmp ->
+         rf_backprop (input was x) -> dL/dx.  Recompute tmp = rf(x)
+         since the planar backprop needs it as the input vector. */
       Vector *tmp = vec_new(dL_dx->size);
-      rf_backprop(data->rf, x, tmp, dL_dy);
-      pf_backprop(data->pf, x, dL_dx, tmp);
+      Vector *dL_dtmp = vec_new(dL_dx->size);
+      rf_forward(data->rf, tmp, x);
+      pf_backprop(data->pf, tmp, dL_dtmp, dL_dy);
+      rf_backprop(data->rf, x, dL_dx, dL_dtmp);
       vec_free(tmp);
-    }    
+      vec_free(dL_dtmp);
+    }
     else if (data->rf != NULL) 
       /* We need to back-propagate through the radial flow to obtain
          the real dL_dx */
