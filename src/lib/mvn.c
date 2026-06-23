@@ -396,6 +396,8 @@ double mvn_log_dens(MVN *mvn, Vector *x) {
     vec_minus_eq(z, mvn->mu);
     mvn_project_LOWR(mvn, z, a);
     retval = mvn_log_dens(mvn->lowRmvn, a);
+    vec_free(z);
+    vec_free(a);
   }
   else {
     /* more complicated for MVN_GEN */
