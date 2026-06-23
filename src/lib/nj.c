@@ -201,8 +201,13 @@ TreeNode* nj_infer_tree(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *n
 
     /* set up backprop data */
     if (dt_dD != NULL) {
-      Jk = malloc(Npairs * npairs * sizeof(double));
-      Jnext = malloc(Npairs * npairs * sizeof(double));
+      /* Npairs * npairs can overflow int for large n
+         (Npairs ~ 2n^2; npairs ~ n^2/2 -> ~ n^4 entries).  Compute
+         the byte count in size_t to avoid silent wraparound to a
+         negative malloc size. */
+      size_t jbytes = (size_t)Npairs * (size_t)npairs * sizeof(double);
+      Jk = malloc(jbytes);
+      Jnext = malloc(jbytes);
       nj_backprop_init(Jk, n);
       mat_zero(dt_dD);
     }
@@ -242,7 +247,7 @@ TreeNode* nj_infer_tree(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *n
       if (dt_dD != NULL) {
         free(Jk);
         Jk = Jnext;
-        Jnext = malloc(Npairs * npairs * sizeof(double));
+        Jnext = malloc((size_t)Npairs * (size_t)npairs * sizeof(double));
       }
     }
 
