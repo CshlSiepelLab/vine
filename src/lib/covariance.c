@@ -117,6 +117,9 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
   retval->no_zero_br = FALSE;
   retval->treeprior = treeprior;
   retval->subsample = FALSE;
+  retval->subsampsize = 0;
+  retval->reuse_subsamp = 0;
+  retval->var_pen = 0.0;
   retval->tree_diam_leaf1 = -1;
   retval->tree_diam_leaf2 = -1;
   retval->seq_to_node_map = NULL;
