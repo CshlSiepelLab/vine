@@ -571,6 +571,49 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
     *migll = mig_compute_log_likelihood(mod, data->migtable, data->crispr_mod,
                                         migbranchgrad);
     vec_plus_eq(dL_dt, migbranchgrad);
+
+    /* optional one-shot numerical check of mg->deriv_gtr (set
+       CHECK_MIG=1).  Compares each analytical partial derivative
+       against a centered-difference of the migration log-likelihood
+       under +/- eps perturbations of mg->gtr_params. */
+    if (getenv("CHECK_MIG") != NULL) {
+      static int mig_check_done = 0;
+      if (!mig_check_done) {
+        mig_check_done = 1;
+        double eps = DERIV_EPS;
+        MigTable *mg = data->migtable;
+        double max_diff = 0;
+        int worst = -1;
+        for (int p = 0; p < mg->gtr_params->size; p++) {
+          double orig = vec_get(mg->gtr_params, p);
+          vec_set(mg->gtr_params, p, orig + eps);
+          mig_set_REV_matrix(mg, mg->gtr_params);
+          double mp = mig_compute_log_likelihood(mod, mg,
+                                                 data->crispr_mod, NULL);
+          vec_set(mg->gtr_params, p, orig - eps);
+          mig_set_REV_matrix(mg, mg->gtr_params);
+          double mm = mig_compute_log_likelihood(mod, mg,
+                                                 data->crispr_mod, NULL);
+          vec_set(mg->gtr_params, p, orig);
+          mig_set_REV_matrix(mg, mg->gtr_params);
+          double num = (mp - mm) / (2 * eps);
+          double ana = vec_get(mg->deriv_gtr, p);
+          double diff = fabs(num - ana);
+          if (getenv("CHECK_MIG_VERBOSE") != NULL)
+            fprintf(stderr,
+                    "  mig[%d]: ana=%+.6e num=%+.6e diff=%.3e\n",
+                    p, ana, num, diff);
+          if (diff > max_diff) { max_diff = diff; worst = p; }
+        }
+        fprintf(stderr,
+                "[mig-check] mg->deriv_gtr: max |anal-num| = %.6e at idx %d\n",
+                max_diff, worst);
+        /* recompute migration LL to restore mg->deriv_gtr to the
+           analytical state at the original gtr_params (the helper
+           overwrote it during the sweep) */
+        mig_compute_log_likelihood(mod, mg, data->crispr_mod, migbranchgrad);
+      }
+    }
   }
 
   /* apply chain rule to get dL/dD gradient (a vector of dim ndist) */

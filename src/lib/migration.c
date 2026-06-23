@@ -484,28 +484,34 @@ double mig_compute_log_likelihood(TreeModel *mod, MigTable *mg,
           tmp[i] += pL[k][sibling->id] * mm_get_floor(sib_subst_mat, i, k);
       }
 
+      /* adjust for all relevant scale terms; do everything in log
+         space.  Computed for every branch (including the root's right
+         child) because mg->deriv_gtr accumulates contributions from
+         every branch; previously expon was inside the
+         "n != rchild" gate and the GTR-rate accumulation below used a
+         stale expon left over from the previous iteration on the
+         right-child branch. */
+      expon = -vec_get(lscale, mod->tree->id)
+        + vec_get(lscale, sibling->id) + vec_get(lscale_o, par->id)
+        + vec_get(lscale, n->id) - log(base_prob);
+      /* note division by base_prob because we need deriv of log P */
+
+      /* avoid overflow */
+      if (expon > 700.0) expon = 700.0;
+      if (expon < -745.0) expon = -745.0;
+
       if (n != mod->tree->rchild) { /* skip branch to right of root because unrooted */
         /* calculate derivative analytically */
         deriv = 0;
         mig_grad_REV_dt(mg, grad_mat[n->id], n->dparent); /* FIXME: customize */
-          
-        for (i = 0; i < nstates; i++)   
-          for (j = 0; j < nstates; j++)    
+
+        for (i = 0; i < nstates; i++)
+          for (j = 0; j < nstates; j++)
             deriv +=  tmp[i] * pLbar[i][par->id] * pL[j][n->id] * mat_get(grad_mat[n->id], i, j);
 
-        /* adjust for all relevant scale terms; do everything in log space */
-        expon = -vec_get(lscale, mod->tree->id)
-          + vec_get(lscale, sibling->id) + vec_get(lscale_o, par->id)
-          + vec_get(lscale, n->id) - log(base_prob);
-        /* note division by base_prob because we need deriv of log P */
-
-        /* avoid overflow */
-        if (expon > 700.0) expon = 700.0;
-        if (expon < -745.0) expon = -745.0;
-          
         deriv *= exp(expon);
         assert(isfinite(deriv));
-                  
+
         vec_set(branchgrad, n->id, vec_get(branchgrad, n->id) + deriv);
       }
 
