@@ -27,7 +27,7 @@ MultiDAG *mdag_new(MigTable *mg) {
   G->edges = lst_new_ptr(100);
   G->nedges = 0;
   G->migtable = mg;
-  G->nstates = 0;
+  G->nstates = (mg != NULL) ? mg->nstates : 0; /* match header comment */
   G->id = idcounter++;
   return G;
 }
