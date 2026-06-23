@@ -1315,8 +1315,8 @@ void cpr_free_state_sets(CrisprAncestralStateSets *sets) {
     lst_free(l);
   }
   for (i = 0; i < lst_size(sets->sil_lists); i++) {
-    l = lst_get_ptr(sets->restr_lists, i);
-    if (l != NULL) 
+    l = lst_get_ptr(sets->sil_lists, i);
+    if (l != NULL)
       lst_free(l);
   }
   free(sets);
