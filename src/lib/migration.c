@@ -858,13 +858,17 @@ void mig_print_labeled_nexus(TreeNode *tree, FILE *outf, MigTable *mg,
                              List *state_samples) {
   int nn = tree->nnodes;
 
-  /* 1) Gather TAXA (leaf names) in any traversal; leaves are guaranteed named/unique */
+  /* 1) Gather TAXA (leaf names) in any traversal; leaves are
+        guaranteed named/unique.  Snapshot the names by copy -- step
+        (2) below overwrites n->name with the annotated form, so
+        aliasing the live buffer would make the TAXA block print
+        annotations too. */
   List *trav = tree->nodes;
   List *taxa = lst_new_ptr(64);
   for (int i = 0; i < nn; i++) {
     TreeNode *n = lst_get_ptr(trav, i);
     if (n->lchild == NULL && n->rchild == NULL)
-      lst_push_ptr(taxa, n->name);
+      lst_push_ptr(taxa, copy_charstr(n->name));
   }
 
   /* 2) Temporarily append annotations to node names: "<name>[&state=STATE]" */
@@ -920,15 +924,21 @@ void mig_print_labeled_nexus(TreeNode *tree, FILE *outf, MigTable *mg,
 
   /* 4) Restore original names and free temporaries */
   for (int i = 0; i < lst_size(trav); i++) {
-  TreeNode *n = lst_get_ptr(trav, i);
-  if (saved_names[n->id]) {
-    strncpy(n->name, saved_names[n->id]->chars, sizeof(n->name) - 1);
-    n->name[sizeof(n->name) - 1] = '\0';
-    str_free(saved_names[n->id]);
-    saved_names[n->id] = NULL;
+    TreeNode *n = lst_get_ptr(trav, i);
+    if (saved_names[n->id]) {
+      strncpy(n->name, saved_names[n->id]->chars, sizeof(n->name) - 1);
+      n->name[sizeof(n->name) - 1] = '\0';
+      str_free(saved_names[n->id]);
+      saved_names[n->id] = NULL;
+    }
   }
-}
   sfree(saved_names);
+
+  /* taxa list owns its char* copies (see step 1); free them */
+  for (int i = 0; i < lst_size(taxa); i++) {
+    char *lab = (char*)lst_get_ptr(taxa, i);
+    if (lab != NULL) sfree(lab);
+  }
   lst_free(taxa);
 }
 
