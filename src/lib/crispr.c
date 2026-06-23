@@ -1654,7 +1654,8 @@ void cpr_add_dup_leaves(TreeNode *tree, CrisprMutTable *M) {
     leaf->dparent = 0;
 
     newleaf = tr_new_node();
-    strcpy(newleaf->name, ((String*)lst_get_ptr(dups, 0))->chars);
+    snprintf(newleaf->name, sizeof(newleaf->name), "%s",
+             ((String*)lst_get_ptr(dups, 0))->chars);
     newleaf->dparent = 0;
 
     subtree = tr_new_node();
@@ -1667,7 +1668,8 @@ void cpr_add_dup_leaves(TreeNode *tree, CrisprMutTable *M) {
     /* wrap in additional internal nodes for remaining dups */
     for (j = 1; j < ndups; j++) {
       newleaf = tr_new_node();
-      strcpy(newleaf->name, ((String*)lst_get_ptr(dups, j))->chars);
+      snprintf(newleaf->name, sizeof(newleaf->name), "%s",
+               ((String*)lst_get_ptr(dups, j))->chars);
       newleaf->dparent = 0;
 
       newint = tr_new_node();

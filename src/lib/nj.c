@@ -189,7 +189,9 @@ TreeNode* nj_infer_tree(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *n
     
     for (i = 0; i < n; i++) {
       node_u = tr_new_node();
-      strcat(node_u->name, names[i]);
+      /* bound by sizeof(node_u->name) to avoid stack overflow on
+         long taxon names */
+      snprintf(node_u->name, sizeof(node_u->name), "%s", names[i]);
       lst_push_ptr(nodes, node_u);
       vec_set(active, i, TRUE);
       for (j = i+1; j < n; j++)
@@ -340,7 +342,7 @@ TreeNode* nj_fast_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *n
     
   for (i = 0; i < n; i++) {
     node_u = tr_new_node();
-    strcat(node_u->name, names[i]);
+    snprintf(node_u->name, sizeof(node_u->name), "%s", names[i]);
     lst_push_ptr(nodes, node_u);
     vec_set(active, i, TRUE);
     for (j = i+1; j < n; j++) {
