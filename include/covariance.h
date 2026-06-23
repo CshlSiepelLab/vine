@@ -86,6 +86,12 @@ typedef struct cvdat {
   unsigned int subsample; /* whether or not to subsample sites in likelihood calculation */
   int subsampsize; /* size of subsample (number of sites) */
   int reuse_subsamp; /* whether or not to reuse last subsample */
+  Vector *tuplecdf;     /* cached CDF over alignment site-pattern
+                           counts for subsampled likelihood; tied to
+                           this CovarData's msa (allocated and freed
+                           with the CovarData) */
+  Vector *tuplecounts;  /* draw / view of site-pattern counts; same
+                           lifetime as tuplecdf */
   int tree_diam_leaf1; /* store the ids of two leaves along a diameter
                           of the last reconstructed tree; for use in
                           rerooting tree in case of prior */

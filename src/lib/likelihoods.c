@@ -516,27 +516,36 @@ double nj_compute_log_likelihood(TreeModel *mod, CovarData *data,
   if (data->nthreads > 1 && data->subsample)
     die("ERROR: subsampling is not allowed with multithreading.\n");
 
-  /* set up tuplecounts; subsample if needed */
-  static Vector *tuplecdf = NULL;
-  static Vector *tuplecounts = NULL;
+  /* set up tuplecounts; subsample if needed.  Persistent caches
+     (CDF and the per-iteration subsample) live on CovarData --
+     previously file-scope statics, which broke any consumer with
+     more than one MSA in the same process.  The non-subsample path
+     hands back a transient borrowed view of msa->ss->counts; the
+     existing post-call sfree at the bottom of this function frees
+     that view wrapper without touching the MSA-owned data. */
+  Vector *tuplecounts;
   if (data->subsample == TRUE) {
-    if (tuplecdf == NULL) { /* build CDF for sampling */
+    if (data->tuplecdf == NULL) { /* build CDF for sampling */
       Vector *counts = vec_view_array(data->msa->ss->counts, data->msa->ss->ntuples);
-      tuplecdf = pv_cdf_from_counts(counts, LOWER);
-      sfree(counts); /* avoid vec_free */
+      data->tuplecdf = pv_cdf_from_counts(counts, LOWER);
+      sfree(counts); /* avoid vec_free (would free the shared underlying array) */
     }
     else  /* CDF already exists; check that it makes sense */
-      assert(tuplecdf->size == data->msa->ss->ntuples);
-    if (tuplecounts == NULL || data->reuse_subsamp == FALSE ||
-        vec_sum(tuplecounts) != data->subsampsize) { /* need new subsample */
-      if (tuplecounts == NULL) tuplecounts = vec_new(data->msa->ss->ntuples);
-      else assert(tuplecounts->size == data->msa->ss->ntuples);
-      pv_draw_counts(tuplecounts, tuplecdf, data->subsampsize);
+      assert(data->tuplecdf->size == data->msa->ss->ntuples);
+    if (data->tuplecounts == NULL || data->reuse_subsamp == FALSE ||
+        vec_sum(data->tuplecounts) != data->subsampsize) { /* need new subsample */
+      if (data->tuplecounts == NULL)
+        data->tuplecounts = vec_new(data->msa->ss->ntuples);
+      else
+        assert(data->tuplecounts->size == data->msa->ss->ntuples);
+      pv_draw_counts(data->tuplecounts, data->tuplecdf, data->subsampsize);
     }
+    tuplecounts = data->tuplecounts;
   }
-  else 
-    /* not subsampling; just provide a 'view' of the full counts array */
-    tuplecounts = vec_view_array(data->msa->ss->counts, data->msa->ss->ntuples);
+  else {
+    tuplecounts = vec_view_array(data->msa->ss->counts,
+                                 data->msa->ss->ntuples);
+  }
 
   /* ---- set up gradient cache ---- */
   int nnodes = mod->tree->nnodes;

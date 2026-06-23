@@ -119,6 +119,8 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
   retval->subsample = FALSE;
   retval->subsampsize = 0;
   retval->reuse_subsamp = 0;
+  retval->tuplecdf = NULL;
+  retval->tuplecounts = NULL;
   retval->var_pen = 0.0;
   retval->tree_diam_leaf1 = -1;
   retval->tree_diam_leaf2 = -1;
@@ -211,6 +213,10 @@ void nj_free_covar_data(CovarData *data) {
     pf_free(data->pf);
   if (data->taylor != NULL)
     tay_free(data->taylor);
+  if (data->tuplecdf != NULL)
+    vec_free(data->tuplecdf);
+  if (data->tuplecounts != NULL)
+    vec_free(data->tuplecounts);
   free(data);
 }
 
