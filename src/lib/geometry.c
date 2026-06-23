@@ -132,7 +132,7 @@ void nj_points_to_distances_hyperbolic(Vector *points, CovarData *data) {
       if (Dij > maxdist) {
         maxdist = Dij;
         data->tree_diam_leaf1 = i; /* store these for use in rerooting, if needed */
-        data->tree_diam_leaf1 = j;
+        data->tree_diam_leaf2 = j;
       }
     }
   }
