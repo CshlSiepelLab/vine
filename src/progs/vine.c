@@ -175,7 +175,20 @@ int main(int argc, char *argv[]) {
     {0, 0, 0, 0}
   };
 
-  while ((c = getopt_long(argc, argv, "0:1:ab:B:c:d:D:E:egG:hHi:FZj:JkK:l:L:m:M:n:No:q:v:r:Rt:T:Vw:W:S:s:CY:yPp:Xx", long_opts, &opt_idx)) != -1) {
+  /* Short-option string must match the long_opts table above:
+     each entry's short letter is followed by ':' iff has_arg == 1.
+     Past bugs (silently surfaced by users typing the short forms):
+       - '0' (--nj-only) and 'L' (--relclock) used to have spurious
+         colons, so -0 / -L consumed the next argv as optarg.
+       - 'V' (--embedding) and 'P' (--treeprior) were missing colons,
+         so the short forms NULL-derefed when accessing optarg.
+       - 'O' (--sample-graphs), 'Q' (--thin), and 'U' (--upweight-kld)
+         were missing entirely, so the short forms reported "unknown
+         option".
+     Keep this string in lockstep with long_opts. */
+  while ((c = getopt_long(argc, argv,
+                          "01:ab:B:c:Cd:D:eE:FgG:hHi:j:JkK:l:Lm:M:n:No:O:p:P:q:Q:r:Rs:S:t:T:U:v:V:w:W:xXyY:Z",
+                          long_opts, &opt_idx)) != -1) {
     switch (c) {
     case 'b':
       batchsize = atoi(optarg);
