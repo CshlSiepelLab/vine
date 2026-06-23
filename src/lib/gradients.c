@@ -535,9 +535,18 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   else
     ll_base = nj_compute_log_likelihood(mod, data, dL_dt);
 
-  if (!isfinite(ll_base)) /* can happen with crispr; force calling
-                             code to deal with it */
+  if (!isfinite(ll_base)) {
+    /* can happen with crispr (degenerate trees); release any
+       workspace we already allocated before returning so repeated
+       hits do not leak per-call */
+    vec_free(dL_dt);
+    vec_free(dL_dD);
+    vec_free(dL_dy);
+    vec_free(y);
+    if (nb != NULL) nj_free_neighbors(nb);
+    if (migbranchgrad != NULL) vec_free(migbranchgrad);
     return ll_base;
+  }
 
   /* optional numerical check of nuisance gradients (set CHECK_NUIS=1) */
   if (data->crispr_mod != NULL && getenv("CHECK_NUIS") != NULL) {
