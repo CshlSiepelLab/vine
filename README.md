@@ -9,6 +9,23 @@ of supporting libraries for variational inference of phylogenetic trees.
 - C/C++ compiler (GCC, Clang, etc.)
 - [PHAST](https://github.com/CshlSiepelLab/phast) (Phylogenetic Analysis with Space/Time models)
 
+## Installation
+
+VINE is easily installable via Bioconda:
+
+```bash
+conda install -c conda-forge -c bioconda vine-phylo
+```
+
+or Homebrew:
+
+```bash
+brew tap CshlSiepelLab/tools
+brew install vine
+```
+
+In both cases, PHAST will be installed as a dependency if needed.
+
 ## Building from Source
 
 If PHAST is installed in a standard location, CMake will usually find it
