@@ -675,7 +675,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
           int idx_i = base_i + d;
           int idx_j = base_j + d;
             
-          double coord_diff = vec_get(x, idx_i) - vec_get(x, idx_j);
+          double coord_diff = vec_get(y, idx_i) - vec_get(y, idx_j);
           double grad_contrib = weight * coord_diff / (dist_ij * data->pointscale * data->pointscale);
           /* need two factors of pointscale, one for the coord_diff, one for the distance */
           
