@@ -185,6 +185,8 @@ double tp_compute_log_prior(TreeModel *mod, struct cvdat *data, Vector *branchgr
   TreePrior *tp = data->treeprior;
   int nn = mod->tree->nnodes;
   int nbranches = nn - 1;
+  int nleaves = (nn + 1) / 2;   /* Yule exponent tracks tips/birth events,
+                                   not the 2*(L-1) branches (Tier 0 fix) */
 
   if (branchgrad == NULL || branchgrad->size != nbranches)
     die("ERROR in tp_compute_log_prior: branchgrad must have size "
@@ -298,9 +300,11 @@ double tp_compute_log_prior(TreeModel *mod, struct cvdat *data, Vector *branchgr
     tp->relclock_sig_grad += -1.0/sig - psi/sig + (2.0 * rho)/(sig*sig2);   // since sig*sig2 = σ^3
   }
 
-  /* Yule (lambda integrated out) */
+  /* Yule (lambda integrated out): with a flat prior on lambda the marginal
+     gives S^{-L} (L = #tips), i.e. exponent = nleaves, NOT the 2*(L-1)
+     branches the old code used (which doubled the prior's strength). */
   if (tp->type == YULE)
-    retval += -nbranches * log(timesum);
+    retval += -nleaves * log(timesum);
   else if (tp->type == GAMMA)
     retval += (tp->gamma_shape-1.0) * log(timesum) - timesum/tp->gamma_scale -
       tp->gamma_shape * log(tp->gamma_scale) - lgamma(tp->gamma_shape);
@@ -371,7 +375,7 @@ double tp_compute_log_prior(TreeModel *mod, struct cvdat *data, Vector *branchgr
     double base = vec_get(tau_base, n->id);     
     double gT = 0;    
     if (tp->type == YULE)
-      gT = -(double)nbranches / timesum;
+      gT = -(double)nleaves / timesum;
     else if (tp->type == GAMMA)
       gT = (tp->gamma_shape - 1.0) / timesum - 1.0 / tp->gamma_scale;
     else
@@ -437,7 +441,7 @@ double tp_compute_log_prior(TreeModel *mod, struct cvdat *data, Vector *branchgr
 */
 double tp_prior_noclock(TreeModel *mod, TreePrior *tp, Vector *branchgrad) {
   const int nn = mod->tree->nnodes;
-  const int nbranches = nn - 1;
+  const int nleaves = (nn + 1) / 2;   /* Yule exponent: tips, not branches (Tier 0) */
 
   double T = tp_treelen(mod);
   if (T < 1e-12) T = 1e-12;  /* avoid NaN */
@@ -446,8 +450,8 @@ double tp_prior_noclock(TreeModel *mod, TreePrior *tp, Vector *branchgrad) {
   double dlogp_dT = 0.0;
 
   if (tp->type == YULE) {
-    lp = -(double)nbranches * log(T);
-    dlogp_dT = -(double)nbranches / T;
+    lp = -(double)nleaves * log(T);
+    dlogp_dT = -(double)nleaves / T;
   }
   else if (tp->type == GAMMA) {
     lp = (tp->gamma_shape - 1.0) * log(T) - T / tp->gamma_scale -

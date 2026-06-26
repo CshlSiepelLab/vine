@@ -75,12 +75,16 @@ typedef struct {
    distribution for relative clock rates along branches */
 /* initialization for sigma */
 #define SIG_INIT 0.5
-/* floor for sigma in estimation, to keep from collapsing */
-#define SIG_FLOOR 0.4
+/* floor for sigma in estimation, to keep from collapsing.  Kept small
+   (just enough to bound the 1/sigma terms); the old value of 0.4
+   pinned the clock far above the data-supported scale (Tier 0). */
+#define SIG_FLOOR 0.1
 /* hyperparameter for mean of log sigma */
 #define LSIG_MEAN log(0.7)
-/* hyperparameter for sd of log sigma */
-#define LSIG_SD 0.1
+/* hyperparameter for sd of log sigma.  Widened from 0.1 (which was a
+   +/-10%-in-log straitjacket pinning sigma ~0.7 regardless of data) so
+   the clock can adapt to the data-supported rate variance (Tier 0). */
+#define LSIG_SD 0.5
 /* hyperparameter for mean of sigma under exponential */
 #define SIG_EXP_MEAN 2
 
