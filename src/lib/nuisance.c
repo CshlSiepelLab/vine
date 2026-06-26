@@ -46,9 +46,13 @@ int nj_get_num_nuisance_params(TreeModel *mod, CovarData *data) {
   if (data->treeprior != NULL && data->treeprior->relclock == TRUE && data->ultrametric == FALSE)
     retval += (1 + (mod->tree->nnodes + 1)/2 - 1);
 
+  /* M2 latent clock: relclock_sig + one rate per branch (nnodes-1) */
+  if (data->treeprior != NULL && data->treeprior->relclock == TRUE && data->ultrametric == TRUE)
+    retval += (1 + (mod->tree->nnodes - 1));
+
   if (data->migtable != NULL)
     retval += data->migtable->gtr_params->size;
-  
+
   return retval;
 }
 
@@ -135,6 +139,23 @@ char *nj_get_nuisance_param_name(TreeModel *mod, CovarData *data, int idx) {
     idx -= ninternal;
   }
 
+  if (data->treeprior != NULL && data->treeprior->relclock == TRUE && data->ultrametric == TRUE) {
+    if (idx == 0)
+      return "relclock_sig";
+    idx -= 1;
+    /* rates->size once allocated (after the first tp_compute_log_prior /
+       likelihood pass); tree-based fallback for the startup header print. */
+    int nbr = data->treeprior->rates != NULL
+                ? data->treeprior->rates->size
+                : (mod->tree->nnodes - 1);
+    if (idx < nbr) {
+      tmp = smalloc(25 * sizeof(char));
+      snprintf(tmp, 25, "rate[%d]", idx);
+      return tmp;
+    }
+    idx -= nbr;
+  }
+
   if (data->migtable != NULL) {
     if (idx < data->migtable->gtr_params->size) {
       tmp = smalloc(10 * sizeof(char));
@@ -183,8 +204,14 @@ void nj_update_nuis_grad(TreeModel *mod, CovarData *data, Vector *nuis_grad) {
 
   if (data->treeprior != NULL && data->treeprior->relclock == TRUE && data->ultrametric == FALSE) {
     vec_set(nuis_grad, idx++, data->treeprior->relclock_sig_grad);
-    for (i = 0; i < data->treeprior->nodetimes_grad->size; i++) 
-      vec_set(nuis_grad, idx++, vec_get(data->treeprior->nodetimes_grad, i)); 
+    for (i = 0; i < data->treeprior->nodetimes_grad->size; i++)
+      vec_set(nuis_grad, idx++, vec_get(data->treeprior->nodetimes_grad, i));
+  }
+
+  if (data->treeprior != NULL && data->treeprior->relclock == TRUE && data->ultrametric == TRUE) {
+    vec_set(nuis_grad, idx++, data->treeprior->relclock_sig_grad);
+    for (i = 0; i < data->treeprior->rates_grad->size; i++)
+      vec_set(nuis_grad, idx++, vec_get(data->treeprior->rates_grad, i));
   }
 
   if (data->migtable != NULL) {
@@ -231,15 +258,21 @@ void nj_save_nuis_params(Vector *stored_vals, TreeModel *mod, CovarData *data) {
 
   if (data->treeprior != NULL && data->treeprior->relclock == TRUE && data->ultrametric == FALSE) {
     vec_set(stored_vals, idx++, data->treeprior->relclock_sig);
-    for (i = 0; i < data->treeprior->nodetimes->size; i++) 
-      vec_set(stored_vals, idx++, vec_get(data->treeprior->nodetimes, i)); 
+    for (i = 0; i < data->treeprior->nodetimes->size; i++)
+      vec_set(stored_vals, idx++, vec_get(data->treeprior->nodetimes, i));
+  }
+
+  if (data->treeprior != NULL && data->treeprior->relclock == TRUE && data->ultrametric == TRUE) {
+    vec_set(stored_vals, idx++, data->treeprior->relclock_sig);
+    for (i = 0; i < data->treeprior->rates->size; i++)
+      vec_set(stored_vals, idx++, vec_get(data->treeprior->rates, i));
   }
 
   if (data->migtable != NULL) {
     for (i = 0; i < data->migtable->gtr_params->size; i++)
       vec_set(stored_vals, idx++, vec_get(data->migtable->gtr_params, i));
   }
-  
+
   assert(idx == stored_vals->size);
 }
 
@@ -294,8 +327,14 @@ void nj_update_nuis_params(Vector *stored_vals, TreeModel *mod, CovarData *data)
 
   if (data->treeprior != NULL && data->treeprior->relclock == TRUE && data->ultrametric == FALSE) {
     data->treeprior->relclock_sig = vec_get(stored_vals, idx++);
-    for (i = 0; i < data->treeprior->nodetimes->size; i++) 
+    for (i = 0; i < data->treeprior->nodetimes->size; i++)
       vec_set(data->treeprior->nodetimes, i, vec_get(stored_vals, idx++));
+  }
+
+  if (data->treeprior != NULL && data->treeprior->relclock == TRUE && data->ultrametric == TRUE) {
+    data->treeprior->relclock_sig = vec_get(stored_vals, idx++);
+    for (i = 0; i < data->treeprior->rates->size; i++)
+      vec_set(data->treeprior->rates, i, vec_get(stored_vals, idx++));
   }
 
   if (data->migtable != NULL) {
@@ -415,6 +454,21 @@ void nj_nuis_param_pluseq(TreeModel *mod, CovarData *data, int idx, double inc) 
     idx -= data->treeprior->nodetimes->size;
   }
 
+  if (data->treeprior != NULL && data->treeprior->relclock == TRUE && data->ultrametric == TRUE) {
+    if (idx == 0) {
+      data->treeprior->relclock_sig += inc;
+      return;
+    }
+    idx--;
+    if (idx < data->treeprior->rates->size) {
+      double v = vec_get(data->treeprior->rates, idx) + inc;
+      if (v < 1e-6) v = 1e-6;   /* keep rates positive so bl_eff>0, log finite */
+      vec_set(data->treeprior->rates, idx, v);
+      return;
+    }
+    idx -= data->treeprior->rates->size;
+  }
+
   if (data->migtable) {
     if (idx < data->migtable->gtr_params->size) {
       vec_set(data->migtable->gtr_params, idx, vec_get(data->migtable->gtr_params, idx) + inc);
@@ -486,6 +540,15 @@ double nj_nuis_param_get(TreeModel *mod, CovarData *data, int idx) {
     if (idx < data->treeprior->nodetimes->size)
       return vec_get(data->treeprior->nodetimes, idx);
     idx -= data->treeprior->nodetimes->size;
+  }
+
+  if (data->treeprior != NULL && data->treeprior->relclock == TRUE && data->ultrametric == TRUE) {
+    if (idx == 0)
+      return data->treeprior->relclock_sig;
+    idx--;
+    if (idx < data->treeprior->rates->size)
+      return vec_get(data->treeprior->rates, idx);
+    idx -= data->treeprior->rates->size;
   }
 
   if (data->migtable != NULL) {

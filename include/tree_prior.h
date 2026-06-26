@@ -66,6 +66,17 @@ typedef struct {
   BSHash *bs2idx; /* bitset hash used to index internal nodes by sets of
                      descendant leaves; needed for persistence of
                      nodetimes as different trees are sampled */
+  Vector *rates; /* M2 latent relaxed clock: per-branch relative
+                    substitution rates, one per non-root node (size
+                    nnodes-1), indexed by br2idx slot.  Optimized as
+                    nuisance parameters; initialized to 1.0.  bl_eff =
+                    rate_b * tau_b enters the Felsenstein likelihood. */
+  Vector *rates_grad; /* gradient of rates: the likelihood part
+                         (tau_b * dL/d bl_eff, set in gradients.c) plus the
+                         lognormal-prior part (set in tp_compute_log_prior) */
+  BSHash *br2idx; /* bitset hash mapping each branch (a non-root node's
+                     descendant-leaf set, incl. leaf singletons) to its
+                     slot in rates; persists rates across sampled trees */
 } TreePrior;
 
 /* shape parameter for Gamma prior; use moderately informative value */
@@ -97,6 +108,20 @@ double tp_compute_log_prior(TreeModel *mod, struct cvdat *data, Vector *branchgr
 double tp_prior_noclock(TreeModel *mod, TreePrior *tp, Vector *branchgrad);
 
 void tp_init_nodetimes(TreePrior *tp, TreeModel *mod, List *bs_by_id);
+
+/* M2 latent relaxed clock: rescale each non-root node's dparent from the
+   internode time tau_b to the effective branch length bl_eff = rate_b*tau_b
+   before the Felsenstein likelihood call.  Saves the original tau into
+   tau_saved (size nnodes, indexed by node id); allocates rates/br2idx on
+   first call and zeroes rates_grad for this gradient evaluation. */
+void tp_rates_pre_likelihood(TreeModel *mod, TreePrior *tp, Vector *tau_saved);
+
+/* M2: after the likelihood call, dL_dt[b] = dL/d bl_eff.  Accumulate the
+   likelihood part of rates_grad (tau_b * dL_dt[b]), rewrite dL_dt[b] in
+   place to the time gradient (rate_b * dL_dt[b]) for the UPGMA backprop, and
+   restore dparent = tau_saved. */
+void tp_rates_post_likelihood(TreeModel *mod, TreePrior *tp, Vector *tau_saved,
+                              Vector *dL_dt);
 
 void tp_init_gamma_scale(TreePrior *tp, TreeModel *mod);
 

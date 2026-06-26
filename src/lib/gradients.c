@@ -535,6 +535,17 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   tree = nj_inf(data->dist, data->names, NULL, nb, data);
   nj_reset_tree_model(mod, tree);
 
+  /* M2 latent relaxed clock: rescale dparent to bl_eff = rate*tau before the
+     Felsenstein likelihood (restored, and dL_dt converted back to the time
+     gradient, in tp_rates_post_likelihood below). */
+  unsigned int latent_clock = (data->treeprior != NULL &&
+      data->treeprior->relclock == TRUE && data->ultrametric == TRUE);
+  Vector *tau_saved = NULL;
+  if (latent_clock) {
+    tau_saved = vec_new(mod->tree->nnodes);
+    tp_rates_pre_likelihood(mod, data->treeprior, tau_saved);
+  }
+
   /* calculate log likelihood and analytical gradient */
   if (data->crispr_mod != NULL)
     ll_base = cpr_compute_log_likelihood(data->crispr_mod, dL_dt);
@@ -552,8 +563,14 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
     if (nb != NULL) nj_free_neighbors(nb);
     if (migbranchgrad != NULL) vec_free(migbranchgrad);
     if (priorbranchgrad != NULL) vec_free(priorbranchgrad);
+    if (tau_saved != NULL) vec_free(tau_saved);
     return ll_base;
   }
+
+  /* M2: dL_dt holds dL/d bl_eff; accumulate the rate likelihood gradient,
+     convert dL_dt to the time gradient, and restore dparent = tau. */
+  if (latent_clock)
+    tp_rates_post_likelihood(mod, data->treeprior, tau_saved, dL_dt);
 
   /* optional numerical check of nuisance gradients (set CHECK_NUIS=1) */
   if (data->crispr_mod != NULL && getenv("CHECK_NUIS") != NULL) {
@@ -925,6 +942,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
     nj_free_neighbors(nb);
   if (migbranchgrad != NULL) vec_free(migbranchgrad);
   if (priorbranchgrad != NULL) vec_free(priorbranchgrad);
+  if (tau_saved != NULL) vec_free(tau_saved);
 
   return ll_base;
 }

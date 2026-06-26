@@ -89,9 +89,14 @@ TreePrior *tp_new(enum tree_prior_type type, unsigned int relclock) {
   retval->relclock_sig_grad = 0;
 
   /* these will be initialized later, after an initial tree is available */
-  retval->nodetimes = NULL; 
+  retval->nodetimes = NULL;
   retval->nodetimes_grad = NULL;
   retval->bs2idx = NULL;
+
+  /* M2 latent relaxed clock; allocated lazily on first likelihood pass */
+  retval->rates = NULL;
+  retval->rates_grad = NULL;
+  retval->br2idx = NULL;
 
   /* set these to defaults */
   retval->relclock_lsig_mean = LSIG_MEAN;
@@ -114,6 +119,15 @@ void tp_free(TreePrior *tp) {
     /* free the value heap allocations (each is a single int*)
        before tearing the table down */
     BSHash *H = tp->bs2idx;
+    for (int s = 0; s < H->nslots; s++)
+      if (H->a[s].used && H->a[s].val != NULL)
+        sfree(H->a[s].val);
+    bs_hash_free(H, 0);
+  }
+  if (tp->rates != NULL)      vec_free(tp->rates);
+  if (tp->rates_grad != NULL) vec_free(tp->rates_grad);
+  if (tp->br2idx != NULL) {
+    BSHash *H = tp->br2idx;
     for (int s = 0; s < H->nslots; s++)
       if (H->a[s].used && H->a[s].val != NULL)
         sfree(H->a[s].val);
@@ -159,6 +173,98 @@ static int tp_get_or_assign_idx(TreePrior *tp, const BSet *key, int *used) {
   return pick;
 }
 
+/* M2: branch-keyed analogue of tp_get_or_assign_idx, using br2idx/rates.
+   Every non-root node (incl. leaves) keys on its descendant-leaf bitset,
+   which is unique within a single tree, so the nbranches slots fill exactly;
+   the hash fallback only triggers across topology-diverse samples (lossy,
+   as with nodetimes). */
+static int tp_get_or_assign_branch_idx(TreePrior *tp, const BSet *key,
+                                       int *used) {
+  void *pv = bs_hash_get(tp->br2idx, key);
+  if (pv != NULL) {
+    int idx = *(int*)pv;
+    used[idx] = 1;
+    return idx;
+  }
+  int K = tp->rates->size;
+  int pick = -1;
+  for (int j = 0; j < K; ++j) if (!used[j]) { pick = j; break; }
+  if (pick < 0)
+    pick = (int)(bs_hash64(key) % (uint64_t)K);
+  int *stored = (int*)smalloc(sizeof(int));
+  *stored = pick;
+  bs_hash_put(tp->br2idx, key, stored);
+  used[pick] = 1;
+  return pick;
+}
+
+/* M2: allocate the per-branch rate vector (size nnodes-1 = #branches),
+   its gradient, and the branch-index hash.  Rates initialized to 1.0 so the
+   first pass reproduces the strict-clock (M1) bl_eff = tau. */
+static void tp_init_rates(TreePrior *tp, TreeModel *mod) {
+  int nbranches = mod->tree->nnodes - 1;
+  tp->rates = vec_new(nbranches);
+  tp->rates_grad = vec_new(nbranches);
+  vec_set_all(tp->rates, 1.0);
+  vec_zero(tp->rates_grad);
+  if (tp->br2idx == NULL) tp->br2idx = bs_hash_new(128);
+}
+
+void tp_rates_pre_likelihood(TreeModel *mod, TreePrior *tp, Vector *tau_saved) {
+  int nn = mod->tree->nnodes;
+  if (tp->rates == NULL) tp_init_rates(tp, mod);
+
+  List *bs_by_id = tr_set_leaf_bitsets(mod->tree);
+  int K = tp->rates->size;
+  int *used = (int*)scalloc(K, sizeof(int));
+
+  for (int i = 0; i < nn; ++i) {
+    TreeNode *n = (TreeNode*)lst_get_ptr(mod->tree->nodes, i);
+    if (n->parent == NULL) continue;            /* root has no branch */
+    BSet *bs = (BSet*)lst_get_ptr(bs_by_id, n->id);
+    int slot = tp_get_or_assign_branch_idx(tp, bs, used);
+    double rate = vec_get(tp->rates, slot);
+    double tau  = n->dparent;
+    vec_set(tau_saved, n->id, tau);
+    n->dparent = rate * tau;                     /* bl_eff for the likelihood */
+  }
+
+  /* zero rates_grad for this gradient eval; the likelihood part is added in
+     tp_rates_post_likelihood, the prior part in tp_compute_log_prior */
+  vec_zero(tp->rates_grad);
+
+  for (int id = 0; id < nn; ++id)
+    bs_free((BSet*)lst_get_ptr(bs_by_id, id));
+  lst_free(bs_by_id);
+  sfree(used);
+}
+
+void tp_rates_post_likelihood(TreeModel *mod, TreePrior *tp, Vector *tau_saved,
+                              Vector *dL_dt) {
+  int nn = mod->tree->nnodes;
+  List *bs_by_id = tr_set_leaf_bitsets(mod->tree);
+
+  for (int i = 0; i < nn; ++i) {
+    TreeNode *n = (TreeNode*)lst_get_ptr(mod->tree->nodes, i);
+    if (n->parent == NULL) continue;
+    BSet *bs = (BSet*)lst_get_ptr(bs_by_id, n->id);
+    void *pv = bs_hash_get(tp->br2idx, bs);      /* slot assigned in pre */
+    int slot = (pv != NULL) ? *(int*)pv : 0;
+    double rate = vec_get(tp->rates, slot);
+    double tau  = vec_get(tau_saved, n->id);
+    double g    = vec_get(dL_dt, n->id);          /* dL/d bl_eff */
+    /* likelihood part of the rate gradient: d bl_eff/d rate = tau */
+    vec_set(tp->rates_grad, slot, vec_get(tp->rates_grad, slot) + tau * g);
+    /* convert dL_dt to the TIME gradient for UPGMA backprop: d bl_eff/d tau = rate */
+    vec_set(dL_dt, n->id, rate * g);
+    n->dparent = tau;                             /* restore time tree */
+  }
+
+  for (int id = 0; id < nn; ++id)
+    bs_free((BSet*)lst_get_ptr(bs_by_id, id));
+  lst_free(bs_by_id);
+}
+
 /* Huber functions with threshold kappa, for reduced sensitivity to
    outliers compared with standard quadratic */
 static inline double huber_rho(double z, double kappa) {
@@ -171,6 +277,96 @@ static inline double huber_psi(double z, double kappa) {  // derivative wrt z
   if (z >=  kappa) return  kappa;
   if (z <= -kappa) return -kappa;
   return z;
+}
+
+/* M2 latent relaxed clock prior.  Two independent pieces:
+   (1) the time-tree prior (Yule with lambda integrated, Gamma, or NONE) on
+       tau_b = dparent_b, scored by tp_prior_noclock; its per-branch gradient
+       goes into branchgrad and is folded into dL_dtau -> embedding.
+   (2) a lognormal(mean 1, sigma) prior on the explicit per-branch rates,
+       penalizing log rate toward mu = -0.5 sigma^2 (Huber-robustified, as in
+       the NJ-era clock).  This writes rates_grad (a nuisance gradient) and
+       relclock_sig_grad; it does NOT touch branchgrad.  The rates enter the
+       LIKELIHOOD via the bl_eff = rate*tau sandwich in gradients.c, so this
+       prior only regularizes them -- it never penalizes branch lengths the
+       way the broken NJ-relclock did.
+   rates_grad's likelihood part (tau*dL/d bl_eff) was already accumulated by
+   tp_rates_post_likelihood before this call; here we ADD the prior part. */
+static double tp_latent_clock_prior(TreeModel *mod, struct cvdat *data,
+                                    Vector *branchgrad) {
+  TreePrior *tp = data->treeprior;
+  int nn = mod->tree->nnodes;
+  int nbranches = nn - 1;
+
+  /* (1) time-tree prior on tau = dparent (writes branchgrad) */
+  double retval = tp_prior_noclock(mod, tp, branchgrad);
+
+  /* if rates are not yet allocated (prior somehow reached before the first
+     likelihood pass), there is nothing to score; the time prior stands. */
+  if (tp->rates == NULL)
+    return retval;
+
+  /* (2) lognormal clock prior on the rates */
+  double raw_sigma = tp->relclock_sig;
+  double sig  = SIG_FLOOR + softplus(raw_sigma);
+  double sig2 = sig * sig, mu = -0.5 * sig2, lsig = log(sig);
+  double dsig_draw = sigmoid(raw_sigma);
+  const double KAPPA = 0.5;
+
+  /* per-branch normalizing constant of the lognormal density */
+  retval += nbranches * (-lsig - 0.5 * log(2 * M_PI));
+
+  List *bs_by_id = tr_set_leaf_bitsets(mod->tree);
+  for (int i = 0; i < nn; ++i) {
+    TreeNode *n = (TreeNode*)lst_get_ptr(mod->tree->nodes, i);
+    if (n->parent == NULL) continue;
+    BSet *bs = (BSet*)lst_get_ptr(bs_by_id, n->id);
+    void *pv = bs_hash_get(tp->br2idx, bs);     /* slot assigned in pre */
+    int slot = (pv != NULL) ? *(int*)pv : 0;
+    double rate = fmax(vec_get(tp->rates, slot), BL_EPS);  /* keep log finite */
+
+    double z   = log(rate) - mu;                 /* penalize log rate toward mu */
+    double rho = huber_rho(z, KAPPA);
+    double psi = huber_psi(z, KAPPA);
+
+    retval += -rho / sig2;
+
+    /* d/drate of [-rho(z)/sig2], z = log rate - mu, dz/drate = 1/rate */
+    double dr = -(psi / sig2) / rate;
+    vec_set(tp->rates_grad, slot, vec_get(tp->rates_grad, slot) + dr);
+
+    /* d/dsigma of [-log sigma - rho/sig2] = -1/sig - psi/sig + 2 rho/sig^3 */
+    tp->relclock_sig_grad += -1.0/sig - psi/sig + (2.0 * rho)/(sig * sig2);
+  }
+
+  /* sigma hyperprior: gaussian on log sigma (matching the NJ-era clock) */
+  if (tp->relclock_sig_exp_mean == -1) {
+    double lsigdif = lsig - tp->relclock_lsig_mean;
+    double lsigvar = tp->relclock_lsig_sd * tp->relclock_lsig_sd;
+    retval += -0.5 * (lsigdif * lsigdif) / lsigvar;
+    tp->relclock_sig_grad += -lsigdif / lsigvar * (1.0 / sig);
+  }
+  else {
+    retval += -log(tp->relclock_sig_exp_mean) - sig / tp->relclock_sig_exp_mean;
+    tp->relclock_sig_grad += -1.0 / tp->relclock_sig_exp_mean;
+  }
+
+  if (sig < SIG_FLOOR && tp->relclock_sig_grad < 0.0)
+    tp->relclock_sig_grad = 0.0;   /* do not push below floor */
+  tp->relclock_sig_grad *= dsig_draw;   /* chain to the raw (pre-softplus) param */
+
+  if (!isfinite(retval)) {
+    /* degenerate sample: fail soft, like the NJ-era path */
+    vec_zero(branchgrad);
+    vec_zero(tp->rates_grad);
+    tp->relclock_sig_grad = 0.0;
+    retval = 0.0;
+  }
+
+  for (int id = 0; id < nn; ++id)
+    bs_free((BSet*)lst_get_ptr(bs_by_id, id));
+  lst_free(bs_by_id);
+  return retval;
 }
 
 /* compute log prior for a tree and branch lengths under a simple Yule
@@ -198,13 +394,14 @@ double tp_compute_log_prior(TreeModel *mod, struct cvdat *data, Vector *branchgr
   vec_zero(branchgrad);
 
   /* LATENT_CLOCK (relclock + ultrametric): the new latent relaxed clock.
-     M0 scaffold -- the prior is not yet implemented, so contribute nothing;
-     --relclock then runs as plain UPGMA + Felsenstein.  (M1 will add the
-     Yule prior on times; M2 the per-branch rates + lognormal clock prior.)
-     Returning here also bypasses the NJ-era nodetime/penalty machinery,
-     which is not valid on the (ultrametric) UPGMA tree. */
+     In ultrametric mode dparent_b is the internode TIME tau_b.  M2 scores
+     the time-tree prior (Yule/Gamma/NONE on the tau's) AND a lognormal
+     prior on the explicit per-branch rates; the rates enter the Felsenstein
+     likelihood via the bl_eff = rate*tau sandwich (gradients.c).  This
+     bypasses the NJ-era nodetime/penalty machinery, invalid on the UPGMA
+     tree. */
   if (tp->relclock == TRUE && data->ultrametric == TRUE)
-    return 0.0;
+    return tp_latent_clock_prior(mod, data, branchgrad);
 
   if (tp->type == GAMMA && tp->gamma_scale == -1)
     tp_init_gamma_scale(tp, mod);
