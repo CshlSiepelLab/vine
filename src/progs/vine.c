@@ -409,13 +409,26 @@ int main(int argc, char *argv[]) {
     hyperbolic = FALSE;
   /* for convenience in scripting; nonhyperbolic considered special case of hyperbolic */
 
+  /* the relaxed clock is implemented on the ultrametric (UPGMA) time tree;
+     --relclock enables that machinery internally (below), so forbid the
+     confusing explicit combination. */
+  if (relclock == TRUE && ultrametric == TRUE)
+    die("Cannot specify both --relclock and --ultrametric; --relclock uses the ultrametric (UPGMA) machinery internally.\n");
+
   /* set up tree prior if selected */
   if (tp_type != NONE || relclock == TRUE)
     tprior = tp_new(tp_type, relclock);
-  
+
   if (tprior != NULL && (is_crispr == TRUE || ultrametric == TRUE))
     die("Tree prior cannot be used with CRISPR mutation model or ultrametric trees.\n");
-  
+
+  /* --relclock is implemented via the ultrametric (UPGMA) time tree; enable
+     it internally.  Placed AFTER the guard above so the guard does not fire
+     on a --relclock run (the explicit --relclock --ultrametric combo is
+     already prohibited above). */
+  if (relclock == TRUE)
+    ultrametric = TRUE;
+
   if (rank != DEFAULT_RANK && covar_param != LOWR && !silent)
     fprintf(stderr, "WARNING: --rank ignored when --covar is not LOWR\n");
 

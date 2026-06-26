@@ -197,6 +197,15 @@ double tp_compute_log_prior(TreeModel *mod, struct cvdat *data, Vector *branchgr
   tp->relclock_sig_grad = 0.0;
   vec_zero(branchgrad);
 
+  /* LATENT_CLOCK (relclock + ultrametric): the new latent relaxed clock.
+     M0 scaffold -- the prior is not yet implemented, so contribute nothing;
+     --relclock then runs as plain UPGMA + Felsenstein.  (M1 will add the
+     Yule prior on times; M2 the per-branch rates + lognormal clock prior.)
+     Returning here also bypasses the NJ-era nodetime/penalty machinery,
+     which is not valid on the (ultrametric) UPGMA tree. */
+  if (tp->relclock == TRUE && data->ultrametric == TRUE)
+    return 0.0;
+
   if (tp->type == GAMMA && tp->gamma_scale == -1)
     tp_init_gamma_scale(tp, mod);
 
