@@ -63,9 +63,10 @@ TaylorData *tay_new(CovarData *data) {
   td->mig_active_last_refresh = FALSE;
   td->elbo_bias = 0.0;
   td->siggrad_cache = NULL; /* will be allocated later */
+  td->nuis_bias_cache = NULL; /* allocated lazily in latent-clock mode */
   td->warmup = 50; /* number of iterations before updates begin */
   td->period = 30; /* update period */
-  td->beta = 0.3;  
+  td->beta = 0.3;
   
   return td;
 }
@@ -81,6 +82,8 @@ void tay_free(TaylorData *td) {
   vec_free(td->tmp_extra);
   if (td->siggrad_cache != NULL)
     vec_free(td->siggrad_cache);
+  if (td->nuis_bias_cache != NULL)
+    vec_free(td->nuis_bias_cache);
   vec_free(td->y);
   vec_free(td->x);
   if (td->nb != NULL)
@@ -855,6 +858,21 @@ double nj_elbo_hybrid(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
     nj_update_nuis_grad(mod, data, nuis_grad);
   }
 
+  /* M2 latent relaxed clock: the per-branch rate nuisances are badly served
+     by the single mean-tree gradient (nuis_grad above) -- they want
+     E_q[tau * dL/d bl_eff] over the sampled trees, and the bias grows with
+     tree size.  Stash the mean-point nuisance gradient now; below we cache an
+     EMA of the (MC - mean-point) bias and add it back every iteration, the
+     same way ll uses ll_mu + 0.5*T_cache.  Gated on latent-clock mode so the
+     default Taylor path is byte-for-byte unchanged. */
+  unsigned int latent_clock = (data->treeprior != NULL &&
+      data->treeprior->relclock == TRUE && data->ultrametric == TRUE);
+  Vector *nuis_mu = NULL;
+  if (latent_clock && nuis_grad != NULL) {
+    nuis_mu = vec_new(nuis_grad->size);
+    vec_copy(nuis_mu, nuis_grad);
+  }
+
   /* ---------------------------------------
    * 2. Decide whether to refresh MC cache
    * --------------------------------------- */
@@ -900,6 +918,22 @@ double nj_elbo_hybrid(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
                          mc_nuis,
                          &mc_lprior,
                          &mc_migll);
+
+    /* M2: EMA the nuisance-gradient bias (MC - mean-point) for latent-clock
+       mode.  Computed here, before mig_active_last_refresh is updated below,
+       so the reset condition is still valid. */
+    if (latent_clock && nuis_grad != NULL && mc_nuis != NULL && nuis_mu != NULL) {
+      if (td->nuis_bias_cache == NULL)
+        td->nuis_bias_cache = vec_new(nuis_grad->size);
+      int nuis_reset = (td->iter == td->warmup) ||
+                       (mig_active_now != td->mig_active_last_refresh);
+      for (int j = 0; j < nuis_grad->size; j++) {
+        double b = vec_get(mc_nuis, j) - vec_get(nuis_mu, j);
+        double old = vec_get(td->nuis_bias_cache, j);
+        vec_set(td->nuis_bias_cache, j,
+                nuis_reset ? b : (1.0 - td->beta) * old + td->beta * b);
+      }
+    }
 
     /* ---------------------------------------
      * 3. Cache + smooth MC correction
@@ -973,6 +1007,15 @@ double nj_elbo_hybrid(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
     vec_free(mc_grad);
     if (mc_nuis) vec_free(mc_nuis);
   }
+
+  /* M2: apply the cached bias corrections every iteration so the embedding and
+     rate gradients are distribution-averaged (fresh mean-point base + EMA bias)
+     rather than the biased single-mean-tree estimate.  MC still runs only on
+     refresh iters, so Taylor's speed is preserved. */
+  if (latent_clock && nuis_grad != NULL && td->nuis_bias_cache != NULL && nuis_mu != NULL)
+    for (int j = 0; j < nuis_grad->size; j++)
+      vec_set(nuis_grad, j, vec_get(nuis_mu, j) + vec_get(td->nuis_bias_cache, j));
+  if (nuis_mu != NULL) vec_free(nuis_mu);
 
   td->iter++;
 

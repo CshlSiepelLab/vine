@@ -72,6 +72,11 @@ typedef struct taylor_data {
                                            warmup-era residual */
   double elbo_bias;  /* EMA of (Taylor ELBO - MC ELBO), for debiasing */
   Vector *siggrad_cache;   /* size = nsigma (or full grad layout if you include mu) */
+  Vector *nuis_bias_cache; /* M2: EMA of (MC nuisance grad - mean-point nuisance
+                              grad), used in latent-clock mode to give the
+                              per-branch rate nuisances a distribution-averaged
+                              gradient every iteration instead of the biased
+                              single-mean-tree estimate (size = nuis_grad) */
   int iter;    /* current iteration */
   int warmup;  /* number of warmup iterations */
   int period;  /* period between updates */
