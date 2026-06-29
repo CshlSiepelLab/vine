@@ -44,7 +44,7 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     *best_sigmapar, *rescaledgrad, *sparsitygrad = NULL, 
     *sigmapar = data->params;
   Vector **m_mu = NULL, **v_mu = NULL, **best_mu = NULL;
-  int n = data->nseqs, j, k, t, stop = FALSE, bestt = -1, graddim,
+  int n = data->nseqs, i, j, k, t, stop = FALSE, bestt = -1, graddim,
     dim = data->dim, fulld = n*dim, reenable_taylor_t = -1,
     component = 0, ncomponents = mixmvn->ncomponents;
   int *component_t = NULL;
@@ -185,65 +185,69 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     sched_next(s, st, sm, sd);
     unsigned int clipped = FALSE;
     
-    /* we can precompute the KLD because it does not depend on the data under this model */
-    /* (see equation 7, Doersch arXiv 2016) */
+    /* we can precompute the KLD because it does not depend on the data under this model,
+       (see equation 7, Doersch arXiv 2016). This does not apply to the mixture case, which
+       will be handled using monte carlo below. */
     kld = 0;
     vec_zero(kldgrad);
-    logdet = mmvn_log_det(mmvn);
-    if (data->treeprior == NULL) { /* only do if no explicit tree prior */
-      trace = mmvn_trace(mmvn);  /* we'll reuse this */
-    
-      kld = 0.5 * (trace + mmvn_mu2(mmvn) - fulld - logdet);
+    if (ncomponents == 1) {
+      logdet = mmvn_log_det(mmvn);
+      if (data->treeprior == NULL) { /* only do if no explicit tree prior */
+        trace = mmvn_trace(mmvn);  /* we'll reuse this */
+      
+        kld = 0.5 * (trace + mmvn_mu2(mmvn) - fulld - logdet);
 
-      kld *= data->kld_upweight/(data->pointscale*data->pointscale);      
-    
-      /* we can also precompute the contribution of the KLD to the gradient */
-      /* Note KLD is subtracted rather than added, so compute the gradient of -KLD */
-      for (j = 0; j < kldgrad->size; j++) {
-        double gj = 0.0;
+        kld *= data->kld_upweight/(data->pointscale*data->pointscale);      
+      
+        /* we can also precompute the contribution of the KLD to the gradient */
+        /* Note KLD is subtracted rather than added, so compute the gradient of -KLD */
+        for (j = 0; j < kldgrad->size; j++) {
+          double gj = 0.0;
 
-        if (j < n*dim)  /* partial deriv wrt mu_j is just mu_j */
-          gj = -1.0*mmvn_get_mu_el(mmvn, j);
-        else {            /* partial deriv wrt sigma_j is more
-                             complicated because of the trace and log
-                             determinant */
-          if (data->type == CONST || data->type == DIST)
-            gj = 0.5 * (fulld - trace);
-          else if (data->type == DIAG) 
-            gj = 0.5 * (1.0 - mat_get(mmvn->mvn->sigma, j-fulld, j-fulld)); 
-          else 
-            continue; /* LOWR case is messy; handle below */
+          if (j < n*dim)  /* partial deriv wrt mu_j is just mu_j */
+            gj = -1.0*mmvn_get_mu_el(mmvn, j);
+          else {            /* partial deriv wrt sigma_j is more
+                              complicated because of the trace and log
+                              determinant */
+            if (data->type == CONST || data->type == DIST)
+              gj = 0.5 * (fulld - trace);
+            else if (data->type == DIAG) 
+              gj = 0.5 * (1.0 - mat_get(mmvn->mvn->sigma, j-fulld, j-fulld)); 
+            else 
+              continue; /* LOWR case is messy; handle below */
+          }
+          vec_set(kldgrad, j, gj);
         }
-        vec_set(kldgrad, j, gj);
+      
+        if (data->type == LOWR) 
+          nj_set_kld_grad_LOWR(kldgrad, mmvn);
       }
-    
-      if (data->type == LOWR) 
-        nj_set_kld_grad_LOWR(kldgrad, mmvn);
-    }
-    else { /* with explicit tree prior, we need the entropy of the MVN instead */
-      kld = -0.5 * (fulld * (1.0 + log(2 * M_PI)) + logdet);
-      kld *= data->kld_upweight/(data->pointscale*data->pointscale);      
-      /* note overloading name and negating */
-      for (j = 0; j < kldgrad->size; j++) {
-        double gj = 0.0;
+      else { /* with explicit tree prior, we need the entropy of the MVN instead */
+        kld = -0.5 * (fulld * (1.0 + log(2 * M_PI)) + logdet);
+        kld *= data->kld_upweight/(data->pointscale*data->pointscale);      
+        /* note overloading name and negating */
+        for (j = 0; j < kldgrad->size; j++) {
+          double gj = 0.0;
 
-        if (j < n*dim)  /* partial deriv wrt mu_j is zero */
-          gj = 0.0;
-        else {            /* partial deriv wrt sigma_j */
-          if (data->type == CONST || data->type == DIST)
-            gj = 0.5 * fulld;
-          else if (data->type == DIAG) 
-            gj = 0.5;
-          else 
-            continue; /* LOWR case is messy; handle below */
+          if (j < n*dim)  /* partial deriv wrt mu_j is zero */
+            gj = 0.0;
+          else {            /* partial deriv wrt sigma_j */
+            if (data->type == CONST || data->type == DIST)
+              gj = 0.5 * fulld;
+            else if (data->type == DIAG) 
+              gj = 0.5;
+            else 
+              continue; /* LOWR case is messy; handle below */
+          }
+          vec_set(kldgrad, j, gj);
         }
-        vec_set(kldgrad, j, gj);
+        if (data->type == LOWR) 
+          nj_set_entropy_grad_LOWR(kldgrad, mmvn);
       }
-      if (data->type == LOWR) 
-        nj_set_entropy_grad_LOWR(kldgrad, mmvn);
     }
 
-    /* can also pre-compute variance penalty */
+    /* can also pre-compute variance penalty, which is okay in the mixture case
+    when the covariance is shared across components */
     vec_zero(sparsitygrad);
     nj_compute_variance_penalty(sparsitygrad, mmvn, data);
     penalty = data->var_pen;
@@ -306,8 +310,70 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     
     if (data->taylor == NULL) {
       ll_at_mean = 0;  /* not available in MC path */
-      avell = nj_elbo_montecarlo(mod, mmvn, data, nminibatch, avegrad,
-                                 ave_nuis_grad, &ave_lprior, &avemigll);
+      if (ncomponents == 1)
+        avell = nj_elbo_montecarlo(mod, mmvn, data, nminibatch, avegrad,
+                                   ave_nuis_grad, &ave_lprior, &avemigll);
+      else {
+        Vector *grad = vec_new(avegrad->size), *nuis_grad = NULL,
+          *points = vec_new(fulld), *points_std;
+        double ll, migll = 0, lprior = 0;
+
+        if (data->type == LOWR)
+          points_std = vec_new(data->lowrank * dim);
+        else
+          points_std = vec_new(fulld);
+
+        vec_zero(avegrad);
+        if (ave_nuis_grad != NULL) {
+          nuis_grad = vec_new(ave_nuis_grad->size);
+          vec_zero(ave_nuis_grad);
+        }
+        avell = ave_lprior = avemigll = kld = 0;
+
+        for (i = 0; i < nminibatch; i++) {
+          migll = 0;
+          lprior = 0;
+          vec_zero(grad);
+
+          nj_sample_points(mmvn, points, points_std);
+          ll = nj_compute_model_grad(mod, mmvn, points, points_std, grad, data,
+                                     NULL, &migll, &lprior);
+          assert(isfinite(ll));
+
+          avell += ll;
+          avemigll += migll;
+          ave_lprior += lprior;
+          kld += mixmvn_log_dens(mixmvn, points);
+          if (data->treeprior == NULL)
+            kld += 0.5 * (fulld * log(2 * M_PI) +
+                          vec_inner_prod(points, points));
+          vec_plus_eq(avegrad, grad);
+
+          if (ave_nuis_grad != NULL) {
+            vec_zero(nuis_grad);
+            nj_update_nuis_grad(mod, data, nuis_grad);
+            vec_plus_eq(ave_nuis_grad, nuis_grad);
+          }
+        }
+
+        vec_scale(avegrad, 1.0/nminibatch);
+        avell /= nminibatch;
+        ave_lprior /= nminibatch;
+        avemigll /= nminibatch;
+        kld *= data->kld_upweight /
+          (nminibatch * data->pointscale * data->pointscale);
+        if (ave_nuis_grad != NULL)
+          vec_scale(ave_nuis_grad, 1.0/nminibatch);
+
+        vec_free(points);
+        vec_free(points_std);
+        vec_free(grad);
+        if (nuis_grad != NULL)
+          vec_free(nuis_grad);
+
+        tr_free(mod->tree);
+        mod->tree = NULL;
+      }
     }
     
     /* In subsample mode the likelihood (and its gradient) are computed
