@@ -66,6 +66,14 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   if (mmvn->d * mmvn->n != dim * n)
     die("ERROR in nj_variational_inf: bad dimensions\n");
 
+  /* TODO: implement Taylor approximation for mixture models */
+  if (ncomponents > 1 && data->taylor != NULL) {
+    if (!silent)
+      fprintf(stderr, "Disabling Taylor approximation for mixture model.\n");
+    tay_free(data->taylor);
+    data->taylor = NULL;
+  }
+
   graddim = fulld + data->params->size;
   kldgrad = vec_new(graddim);
   avegrad = vec_new(graddim);
