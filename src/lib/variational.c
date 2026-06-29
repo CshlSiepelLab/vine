@@ -35,7 +35,7 @@
    Adam algorithm.  Takes initial tree model and alignment and
    distance matrix, dimensionality of Euclidean space to work in.
    Note: alters distance matrix */
-void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
+void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
                         double learnrate, int nbatches_conv, int min_nbatches,
                         CovarData *data, FILE *logf,
                         unsigned int silent, unsigned int log_all) {
@@ -50,6 +50,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
     running_tot = 0, last_running_tot = -INFTY, trace, logdet, penalty = 0,
     bestpenalty = 0, ave_lprior, best_lprior = -INFTY, subsamp_rescale = 1.0,
     ll_at_mean = 0, bestll_at_mean = -INFTY;
+  multi_MVN *mmvn = mixmvn_get_component(mixmvn, 0);  /* Initialize mmvn with the first component */
   TaylorData *taylor_stash = NULL;
 
   /* for nuisance parameters; these are parameters that are optimized
@@ -141,6 +142,9 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
   sm->grad_norm = 0;
 
   do {
+
+    /* Sample which component to use this iteration */
+    mmvn = mixmvn_get_component(mixmvn, mixmvn_sample_component(mixmvn));
 
     /* simple update to user */
     if (t > 0 && t % 100 == 0) {

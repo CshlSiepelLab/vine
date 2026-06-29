@@ -17,6 +17,7 @@
 #include <nj.h>
 #include <mvn.h>
 #include <multi_mvn.h>
+#include <mixture_mvn.h>
 
 /* tuning parameters for Adam algorithm.  The learning rate (called
    alpha) will be passed in as a parameter.
@@ -36,7 +37,7 @@
    algorithms */
 #define NSUBSAMPLES 256
 
-void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
+void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
                         double learnrate, int nbatches_conv, int min_nbatches,
                         CovarData *data, FILE *logf, unsigned int silent,
                         unsigned int log_all_params);

@@ -685,7 +685,7 @@ int main(int argc, char *argv[]) {
 
       if (!silent) fprintf(stderr, "Starting variational inference...\n");
 
-      nj_variational_inf(mod, mmvn, batchsize, learnrate,
+      nj_variational_inf(mod, mixmvn, batchsize, learnrate,
                          niter_conv, min_iter, 
                          covar_data, logfile, silent, log_all);
 
