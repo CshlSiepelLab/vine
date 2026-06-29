@@ -37,9 +37,6 @@ mixture_MVN *mixmvn_new(int ncomponents, int n, int d, enum mvn_type type) {
 void mixmvn_free(mixture_MVN *mix) {
   int k;
 
-  if (mix == NULL)
-    return;
-
   for (k = 0; k < mix->ncomponents; k++)
     if (mix->components[k] != NULL)
       mmvn_free(mix->components[k]);
@@ -50,9 +47,39 @@ void mixmvn_free(mixture_MVN *mix) {
 
 /* Return a pointer to the specified component. */
 multi_MVN *mixmvn_get_component(mixture_MVN *mix, int component) {
-  assert(mix != NULL);
-  assert(component >= 0 && component < mix->ncomponents);
   return mix->components[component];
+}
+
+/* Initialize all other component means from one component plus Gaussian jitter. */
+void mixmvn_init_jitter_from_component(mixture_MVN *mix, int component,
+                                  double jitter_sd) {
+  int i, k;
+  Vector *mu;
+
+  assert(component >= 0 && component < mix->ncomponents);
+  assert(jitter_sd >= 0);
+
+  /* Initialize the mean vector with the mean of the specified component. */
+  mu = vec_new(mix->components[component]->n * mix->components[component]->d);
+  mmvn_save_mu(mix->components[component], mu);
+
+  for (k = 0; k < mix->ncomponents; k++) {
+    /* Skip the specified component. */
+    if (k == component)
+      continue;
+
+    /* Add Gaussian jitter to each element of the mean vector. */
+    for (i = 0; i < mu->size; i++)
+      vec_set(mu, i, vec_get(mu, i) + norm_draw(0, jitter_sd));
+
+    /* Store the jittered mean vector. */
+    mmvn_set_mu(mix->components[k], mu);
+
+    /* Restore the mean vector of the specified component for the next component. */
+    mmvn_save_mu(mix->components[component], mu);
+  }
+
+  vec_free(mu);
 }
 
 /* Sample a component from the mixture. */

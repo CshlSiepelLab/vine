@@ -25,6 +25,9 @@ void mixmvn_free(mixture_MVN *mix);
 
 multi_MVN *mixmvn_get_component(mixture_MVN *mix, int component);
 
+void mixmvn_init_jitter_from_component(mixture_MVN *mix, int component,
+                                  double jitter_sd);
+
 int mixmvn_sample_component(mixture_MVN *mix);
 
 double mixmvn_log_dens(mixture_MVN *mix, Vector *x);
