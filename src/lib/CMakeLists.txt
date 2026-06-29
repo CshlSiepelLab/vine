@@ -13,6 +13,7 @@ add_library(vine_core STATIC
     likelihoods.c
     migration.c
     mcmc.c
+    mixture_mvn.c
     multi_mvn.c
     multiDAG.c
     mvn.c

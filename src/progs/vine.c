@@ -29,6 +29,7 @@
 #include <mcmc.h>
 #include <tree_prior.h>
 #include <migration.h>
+#include <mixture_mvn.h>
 #include <multiDAG.h>
 #include <version.h>
 #include "vine.help"
@@ -109,6 +110,7 @@ int main(int argc, char *argv[]) {
     negcurvature = 1.0, var_reg = 1.0, kld_upweight = 1.0;
   MarkovMatrix *rmat = NULL;
   multi_MVN *mmvn = NULL;
+  mixture_MVN *mixmvn = NULL;
   TreeNode *init_tree = NULL;
   CovarData *covar_data = NULL;
   CrisprMutTable *crispr_muts = NULL;
@@ -646,7 +648,8 @@ int main(int argc, char *argv[]) {
       }
 
       /* initialize parameters of multivariate normal */
-      mmvn = mmvn_new(ntips, dim, covar_data->mvn_type);
+      mixmvn = mixmvn_new(1, ntips, dim, covar_data->mvn_type);
+      mmvn = mixmvn_get_component(mixmvn, 0);
       if (random_start == TRUE) {
         mvn_sample_std(mmvn->mvn->mu);
         vec_scale(mmvn->mvn->mu, 0.1);
@@ -796,7 +799,9 @@ int main(int argc, char *argv[]) {
     tm_free(mod);
   if (covar_data != NULL)
     nj_free_covar_data(covar_data);
-  if (mmvn != NULL)
+  if (mixmvn != NULL)
+    mixmvn_free(mixmvn);
+  else if (mmvn != NULL)
     mmvn_free(mmvn);
   if (logfile != NULL)
     fclose(logfile);
