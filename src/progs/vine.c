@@ -86,7 +86,8 @@ int main(int argc, char *argv[]) {
                   batchsize = DEFAULT_BATCHSIZE,
                   niter_conv = DEFAULT_NITER_CONV, min_iter = DEFAULT_MIN_ITER,
                   rank = DEFAULT_RANK, nthreads = 1, dgamma_cats = 1,
-                  mcmc_thin = DEFAULT_MCMC_THIN, seed = -1;
+                  mcmc_thin = DEFAULT_MCMC_THIN, seed = -1,
+                  n_mixture_components = 1;
   unsigned int nj_only = FALSE, random_start = FALSE, hyperbolic = FALSE,
                dist_embedding = FALSE, mcmc = FALSE,
                natural_grad = FALSE, is_crispr = FALSE,
@@ -167,6 +168,7 @@ int main(int argc, char *argv[]) {
     {"treeprior", 1, 0, 'P'},
     {"relclock", 0, 0, 'L'},
     {"migration", 1, 0, 'G'},
+    {"n-mixture-components", 1, 0, 'A'},
     {"primary", 1, 0, '1'},
     {"dgamma", 1, 0, 'K'},
     {"montecarlo", 0, 0, 'y'},
@@ -387,6 +389,11 @@ int main(int argc, char *argv[]) {
       break;
     case 'a':
       log_all = TRUE;
+      break;
+    case 'A':
+      n_mixture_components = atoi(optarg);
+      if (n_mixture_components <= 0)
+        die("ERROR: --n-mixture-components must be positive\n");
       break;
     case 'x':
       printf("VINE version %s\n", VINE_VERSION);
@@ -648,7 +655,7 @@ int main(int argc, char *argv[]) {
       }
 
       /* initialize parameters of multivariate normal */
-      mixmvn = mixmvn_new(1, ntips, dim, covar_data->mvn_type);
+      mixmvn = mixmvn_new(n_mixture_components, ntips, dim, covar_data->mvn_type);
       mmvn = mixmvn_get_component(mixmvn, 0);
       if (random_start == TRUE) {
         mvn_sample_std(mmvn->mvn->mu);
