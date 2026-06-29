@@ -605,18 +605,22 @@ double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
 /* sample a list of trees from the approximate posterior distribution
    and return as a new list.  If logdens is non-null, return
    corresponding vector of log densities for the samples */
-List *nj_var_sample(int nsamples, multi_MVN *mmvn, CovarData *data, char** names,
+List *nj_var_sample(int nsamples, mixture_MVN *mixmvn, CovarData *data, char** names,
                     Vector *logdens) {
   List *retval = lst_new_ptr(nsamples);
-  int i;
+  int i, component;
+  multi_MVN *mmvn;
   TreeNode *tree;
-  Vector *points_x = vec_new(mmvn->d * mmvn->n), *points_y = vec_new(mmvn->d * mmvn->n);
+  Vector *points_x = vec_new(data->dim * data->nseqs),
+    *points_y = vec_new(data->dim * data->nseqs);
   
   for (i = 0; i < nsamples; i++) {
+    component = mixmvn_sample_component(mixmvn);
+    mmvn = mixmvn_get_component(mixmvn, component);
     nj_sample_points(mmvn, points_x, NULL);
     
     if (logdens != NULL) 
-      vec_set(logdens, i, mmvn_log_dens(mmvn, points_x));
+      vec_set(logdens, i, mixmvn_log_dens(mixmvn, points_x));
      
     nj_apply_normalizing_flows(points_y, points_x, data, NULL);
     nj_points_to_distances(points_y, data);

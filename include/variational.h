@@ -47,7 +47,7 @@ double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
                           Vector *ave_nuis_grad, double *ave_lprior,
                           double *avemigll);
 
-List *nj_var_sample(int nsamples, multi_MVN *mmvn, CovarData *data,
+List *nj_var_sample(int nsamples, mixture_MVN *mixmvn, CovarData *data,
                     char** names, Vector *logdens);
 
 TreeNode *nj_mean(Vector *mu, char **names, CovarData *data);

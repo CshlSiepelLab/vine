@@ -459,6 +459,12 @@ int main(int argc, char *argv[]) {
 
   if (is_crispr == TRUE && dgamma_cats != 1)
     die("--dgamma-cats cannot be used with CRISPR.\n");
+
+  /* TODO: Make MCMC mixture aware */
+  if (mcmc == TRUE && n_mixture_components > 1) {
+    mcmc = FALSE;
+    fprintf(stderr, "WARNING: MCMC is not currently supported for mixture models; ignoring --mcmc\n");
+  }
   
   if ((nj_only || dist_embedding) &&
       (indistfile != NULL || init_tree != NULL)) {
@@ -709,7 +715,7 @@ int main(int argc, char *argv[]) {
       }
 
       else /* otherwise just sample directly from approx posterior */
-        trees = nj_var_sample(nsamples, mmvn, covar_data, names, NULL);
+        trees = nj_var_sample(nsamples, mixmvn, covar_data, names, NULL);
 
       /* expand all sampled trees; msa_seq_idx must be rebuilt per tree
          because caterpillar node IDs vary across trees (the global
