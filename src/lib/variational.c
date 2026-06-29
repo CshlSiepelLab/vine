@@ -40,7 +40,7 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
                         CovarData *data, FILE *logf,
                         unsigned int silent, unsigned int log_all) {
 
-  Vector *kldgrad, *avegrad, *m, *m_prev, *v, *v_prev,
+  Vector *kldgrad, *avegrad, *m_sigma, *m_sigma_prev, *v_sigma, *v_sigma_prev,
     *best_sigmapar, *rescaledgrad, *sparsitygrad = NULL, 
     *sigmapar = data->params;
   Vector **m_mu = NULL, **v_mu = NULL, **best_mu = NULL;
@@ -78,10 +78,10 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   kldgrad = vec_new(graddim);
   avegrad = vec_new(graddim);
   rescaledgrad = vec_new(graddim);
-  m = vec_new(graddim);
-  m_prev = vec_new(graddim);
-  v = vec_new(graddim);
-  v_prev = vec_new(graddim);
+  m_sigma = vec_new(sigmapar->size);
+  m_sigma_prev = vec_new(sigmapar->size);
+  v_sigma = vec_new(sigmapar->size);
+  v_sigma_prev = vec_new(sigmapar->size);
   sparsitygrad = vec_new(graddim);
   component_t = smalloc(ncomponents * sizeof(int));
   m_mu = smalloc(ncomponents * sizeof(Vector*));
@@ -145,8 +145,8 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   }
 
   /* initialize moments for Adam algorithm */
-  vec_zero(m);  vec_zero(m_prev);
-  vec_zero(v);  vec_zero(v_prev);
+  vec_zero(m_sigma);  vec_zero(m_sigma_prev);
+  vec_zero(v_sigma);  vec_zero(v_sigma_prev);
   if (n_nuisance_params > 0) {
     vec_zero(m_nuis);  vec_zero(m_nuis_prev);
     vec_zero(v_nuis);  vec_zero(v_nuis_prev);
@@ -374,31 +374,29 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     component_t[component]++; /* track iteration count for this component */
     data->variational_iter = t; /* useful for debugging in other routines */
 
-    for (j = 0; j < rescaledgrad->size; j++) {   
+    /* update mu (component-specific moments) */
+    for (j = 0; j < fulld; j++) {
       double mhatj, vhatj, g = vec_get(rescaledgrad, j);
+      vec_set(m_mu[component], j, ADAM_BETA1 * vec_get(m_mu[component], j) + (1.0 - ADAM_BETA1) * g);
+      vec_set(v_mu[component], j, ADAM_BETA2 * vec_get(v_mu[component], j) + (1.0 - ADAM_BETA2) * pow(g, 2));
+      mhatj = vec_get(m_mu[component], j) / (1.0 - pow(ADAM_BETA1, component_t[component]));
+      vhatj = vec_get(v_mu[component], j) / (1.0 - pow(ADAM_BETA2, component_t[component]));
+      mmvn_set_mu_el(mmvn, j, mmvn_get_mu_el(mmvn, j) + sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS));
+    }
 
-      /* update mu or sigma, depending on parameter index */
-      if (j < fulld) {
-        /* update mu */
-        vec_set(m_mu[component], j, ADAM_BETA1 * vec_get(m_mu[component], j) + (1.0 - ADAM_BETA1) * g);
-        vec_set(v_mu[component], j, ADAM_BETA2 * vec_get(v_mu[component], j) + (1.0 - ADAM_BETA2) * pow(g, 2));
-        mhatj = vec_get(m_mu[component], j) / (1.0 - pow(ADAM_BETA1, component_t[component]));
-        vhatj = vec_get(v_mu[component], j) / (1.0 - pow(ADAM_BETA2, component_t[component]));
-        mmvn_set_mu_el(mmvn, j, mmvn_get_mu_el(mmvn, j) + sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS));
-      }
-      else {
-        /* update sigma */
-        vec_set(m, j, ADAM_BETA1 * vec_get(m_prev, j) + (1.0 - ADAM_BETA1) * g);
-        vec_set(v, j, ADAM_BETA2 * vec_get(v_prev, j) + (1.0 - ADAM_BETA2) * pow(g,2));
-        mhatj = vec_get(m, j) / (1.0 - pow(ADAM_BETA1, t));
-        vhatj = vec_get(v, j) / (1.0 - pow(ADAM_BETA2, t));
-        vec_set(sigmapar, j - fulld, vec_get(sigmapar, j - fulld) + sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS));
-      }
+    /* update sigma (shared across components) */
+    for (j = 0; j < sigmapar->size; j++) {
+      double mhatj, vhatj, g = vec_get(rescaledgrad, fulld + j);
+      vec_set(m_sigma, j, ADAM_BETA1 * vec_get(m_sigma_prev, j) + (1.0 - ADAM_BETA1) * g);
+      vec_set(v_sigma, j, ADAM_BETA2 * vec_get(v_sigma_prev, j) + (1.0 - ADAM_BETA2) * pow(g, 2));
+      mhatj = vec_get(m_sigma, j) / (1.0 - pow(ADAM_BETA1, t));
+      vhatj = vec_get(v_sigma, j) / (1.0 - pow(ADAM_BETA2, t));
+      vec_set(sigmapar, j, vec_get(sigmapar, j) + sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS));
     }
     mixmvn_update_covariance(mixmvn, data);
     
-    vec_copy(m_prev, m);
-    vec_copy(v_prev, v);
+    vec_copy(m_sigma_prev, m_sigma);
+    vec_copy(v_sigma_prev, v_sigma);
 
     /* same thing for nuisance params, if necessary */
     for (j = 0; j < n_nuisance_params; j++) {   
@@ -507,8 +505,8 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   if (!silent) fprintf(stderr, "Converged in %d iterations; ELBO=%.2f...\n", t, bestelb);
 
   vec_free(avegrad); vec_free(rescaledgrad); vec_free(kldgrad);
-  vec_free(sparsitygrad); vec_free(m);
-  vec_free(m_prev); vec_free(v); vec_free(v_prev); vec_free(best_sigmapar);
+  vec_free(sparsitygrad); vec_free(m_sigma);
+  vec_free(m_sigma_prev); vec_free(v_sigma); vec_free(v_sigma_prev); vec_free(best_sigmapar);
   for (k = 0; k < ncomponents; k++) {
     vec_free(m_mu[k]);
     vec_free(v_mu[k]);
