@@ -41,9 +41,9 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
                         unsigned int silent, unsigned int log_all) {
 
   Vector *kldgrad, *avegrad, *m, *m_prev, *v, *v_prev,
-    *best_mu, *best_sigmapar, *rescaledgrad, *sparsitygrad = NULL, 
+    *best_sigmapar, *rescaledgrad, *sparsitygrad = NULL, 
     *sigmapar = data->params;
-  Vector **m_mu = NULL, **v_mu = NULL;
+  Vector **m_mu = NULL, **v_mu = NULL, **best_mu = NULL;
   int n = data->nseqs, j, k, t, stop = FALSE, bestt = -1, graddim,
     dim = data->dim, fulld = n*dim, reenable_taylor_t = -1,
     component = 0, ncomponents = mixmvn->ncomponents;
@@ -78,6 +78,7 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   component_t = smalloc(ncomponents * sizeof(int));
   m_mu = smalloc(ncomponents * sizeof(Vector*));
   v_mu = smalloc(ncomponents * sizeof(Vector*));
+  best_mu = smalloc(ncomponents * sizeof(Vector*));
 
   if (n_nuisance_params > 0) {
     ave_nuis_grad = vec_new(n_nuisance_params);
@@ -88,8 +89,6 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     best_nuis_params = vec_new(n_nuisance_params);
   }
   
-  best_mu = vec_new(fulld);
-  mmvn_save_mu(mmvn, best_mu);
   best_sigmapar = vec_new(sigmapar->size);
   vec_copy(best_sigmapar, sigmapar);
   center = vec_new(dim);
@@ -98,8 +97,10 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   for (k = 0; k < ncomponents; k++) {
     m_mu[k] = vec_new(fulld);
     v_mu[k] = vec_new(fulld);
+    best_mu[k] = vec_new(fulld);
     vec_zero(m_mu[k]);
     vec_zero(v_mu[k]);
+    mmvn_save_mu(mixmvn_get_component(mixmvn, k), best_mu[k]);
     component_t[k] = 0;
   }
 
@@ -338,7 +339,8 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       bestpenalty = penalty;
       bestmigll = avemigll;
       bestt = t;
-      mmvn_save_mu(mmvn, best_mu);
+      for (k = 0; k < ncomponents; k++)
+        mmvn_save_mu(mixmvn_get_component(mixmvn, k), best_mu[k]);
       vec_copy(best_sigmapar, sigmapar);
       if (n_nuisance_params > 0)
         nj_save_nuis_params(best_nuis_params, mod, data);
@@ -456,7 +458,8 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     }    
   } while(stop == FALSE);
 
-  mmvn_set_mu(mmvn, best_mu);
+  for (k = 0; k < ncomponents; k++)
+    mmvn_set_mu(mixmvn_get_component(mixmvn, k), best_mu[k]);
   vec_copy(sigmapar, best_sigmapar);
   nj_update_covariance(mmvn, data);
   if (n_nuisance_params > 0)
@@ -496,13 +499,15 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 
   vec_free(avegrad); vec_free(rescaledgrad); vec_free(kldgrad);
   vec_free(sparsitygrad); vec_free(m);
-  vec_free(m_prev); vec_free(v); vec_free(v_prev); vec_free(best_mu); vec_free(best_sigmapar);
+  vec_free(m_prev); vec_free(v); vec_free(v_prev); vec_free(best_sigmapar);
   for (k = 0; k < ncomponents; k++) {
     vec_free(m_mu[k]);
     vec_free(v_mu[k]);
+    vec_free(best_mu[k]);
   }
   sfree(m_mu);
   sfree(v_mu);
+  sfree(best_mu);
   sfree(component_t);
   sfree(s); sfree(st); sfree(sd); sfree(sm);
   vec_free(center);
