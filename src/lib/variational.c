@@ -43,14 +43,17 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   Vector *kldgrad, *avegrad, *m, *m_prev, *v, *v_prev,
     *best_mu, *best_sigmapar, *rescaledgrad, *sparsitygrad = NULL, 
     *sigmapar = data->params;
-  int n = data->nseqs, j, t, stop = FALSE, bestt = -1, graddim,
-    dim = data->dim, fulld = n*dim, reenable_taylor_t = -1;
+  Vector **m_mu = NULL, **v_mu = NULL;
+  int n = data->nseqs, j, k, t, stop = FALSE, bestt = -1, graddim,
+    dim = data->dim, fulld = n*dim, reenable_taylor_t = -1,
+    component = 0, ncomponents = mixmvn->ncomponents;
+  int *component_t = NULL;
   double elb = 0, avell, avemigll, kld, bestelb = -INFTY, bestll = -INFTY,
     bestkld = -INFTY, bestmigll = -INFTY,
     running_tot = 0, last_running_tot = -INFTY, trace, logdet, penalty = 0,
     bestpenalty = 0, ave_lprior, best_lprior = -INFTY, subsamp_rescale = 1.0,
     ll_at_mean = 0, bestll_at_mean = -INFTY;
-  multi_MVN *mmvn = mixmvn_get_component(mixmvn, 0);  /* Initialize mmvn with the first component */
+  multi_MVN *mmvn = mixmvn_get_component(mixmvn, component);  /* Initialize mmvn with the first component */
   TaylorData *taylor_stash = NULL;
 
   /* for nuisance parameters; these are parameters that are optimized
@@ -72,6 +75,9 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   v = vec_new(graddim);
   v_prev = vec_new(graddim);
   sparsitygrad = vec_new(graddim);
+  component_t = smalloc(ncomponents * sizeof(int));
+  m_mu = smalloc(ncomponents * sizeof(Vector*));
+  v_mu = smalloc(ncomponents * sizeof(Vector*));
 
   if (n_nuisance_params > 0) {
     ave_nuis_grad = vec_new(n_nuisance_params);
@@ -87,6 +93,15 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   best_sigmapar = vec_new(sigmapar->size);
   vec_copy(best_sigmapar, sigmapar);
   center = vec_new(dim);
+
+  /* initialize component-specific moments and iteration counts*/
+  for (k = 0; k < ncomponents; k++) {
+    m_mu[k] = vec_new(fulld);
+    v_mu[k] = vec_new(fulld);
+    vec_zero(m_mu[k]);
+    vec_zero(v_mu[k]);
+    component_t[k] = 0;
+  }
 
   /* set up log file */
   if (logf != NULL) {
@@ -144,7 +159,8 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   do {
 
     /* Sample which component to use this iteration */
-    mmvn = mixmvn_get_component(mixmvn, mixmvn_sample_component(mixmvn));
+    component = mixmvn_sample_component(mixmvn);
+    mmvn = mixmvn_get_component(mixmvn, component);
 
     /* simple update to user */
     if (t > 0 && t % 100 == 0) {
@@ -345,25 +361,29 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 
     /* Adam updates; see Kingma & Ba, arxiv 2014 */
     t++;
+    component_t[component]++; /* track iteration count for this component */
     data->variational_iter = t; /* useful for debugging in other routines */
 
     for (j = 0; j < rescaledgrad->size; j++) {   
       double mhatj, vhatj, g = vec_get(rescaledgrad, j);
-      
-      vec_set(m, j, ADAM_BETA1 * vec_get(m_prev, j) + (1.0 - ADAM_BETA1) * g);
-      vec_set(v, j, ADAM_BETA2 * vec_get(v_prev, j) + (1.0 - ADAM_BETA2) * pow(g,2));
-      mhatj = vec_get(m, j) / (1.0 - pow(ADAM_BETA1, t));
-      vhatj = vec_get(v, j) / (1.0 - pow(ADAM_BETA2, t));
 
       /* update mu or sigma, depending on parameter index */
-      if (j < fulld) 
-        mmvn_set_mu_el(mmvn, j,
-                       mmvn_get_mu_el(mmvn, j) +
-                           sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS));
-      else 
-        vec_set(sigmapar, j - fulld,
-                vec_get(sigmapar, j - fulld) +
-                    sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS));
+      if (j < fulld) {
+        /* update mu */
+        vec_set(m_mu[component], j, ADAM_BETA1 * vec_get(m_mu[component], j) + (1.0 - ADAM_BETA1) * g);
+        vec_set(v_mu[component], j, ADAM_BETA2 * vec_get(v_mu[component], j) + (1.0 - ADAM_BETA2) * pow(g, 2));
+        mhatj = vec_get(m_mu[component], j) / (1.0 - pow(ADAM_BETA1, component_t[component]));
+        vhatj = vec_get(v_mu[component], j) / (1.0 - pow(ADAM_BETA2, component_t[component]));
+        mmvn_set_mu_el(mmvn, j, mmvn_get_mu_el(mmvn, j) + sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS));
+      }
+      else {
+        /* update sigma */
+        vec_set(m, j, ADAM_BETA1 * vec_get(m_prev, j) + (1.0 - ADAM_BETA1) * g);
+        vec_set(v, j, ADAM_BETA2 * vec_get(v_prev, j) + (1.0 - ADAM_BETA2) * pow(g,2));
+        mhatj = vec_get(m, j) / (1.0 - pow(ADAM_BETA1, t));
+        vhatj = vec_get(v, j) / (1.0 - pow(ADAM_BETA2, t));
+        vec_set(sigmapar, j - fulld, vec_get(sigmapar, j - fulld) + sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS));
+      }
     }
     nj_update_covariance(mmvn, data);
     
@@ -477,6 +497,13 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   vec_free(avegrad); vec_free(rescaledgrad); vec_free(kldgrad);
   vec_free(sparsitygrad); vec_free(m);
   vec_free(m_prev); vec_free(v); vec_free(v_prev); vec_free(best_mu); vec_free(best_sigmapar);
+  for (k = 0; k < ncomponents; k++) {
+    vec_free(m_mu[k]);
+    vec_free(v_mu[k]);
+  }
+  sfree(m_mu);
+  sfree(v_mu);
+  sfree(component_t);
   sfree(s); sfree(st); sfree(sd); sfree(sm);
   vec_free(center);
   
