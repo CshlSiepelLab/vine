@@ -12,6 +12,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <phast/misc.h>
+#include <covariance.h>
 #include <mixture_mvn.h>
 
 
@@ -80,6 +81,14 @@ void mixmvn_init_jitter_from_component(mixture_MVN *mix, int component,
   }
 
   vec_free(mu);
+}
+
+/* Update each component with the shared covariance parameters. */
+void mixmvn_update_covariance(mixture_MVN *mix, CovarData *data) {
+  int k;
+
+  for (k = 0; k < mix->ncomponents; k++)
+    nj_update_covariance(mixmvn_get_component(mix, k), data);
 }
 
 /* Sample a component from the mixture. */

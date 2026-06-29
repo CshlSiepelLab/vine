@@ -387,7 +387,7 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
         vec_set(sigmapar, j - fulld, vec_get(sigmapar, j - fulld) + sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS));
       }
     }
-    nj_update_covariance(mmvn, data);
+    mixmvn_update_covariance(mixmvn, data);
     
     vec_copy(m_prev, m);
     vec_copy(v_prev, v);
@@ -458,10 +458,11 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     }    
   } while(stop == FALSE);
 
+  /* Revert to the best parameters found after convergence */
   for (k = 0; k < ncomponents; k++)
     mmvn_set_mu(mixmvn_get_component(mixmvn, k), best_mu[k]);
   vec_copy(sigmapar, best_sigmapar);
-  nj_update_covariance(mmvn, data);
+  mixmvn_update_covariance(mixmvn, data);
   if (n_nuisance_params > 0)
     nj_update_nuis_params(best_nuis_params, mod, data);
 

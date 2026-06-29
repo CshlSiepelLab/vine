@@ -12,6 +12,7 @@
 #define MIXTURE_MVN_H
 
 #include <multi_mvn.h>
+#include <covariance.h>
 
 /* Mixture of embedding distributions. */
 typedef struct {
@@ -27,6 +28,8 @@ multi_MVN *mixmvn_get_component(mixture_MVN *mix, int component);
 
 void mixmvn_init_jitter_from_component(mixture_MVN *mix, int component,
                                   double jitter_sd);
+
+void mixmvn_update_covariance(mixture_MVN *mix, CovarData *data);
 
 int mixmvn_sample_component(mixture_MVN *mix);
 
