@@ -62,6 +62,7 @@ typedef struct taylor_data {
   struct neigh_struc *nb;
   multi_MVN *mmvn;
   TreeModel *mod;
+  int component;        /* mixture component for component-specific flows */
 
   /* scheduling */
   double T_cache;
@@ -90,9 +91,9 @@ TaylorData *tay_new(struct cvdat *data);
 
 void tay_free(TaylorData *td);
 
-double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, struct cvdat *data,
-                      Vector *grad, Vector *nuis_grad, double *lprior,
-                      double *migll, double *ll_at_mean);
+double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, int component,
+                      struct cvdat *data, Vector *grad, Vector *nuis_grad,
+                      double *lprior, double *migll, double *ll_at_mean);
 
 void tay_HVP(Vector *out, Vector *v, void *data_vd);
 

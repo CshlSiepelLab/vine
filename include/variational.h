@@ -59,7 +59,8 @@ void nj_sample_points(multi_MVN *mmvn, Vector *points,
                       Vector *points_std);
 
 void nj_apply_normalizing_flows(Vector *points_y, Vector *points_x,
-                                CovarData *data, double *logdet);
+                                CovarData *data, int component,
+                                double *logdet);
 
 void nj_set_kld_sigma_grad_LOWR(Vector *sigma_kldgrad, multi_MVN *mmvn);
 

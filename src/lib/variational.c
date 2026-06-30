@@ -939,7 +939,7 @@ double nj_elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
        (relclock_sig_grad, nodetimes_grad) are then picked up below by
        nj_update_nuis_grad. */
     ll = nj_compute_model_grad(mod, mmvn, points, points_std, grad, data,
-                               NULL, &migll, &lprior);
+                               component, NULL, &migll, &lprior);
     assert(isfinite(ll));
 
     avell += ll;
@@ -1010,7 +1010,7 @@ List *nj_var_sample(int nsamples, mixture_MVN *mixmvn, CovarData *data, char** n
     if (logdens != NULL) 
       vec_set(logdens, i, mixmvn_log_dens(mixmvn, points_x));
      
-    nj_apply_normalizing_flows(points_y, points_x, data, NULL);
+    nj_apply_normalizing_flows(points_y, points_x, data, component, NULL);
     nj_points_to_distances(points_y, data);
     tree = nj_inf(data->dist, names, NULL, NULL, data);
     lst_push_ptr(retval, tree);
@@ -1076,29 +1076,31 @@ void nj_sample_points(multi_MVN *mmvn, Vector *points, Vector *points_std) {
    f(x).  Optionally populates *logdet with total log determinate of
    Jacobian (if non-NULL) */
 void nj_apply_normalizing_flows(Vector *points_y, Vector *points_x,
-                                CovarData *data, double *logdet) {
+                                CovarData *data, int component,
+                                double *logdet) {
   double ldet = 0;
   assert(points_x->size == points_y->size);
+  assert(component >= 0 && component < data->nflow_components);
   
-  if (data->rfs[0] == NULL && data->pfs[0] == NULL) {
+  if (data->rfs[component] == NULL && data->pfs[component] == NULL) {
     if (logdet != NULL) *logdet = 0;
     vec_copy(points_y, points_x);
     return;
   }
 
-  if (data->rfs[0] != NULL && data->pfs[0] != NULL) {
+  if (data->rfs[component] != NULL && data->pfs[component] != NULL) {
     /* in this case we need an intermediate vector */
     Vector *tmp = vec_new(points_x->size);
-    ldet = rf_forward(data->rfs[0], tmp, points_x);
-    ldet += pf_forward(data->pfs[0], points_y, tmp);
+    ldet = rf_forward(data->rfs[component], tmp, points_x);
+    ldet += pf_forward(data->pfs[component], points_y, tmp);
     vec_free(tmp);
   }
  
-  else if (data->rfs[0] != NULL)
-    ldet = rf_forward(data->rfs[0], points_y, points_x);
+  else if (data->rfs[component] != NULL)
+    ldet = rf_forward(data->rfs[component], points_y, points_x);
 
-  else if (data->pfs[0] != NULL)
-    ldet = pf_forward(data->pfs[0], points_y, points_x);
+  else if (data->pfs[component] != NULL)
+    ldet = pf_forward(data->pfs[component], points_y, points_x);
 
   if (logdet != NULL)
     (*logdet) = ldet; 

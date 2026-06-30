@@ -103,7 +103,7 @@ List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
       vec_plus_eq(x, mu);
     
     /* convert x to y using normalizing flows if available */
-    nj_apply_normalizing_flows(y, x, data, &nf_logdet);
+    nj_apply_normalizing_flows(y, x, data, 0, &nf_logdet);
 
     /* convert to tree */
     nj_points_to_distances(y, data);
@@ -183,7 +183,7 @@ List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
           mmvn_map_std(mmvn, x);
         else
           vec_plus_eq(x, mu);
-        nj_apply_normalizing_flows(y, x, data, &nf_logdet);
+        nj_apply_normalizing_flows(y, x, data, 0, &nf_logdet);
         nj_points_to_distances(y, data);
         tree = nj_inf(data->dist, data->names, NULL, NULL, data);
         mod->tree = NULL; /* clear dangling ptr left by rejected proposed tree */

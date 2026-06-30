@@ -32,7 +32,7 @@
 double nj_compute_model_grad(TreeModel *mod, multi_MVN *mmvn,
                              Vector *points, Vector *points_std,
                              Vector *grad, CovarData *data,
-                             double *nf_logdet, double *migll,
+                             int component, double *nf_logdet, double *migll,
                              double *lprior);
 
 double nj_compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn, 
@@ -53,8 +53,8 @@ double nj_dL_dt_num(Vector *dL_dt, TreeModel *mod, CovarData *data);
 void nj_dt_dD_num(Matrix *dt_dD, Matrix *D, TreeModel *mod, CovarData *data);
 
 double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
-                         CovarData *data, double *nf_logdet, double *migll,
-                         double *lprior);
+                         CovarData *data, int component, double *nf_logdet,
+                         double *migll, double *lprior);
 
 void nj_dr_dalpha_gamma(Vector *dr_dalpha, const TreeModel *mod);
 

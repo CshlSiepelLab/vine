@@ -33,10 +33,10 @@
    Mutates data->dist and mod->tree (caller must restore by recalling
    at the original x). */
 static double check_flow_pipeline_L(Vector *x_local, TreeModel *mod,
-                                    CovarData *data) {
+                                    CovarData *data, int component) {
   Vector *y = vec_new(x_local->size);
   double logdet = 0;
-  nj_apply_normalizing_flows(y, x_local, data, &logdet);
+  nj_apply_normalizing_flows(y, x_local, data, component, &logdet);
   nj_points_to_distances(y, data);
   TreeNode *tree = nj_inf(data->dist, data->names, NULL, NULL, data);
   nj_reset_tree_model(mod, tree);
@@ -61,7 +61,7 @@ static double check_flow_pipeline_L(Vector *x_local, TreeModel *mod,
    with Taylor approx) */
 double nj_compute_model_grad(TreeModel *mod, multi_MVN *mmvn, Vector *points,
                              Vector *points_std, Vector *grad, CovarData *data,
-                             double *nf_logdet,
+                             int component, double *nf_logdet,
                              double *migll, double *lprior) {
   int n = data->nseqs; /* number of taxa */
   int d = mmvn->n * mmvn->d / n; /* dimensionality; have to accommodate diagonal case */
@@ -79,8 +79,8 @@ double nj_compute_model_grad(TreeModel *mod, multi_MVN *mmvn, Vector *points,
     die("ERROR in nj_compute_model_grad: low-rank matrix R required in LOWR case.\n");
   
   /* obtain gradient with respect to points, dL/dx */
-  ll_base = nj_dL_dx_smartest(points, dL_dx, mod, data, nf_logdet, migll,
-                              lprior);
+  ll_base = nj_dL_dx_smartest(points, dL_dx, mod, data, component, nf_logdet,
+                              migll, lprior);
 
   if (!isfinite(ll_base)) /* can happen with crispr model; force calling code to deal with it */
     return ll_base;
@@ -504,8 +504,8 @@ void nj_dt_dD_num(Matrix *dt_dD, Matrix *D, TreeModel *mod, CovarData *data) {
    for each component.  Fastest but most complicated and error-prone
    version. */
 double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
-                         CovarData *data, double *nf_logdet, double *migll,
-                         double *lprior) {
+                         CovarData *data, int component, double *nf_logdet,
+                         double *migll, double *lprior) {
   int n = data->nseqs, nbranches = 2*n-2,  /* have to work with the rooted tree here */
     ndist = n * (n-1) / 2, ndim = data->nseqs * data->dim;
   Vector *dL_dt = vec_new(nbranches);
@@ -528,7 +528,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   if (lprior != NULL) *lprior = 0.0;
   
   /* convert x to y using normalizing flows if available */
-  nj_apply_normalizing_flows(y, x, data, nf_logdet);
+  nj_apply_normalizing_flows(y, x, data, component, nf_logdet);
   
    /* set up baseline objects */
   nj_points_to_distances(y, data);
@@ -672,6 +672,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
     vec_copy(data->taylor->y, y);
     vec_copy(data->taylor->x, x);  /* needed by tay_dx_from_dt for flow backprop */
     vec_copy(data->taylor->base_grad, dL_dt);
+    data->taylor->component = component;
     if (nb != NULL) /* not needed for UPGMA case */
       nj_copy_neighbors(data->taylor->nb, nb);
   }
@@ -776,27 +777,27 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
        Note that this is supported only in the Euclidean case for now;
        need to move this call outside of 'else' if hyperbolic support
        is added */
-    if (data->rfs[0] != NULL && data->pfs[0] != NULL) {
+    if (data->rfs[component] != NULL && data->pfs[component] != NULL) {
       /* forward order is x -> rf -> tmp -> pf -> y, so the reverse
          must be dL/dy -> pf_backprop (input was tmp) -> dL/dtmp ->
          rf_backprop (input was x) -> dL/dx.  Recompute tmp = rf(x)
          since the planar backprop needs it as the input vector. */
       Vector *tmp = vec_new(dL_dx->size);
       Vector *dL_dtmp = vec_new(dL_dx->size);
-      rf_forward(data->rfs[0], tmp, x);
-      pf_backprop(data->pfs[0], tmp, dL_dtmp, dL_dy);
-      rf_backprop(data->rfs[0], x, dL_dx, dL_dtmp);
+      rf_forward(data->rfs[component], tmp, x);
+      pf_backprop(data->pfs[component], tmp, dL_dtmp, dL_dy);
+      rf_backprop(data->rfs[component], x, dL_dx, dL_dtmp);
       vec_free(tmp);
       vec_free(dL_dtmp);
     }
-    else if (data->rfs[0] != NULL)
+    else if (data->rfs[component] != NULL)
       /* We need to back-propagate through the radial flow to obtain
          the real dL_dx */
-      rf_backprop(data->rfs[0], x, dL_dx, dL_dy);
+      rf_backprop(data->rfs[component], x, dL_dx, dL_dy);
       /* note that the gradients wrt the parameters a, b, and ctr are
          computed as side-effects and stored inside rf */
-    else if (data->pfs[0] != NULL)
-      pf_backprop(data->pfs[0], x, dL_dx, dL_dy);
+    else if (data->pfs[component] != NULL)
+      pf_backprop(data->pfs[component], x, dL_dx, dL_dy);
       /* similar for planar flow */
     else
       vec_copy(dL_dx, dL_dy);
@@ -808,7 +809,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
      through the full forward pipeline.  Mutates data->dist /
      mod->tree during the sweep; restored to the original-x pipeline
      state at the end. */
-  if ((data->rfs[0] != NULL || data->pfs[0] != NULL) &&
+  if ((data->rfs[component] != NULL || data->pfs[component] != NULL) &&
       getenv("CHECK_FLOW") != NULL) {
     static int check_done = 0;
     if (!check_done) {
@@ -822,9 +823,9 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
       for (idim = 0; idim < x->size; idim++) {
         double orig = vec_get(x, idim);
         vec_set(x, idim, orig + eps);
-        double Lp = check_flow_pipeline_L(x, mod, data);
+        double Lp = check_flow_pipeline_L(x, mod, data, component);
         vec_set(x, idim, orig - eps);
-        double Lm = check_flow_pipeline_L(x, mod, data);
+        double Lm = check_flow_pipeline_L(x, mod, data, component);
         vec_set(x, idim, orig);
         double num = (Lp - Lm) / (2 * eps);
         double ana = vec_get(dL_dx, idim);
@@ -839,16 +840,16 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
               max_diff_x, worst_x);
 
       /* radial flow: center, a, b */
-      if (data->rfs[0] != NULL) {
-        for (idim = 0; idim < data->rfs[0]->ctr->size; idim++) {
-          double orig = vec_get(data->rfs[0]->ctr, idim);
-          vec_set(data->rfs[0]->ctr, idim, orig + eps);
-          double Lp = check_flow_pipeline_L(x, mod, data);
-          vec_set(data->rfs[0]->ctr, idim, orig - eps);
-          double Lm = check_flow_pipeline_L(x, mod, data);
-          vec_set(data->rfs[0]->ctr, idim, orig);
+      if (data->rfs[component] != NULL) {
+        for (idim = 0; idim < data->rfs[component]->ctr->size; idim++) {
+          double orig = vec_get(data->rfs[component]->ctr, idim);
+          vec_set(data->rfs[component]->ctr, idim, orig + eps);
+          double Lp = check_flow_pipeline_L(x, mod, data, component);
+          vec_set(data->rfs[component]->ctr, idim, orig - eps);
+          double Lm = check_flow_pipeline_L(x, mod, data, component);
+          vec_set(data->rfs[component]->ctr, idim, orig);
           double num = (Lp - Lm) / (2 * eps);
-          double ana = vec_get(data->rfs[0]->ctr_grad, idim);
+          double ana = vec_get(data->rfs[component]->ctr_grad, idim);
           double diff = fabs(num - ana);
           if (diff > max_diff_ctr) { max_diff_ctr = diff; worst_ctr = idim; }
         }
@@ -858,79 +859,82 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
 
         /* a */
         {
-          double orig = data->rfs[0]->a;
-          data->rfs[0]->a = orig + eps; rf_update(data->rfs[0]);
-          double Lp = check_flow_pipeline_L(x, mod, data);
-          data->rfs[0]->a = orig - eps; rf_update(data->rfs[0]);
-          double Lm = check_flow_pipeline_L(x, mod, data);
-          data->rfs[0]->a = orig; rf_update(data->rfs[0]);
+          double orig = data->rfs[component]->a;
+          data->rfs[component]->a = orig + eps; rf_update(data->rfs[component]);
+          double Lp = check_flow_pipeline_L(x, mod, data, component);
+          data->rfs[component]->a = orig - eps; rf_update(data->rfs[component]);
+          double Lm = check_flow_pipeline_L(x, mod, data, component);
+          data->rfs[component]->a = orig; rf_update(data->rfs[component]);
           double num = (Lp - Lm) / (2 * eps);
           fprintf(stderr,
                   "[flow-check] rf->a_grad: anal=%.6e num=%.6e diff=%.6e\n",
-                  data->rfs[0]->a_grad, num, fabs(num - data->rfs[0]->a_grad));
+                  data->rfs[component]->a_grad, num,
+                  fabs(num - data->rfs[component]->a_grad));
         }
         /* b */
         {
-          double orig = data->rfs[0]->b;
-          data->rfs[0]->b = orig + eps; rf_update(data->rfs[0]);
-          double Lp = check_flow_pipeline_L(x, mod, data);
-          data->rfs[0]->b = orig - eps; rf_update(data->rfs[0]);
-          double Lm = check_flow_pipeline_L(x, mod, data);
-          data->rfs[0]->b = orig; rf_update(data->rfs[0]);
+          double orig = data->rfs[component]->b;
+          data->rfs[component]->b = orig + eps; rf_update(data->rfs[component]);
+          double Lp = check_flow_pipeline_L(x, mod, data, component);
+          data->rfs[component]->b = orig - eps; rf_update(data->rfs[component]);
+          double Lm = check_flow_pipeline_L(x, mod, data, component);
+          data->rfs[component]->b = orig; rf_update(data->rfs[component]);
           double num = (Lp - Lm) / (2 * eps);
           fprintf(stderr,
                   "[flow-check] rf->b_grad: anal=%.6e num=%.6e diff=%.6e\n",
-                  data->rfs[0]->b_grad, num, fabs(num - data->rfs[0]->b_grad));
+                  data->rfs[component]->b_grad, num,
+                  fabs(num - data->rfs[component]->b_grad));
         }
       }
 
       /* planar flow: u, w, b */
-      if (data->pfs[0] != NULL) {
-        for (idim = 0; idim < data->pfs[0]->u->size; idim++) {
-          double orig = vec_get(data->pfs[0]->u, idim);
-          vec_set(data->pfs[0]->u, idim, orig + eps);
-          double Lp = check_flow_pipeline_L(x, mod, data);
-          vec_set(data->pfs[0]->u, idim, orig - eps);
-          double Lm = check_flow_pipeline_L(x, mod, data);
-          vec_set(data->pfs[0]->u, idim, orig);
+      if (data->pfs[component] != NULL) {
+        for (idim = 0; idim < data->pfs[component]->u->size; idim++) {
+          double orig = vec_get(data->pfs[component]->u, idim);
+          vec_set(data->pfs[component]->u, idim, orig + eps);
+          double Lp = check_flow_pipeline_L(x, mod, data, component);
+          vec_set(data->pfs[component]->u, idim, orig - eps);
+          double Lm = check_flow_pipeline_L(x, mod, data, component);
+          vec_set(data->pfs[component]->u, idim, orig);
           double num = (Lp - Lm) / (2 * eps);
-          double ana = vec_get(data->pfs[0]->u_grad, idim);
+          double ana = vec_get(data->pfs[component]->u_grad, idim);
           double diff = fabs(num - ana);
           if (diff > max_diff_pf) { max_diff_pf = diff; worst_pf = idim; }
         }
-        for (idim = 0; idim < data->pfs[0]->w->size; idim++) {
-          double orig = vec_get(data->pfs[0]->w, idim);
-          vec_set(data->pfs[0]->w, idim, orig + eps);
-          double Lp = check_flow_pipeline_L(x, mod, data);
-          vec_set(data->pfs[0]->w, idim, orig - eps);
-          double Lm = check_flow_pipeline_L(x, mod, data);
-          vec_set(data->pfs[0]->w, idim, orig);
+        for (idim = 0; idim < data->pfs[component]->w->size; idim++) {
+          double orig = vec_get(data->pfs[component]->w, idim);
+          vec_set(data->pfs[component]->w, idim, orig + eps);
+          double Lp = check_flow_pipeline_L(x, mod, data, component);
+          vec_set(data->pfs[component]->w, idim, orig - eps);
+          double Lm = check_flow_pipeline_L(x, mod, data, component);
+          vec_set(data->pfs[component]->w, idim, orig);
           double num = (Lp - Lm) / (2 * eps);
-          double ana = vec_get(data->pfs[0]->w_grad, idim);
+          double ana = vec_get(data->pfs[component]->w_grad, idim);
           double diff = fabs(num - ana);
           if (diff > max_diff_pf)
-            { max_diff_pf = diff; worst_pf = data->pfs[0]->u->size + idim; }
+            { max_diff_pf = diff; worst_pf = data->pfs[component]->u->size + idim; }
         }
         fprintf(stderr,
                 "[flow-check] pf u/w grad: max |anal-num| = %.6e at idx %d\n",
                 max_diff_pf, worst_pf);
         {
-          double orig = data->pfs[0]->b;
-          data->pfs[0]->b = orig + eps;
-          double Lp = check_flow_pipeline_L(x, mod, data);
-          data->pfs[0]->b = orig - eps;
-          double Lm = check_flow_pipeline_L(x, mod, data);
-          data->pfs[0]->b = orig;
+          double orig = data->pfs[component]->b;
+          data->pfs[component]->b = orig + eps;
+          double Lp = check_flow_pipeline_L(x, mod, data, component);
+          data->pfs[component]->b = orig - eps;
+          double Lm = check_flow_pipeline_L(x, mod, data, component);
+          data->pfs[component]->b = orig;
           double num = (Lp - Lm) / (2 * eps);
           fprintf(stderr,
                   "[flow-check] pf->b_grad: anal=%.6e num=%.6e diff=%.6e\n",
-                  data->pfs[0]->b_grad, num, fabs(num - data->pfs[0]->b_grad));
+                  data->pfs[component]->b_grad, num,
+                  fabs(num - data->pfs[component]->b_grad));
         }
       }
 
       /* restore data->dist and mod->tree to the analytical-pipeline
          state at the original x */
-      check_flow_pipeline_L(x, mod, data);
+      check_flow_pipeline_L(x, mod, data, component);
     }
   }
 

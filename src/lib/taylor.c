@@ -56,6 +56,7 @@ TaylorData *tay_new(CovarData *data) {
   /* these will be set later */
   td->mmvn = NULL;
   td->mod = NULL;
+  td->component = 0;
 
   /* scheduling directives */
   td->iter = 0;
@@ -96,15 +97,16 @@ void tay_free(TaylorData *td) {
    around the mean.  Returns the expected log likelihood.  If
    non-NULL, &half_tr will be populated with 1/2 tr(H S), which is the
    second-order term in the Taylor expansion. */
-double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
-                      Vector *grad, Vector *nuis_grad, double *lprior,
-                      double *migll, double *ll_at_mean) {
+double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, int component,
+                      CovarData *data, Vector *grad, Vector *nuis_grad,
+                      double *lprior, double *migll, double *ll_at_mean) {
   double ll;
 
   /* make sure mmvn and mod are accessible from TaylorData */
   TaylorData *td = data->taylor;
   td->mmvn = mmvn;
   td->mod = mod;
+  td->component = component;
 
   /* first calculate log likelihood at the mean */
   vec_zero(grad);
@@ -115,7 +117,7 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
      and its nuisance grads (relclock_sig_grad, nodetimes_grad) are read
      out via nj_update_nuis_grad below. */
   ll = nj_compute_model_grad(mod, mmvn, mu, NULL,
-                             grad, data, NULL, migll, lprior);
+                             grad, data, component, NULL, migll, lprior);
 
   /* do after calling nj_compute_model_grad so tree is defined */
   assert(mod->tree->nnodes - 1 == td->nbranches);
@@ -449,7 +451,7 @@ void tay_prep_jacobians(TaylorData *tay_data, TreeModel *mod, Vector *x_mean) {
    data->nb      neighbor tape (from mean tree)
    data->dist    distances at mean
    data->y       embedding at mean
-   data->rfs[0], pfs[0]  flows
+   data->rfs[component], pfs[component]  flows
    Everything else must be precomputed.
 
    This is JUST the reverse-mode Jacobian chain for the mean point.
@@ -585,18 +587,19 @@ void tay_dx_from_dt(Vector *dL_dt, Vector *dL_dx, TreeModel *mod,
        x->rf->tmp->pf->y, so the reverse must visit planar first
        (input was tmp = rf_forward(x)) and then radial (input was x). */
     Vector *x_in = tay_data->x;
-    if (data->rfs[0] != NULL && data->pfs[0] != NULL) {
+    int component = tay_data->component;
+    if (data->rfs[component] != NULL && data->pfs[component] != NULL) {
       Vector *tmp = tay_data->tmp_extra;
       Vector *dL_dtmp = tay_data->tmp_x1;
-      rf_forward(data->rfs[0], tmp, x_in);
-      pf_backprop(data->pfs[0], tmp, dL_dtmp, dL_dy);
-      rf_backprop(data->rfs[0], x_in, dL_dx, dL_dtmp);
+      rf_forward(data->rfs[component], tmp, x_in);
+      pf_backprop(data->pfs[component], tmp, dL_dtmp, dL_dy);
+      rf_backprop(data->rfs[component], x_in, dL_dx, dL_dtmp);
     }
-    else if (data->rfs[0] != NULL) {
-      rf_backprop(data->rfs[0], x_in, dL_dx, dL_dy);
+    else if (data->rfs[component] != NULL) {
+      rf_backprop(data->rfs[component], x_in, dL_dx, dL_dy);
     }
-    else if (data->pfs[0] != NULL) {
-      pf_backprop(data->pfs[0], x_in, dL_dx, dL_dy);
+    else if (data->pfs[component] != NULL) {
+      pf_backprop(data->pfs[component], x_in, dL_dx, dL_dy);
     }
     else {
       vec_copy(dL_dx, dL_dy);
@@ -848,6 +851,7 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
                                 NULL,        /* points_std == NULL → no variance grads */
                                 grad,
                                 data,
+                                component,
                                 NULL,
                                 migll, lprior);
 
