@@ -819,10 +819,12 @@ static inline void add_cached_variance_grad(Vector *grad,
    - Mean gradient from Taylor (log likelihood at mu)
    - Variance gradient + curvature correction from MC (cached + smoothed)
 */
-double nj_elbo_hybrid(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
-                      int nminibatch, Vector *grad, Vector *nuis_grad,
-                      double *lprior, double *migll, double *ll_at_mean) {
+double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
+                      CovarData *data, int nminibatch, Vector *grad,
+                      Vector *nuis_grad, double *lprior, double *migll,
+                      double *ll_at_mean) {
   TaylorData *td = data->taylor;
+  multi_MVN *mmvn = mixmvn_get_component(mixmvn, component);
   double ll_mu;
 
   int fulld  = td->fulld;
@@ -912,12 +914,14 @@ double nj_elbo_hybrid(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
        - computes unbiased gradients wrt ALL params
     */
     double mc_ll =
-      nj_elbo_montecarlo(mod, mmvn, data,
+      nj_elbo_montecarlo(mod, mixmvn, component, data,
                          nminibatch,
                          mc_grad,
                          mc_nuis,
                          &mc_lprior,
-                         &mc_migll);
+                         &mc_migll,
+                         NULL,
+                         NULL);
 
     /* M2: EMA the nuisance-gradient bias (MC - mean-point) for latent-clock
        mode.  Computed here, before mig_active_last_refresh is updated below,

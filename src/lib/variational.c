@@ -44,7 +44,7 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     *best_sigmapar, *rescaledgrad, *sparsitygrad = NULL, 
     *sigmapar = data->params;
   Vector **m_mu = NULL, **v_mu = NULL, **best_mu = NULL;
-  int n = data->nseqs, i, j, k, t, stop = FALSE, bestt = -1, graddim,
+  int n = data->nseqs, j, k, t, stop = FALSE, bestt = -1, graddim,
     dim = data->dim, fulld = n*dim, reenable_taylor_t = -1,
     component = 0, ncomponents = mixmvn->ncomponents;
   int *component_t = NULL;
@@ -294,8 +294,9 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     }
 
     if (data->taylor != NULL) {
-      avell = nj_elbo_hybrid(mod, mmvn, data, nminibatch, avegrad,
-                             ave_nuis_grad, &ave_lprior, &avemigll, &ll_at_mean);
+      avell = nj_elbo_hybrid(mod, mixmvn, component, data, nminibatch,
+                             avegrad, ave_nuis_grad, &ave_lprior, &avemigll,
+                             &ll_at_mean);
       /* avell = nj_elbo_taylor(mod, mmvn, data, avegrad, ave_nuis_grad, */
       /*                        &ave_lprior, &avemigll, &ll_at_mean); */
       if ((data->crispr_mod != NULL && data->crispr_mod->zero_likl == TRUE) ||
@@ -310,70 +311,9 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     
     if (data->taylor == NULL) {
       ll_at_mean = 0;  /* not available in MC path */
-      if (ncomponents == 1)
-        avell = nj_elbo_montecarlo(mod, mmvn, data, nminibatch, avegrad,
-                                   ave_nuis_grad, &ave_lprior, &avemigll);
-      else {
-        Vector *grad = vec_new(avegrad->size), *nuis_grad = NULL,
-          *points = vec_new(fulld), *points_std;
-        double ll, migll = 0, lprior = 0;
-
-        if (data->type == LOWR)
-          points_std = vec_new(data->lowrank * dim);
-        else
-          points_std = vec_new(fulld);
-
-        vec_zero(avegrad);
-        if (ave_nuis_grad != NULL) {
-          nuis_grad = vec_new(ave_nuis_grad->size);
-          vec_zero(ave_nuis_grad);
-        }
-        avell = ave_lprior = avemigll = kld = 0;
-
-        for (i = 0; i < nminibatch; i++) {
-          migll = 0;
-          lprior = 0;
-          vec_zero(grad);
-
-          nj_sample_points(mmvn, points, points_std);
-          ll = nj_compute_model_grad(mod, mmvn, points, points_std, grad, data,
-                                     NULL, &migll, &lprior);
-          assert(isfinite(ll));
-
-          avell += ll;
-          avemigll += migll;
-          ave_lprior += lprior;
-          kld += mixmvn_log_dens(mixmvn, points);
-          if (data->treeprior == NULL)
-            kld += 0.5 * (fulld * log(2 * M_PI) +
-                          vec_inner_prod(points, points));
-          vec_plus_eq(avegrad, grad);
-
-          if (ave_nuis_grad != NULL) {
-            vec_zero(nuis_grad);
-            nj_update_nuis_grad(mod, data, nuis_grad);
-            vec_plus_eq(ave_nuis_grad, nuis_grad);
-          }
-        }
-
-        vec_scale(avegrad, 1.0/nminibatch);
-        avell /= nminibatch;
-        ave_lprior /= nminibatch;
-        avemigll /= nminibatch;
-        kld *= data->kld_upweight /
-          (nminibatch * data->pointscale * data->pointscale);
-        if (ave_nuis_grad != NULL)
-          vec_scale(ave_nuis_grad, 1.0/nminibatch);
-
-        vec_free(points);
-        vec_free(points_std);
-        vec_free(grad);
-        if (nuis_grad != NULL)
-          vec_free(nuis_grad);
-
-        tr_free(mod->tree);
-        mod->tree = NULL;
-      }
+      avell = nj_elbo_montecarlo(mod, mixmvn, component, data, nminibatch,
+                                 avegrad, ave_nuis_grad, &ave_lprior,
+                                 &avemigll, &kld, kldgrad);
     }
     
     /* In subsample mode the likelihood (and its gradient) are computed
@@ -545,8 +485,9 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   double final_mc_ll = 0;
   if (data->taylor != NULL && logf != NULL) {
     double dummy_lprior = 0, dummy_migll = 0;
-    final_mc_ll = nj_elbo_montecarlo(mod, mmvn, data, nminibatch, avegrad,
-                                     ave_nuis_grad, &dummy_lprior, &dummy_migll);
+    final_mc_ll = nj_elbo_montecarlo(mod, mixmvn, component, data, nminibatch,
+                                     avegrad, ave_nuis_grad, &dummy_lprior,
+                                     &dummy_migll, NULL, NULL);
   }
 
   if (logf != NULL) {
@@ -593,14 +534,21 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 
 /* estimate key components of the ELBO by Monte Carlo integration,
    over a minibatch of size nminibatch.  Returns the expected log
-   likelihood.  The last four parameters are updated (avegrad,
-   ave_nuis_grad, ave_lprior, and avemigll) */ 
-double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
+   likelihood.  The avegrad, ave_nuis_grad, ave_lprior, and avemigll
+   parameters are updated.  For mixture models, kld is also updated 
+   if not NULL. */ 
+double nj_elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
+                          CovarData *data,
                           int nminibatch, Vector *avegrad, Vector *ave_nuis_grad,
-                          double *ave_lprior, double *avemigll) {
+                          double *ave_lprior, double *avemigll, double *kld,
+                          Vector *kldgrad) {
   Vector *grad = vec_new(avegrad->size), *nuis_grad = NULL, *points, *points_std;
   double ll, migll = 0, lprior = 0, avell = 0;
   int n = data->nseqs, dim = data->dim, fulld = n*dim;
+  multi_MVN *mmvn = mixmvn_get_component(mixmvn, component);
+  int estimate_kld = (mixmvn->ncomponents > 1 && kld != NULL);
+
+  (void)kldgrad; /* Mixture KLD gradient will be added separately later. */
 
   vec_zero(avegrad);
   if (ave_nuis_grad != NULL) {
@@ -609,6 +557,8 @@ double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   }
 
   *ave_lprior = *avemigll = 0;
+  if (estimate_kld)
+    *kld = 0;
 
   points = vec_new(fulld);
   if (data->type == LOWR) /* in this case, the underlying standard
@@ -634,6 +584,12 @@ double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
     avell += ll;
     (*avemigll) += migll;
     (*ave_lprior) += lprior;
+    if (estimate_kld) {
+      *kld += mixmvn_log_dens(mixmvn, points);
+      if (data->treeprior == NULL)
+        *kld += 0.5 * (fulld * log(2 * M_PI) +
+                       vec_inner_prod(points, points));
+    }
     vec_plus_eq(avegrad, grad);
 
     if (ave_nuis_grad != NULL) {
@@ -648,6 +604,9 @@ double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   avell /= nminibatch;
   (*ave_lprior) /= nminibatch;
   (*avemigll) /= nminibatch;
+  if (estimate_kld)
+    *kld *= data->kld_upweight /
+      (nminibatch * data->pointscale * data->pointscale);
 
   /* same for nuisance grad if needed */
   if (ave_nuis_grad != NULL)

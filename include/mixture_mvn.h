@@ -15,7 +15,7 @@
 #include <covariance.h>
 
 /* Mixture of embedding distributions. */
-typedef struct {
+typedef struct mixture_MVN {
   int ncomponents;
   multi_MVN **components;
 } mixture_MVN;

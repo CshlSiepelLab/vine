@@ -21,6 +21,8 @@
 #include <multi_mvn.h>
 #include <nj.h>
 
+typedef struct mixture_MVN mixture_MVN;
+
 #define NHUTCH_SAMPLES 10  /* number of probe vectors for Hutchinson's
                               estimator of trace of Hessian */
 
@@ -113,7 +115,8 @@ void tay_Sigmafun(Vector *out, Vector *v, void *userdata);
 void tay_SigmaGradfun(Vector *grad_sigma, Vector *p_lat, Vector *q_lat,
                       void *userdata);
 
-double nj_elbo_hybrid(TreeModel *mod, multi_MVN *mmvn, struct cvdat *data,
+double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
+                      struct cvdat *data,
                       int nminibatch, Vector *grad, Vector *nuis_grad,
                       double *lprior, double *migll, double *ll_at_mean);
 
