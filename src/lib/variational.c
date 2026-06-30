@@ -57,11 +57,14 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
                         CovarData *data, FILE *logf,
                         unsigned int silent, unsigned int log_all) {
 
-  Vector *sigma_kldgrad, *avegrad, *m_sigma, *m_sigma_prev, *v_sigma, *v_sigma_prev,
-    *best_sigmapar, *rescaledgrad, *sparsitygrad = NULL, 
-    *sigmapar = data->params;
-  Vector **m_mu = NULL, **v_mu = NULL, **best_mu = NULL,
-    **mu_kldgrad = NULL;
+  Vector *model_grad;          /* selected-component mu + shared sigma likelihood/prior gradient */
+  Vector *model_natgrad;       /* natural-gradient-scaled model_grad after sigma regularizers */
+  Vector *sigma_kldgrad;       /* shared covariance KLD gradient */
+  Vector *sigma_penalty_grad;  /* variance-penalty gradient, sigma block only */
+  Vector **mu_kldgrad = NULL;  /* per-component KLD mean gradients */
+  Vector *m_sigma, *m_sigma_prev, *v_sigma, *v_sigma_prev,
+    *best_sigmapar, *sigmapar = data->params;
+  Vector **m_mu = NULL, **v_mu = NULL, **best_mu = NULL;
   int n = data->nseqs, j, k, t, stop = FALSE, bestt = -1, graddim,
     dim = data->dim, fulld = n*dim, reenable_taylor_t = -1,
     component = 0, ncomponents = mixmvn->ncomponents;
@@ -94,13 +97,14 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 
   graddim = fulld + data->params->size;
   sigma_kldgrad = vec_new(sigmapar->size);
-  avegrad = vec_new(graddim);
-  rescaledgrad = vec_new(graddim);
+  model_grad = vec_new(graddim);
+  model_natgrad = vec_new(graddim);
   m_sigma = vec_new(sigmapar->size);
   m_sigma_prev = vec_new(sigmapar->size);
   v_sigma = vec_new(sigmapar->size);
   v_sigma_prev = vec_new(sigmapar->size);
-  sparsitygrad = vec_new(graddim);
+  sigma_penalty_grad = vec_new(graddim); /* full-shaped for helper API;
+                                            only sigma block is populated */
   component_t = smalloc(ncomponents * sizeof(int));
   m_mu = smalloc(ncomponents * sizeof(Vector*));
   v_mu = smalloc(ncomponents * sizeof(Vector*));
@@ -267,8 +271,8 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 
     /* can also pre-compute variance penalty, which is okay in the mixture case
     when the covariance is shared across components */
-    vec_zero(sparsitygrad);
-    nj_compute_variance_penalty(sparsitygrad, mmvn, data);
+    vec_zero(sigma_penalty_grad);
+    nj_compute_variance_penalty(sigma_penalty_grad, mmvn, data);
     penalty = data->var_pen;
 
     if (ncomponents == 1) {
@@ -319,9 +323,9 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 
     if (data->taylor != NULL) {
       avell = nj_elbo_hybrid(mod, mixmvn, component, data, nminibatch,
-                             avegrad, ave_nuis_grad, &ave_lprior, &avemigll,
+                             model_grad, ave_nuis_grad, &ave_lprior, &avemigll,
                              &ll_at_mean);
-      /* avell = nj_elbo_taylor(mod, mmvn, data, avegrad, ave_nuis_grad, */
+      /* avell = nj_elbo_taylor(mod, mmvn, data, model_grad, ave_nuis_grad, */
       /*                        &ave_lprior, &avemigll, &ll_at_mean); */
       if ((data->crispr_mod != NULL && data->crispr_mod->zero_likl == TRUE) ||
           !isfinite(avell)) {
@@ -336,30 +340,30 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     if (data->taylor == NULL) {
       ll_at_mean = 0;  /* not available in MC path */
       avell = nj_elbo_montecarlo(mod, mixmvn, component, data, nminibatch,
-                                 avegrad, ave_nuis_grad, &ave_lprior,
+                                 model_grad, ave_nuis_grad, &ave_lprior,
                                  &avemigll, &kld, sigma_kldgrad, mu_kldgrad);
     }
     
     /* In subsample mode the likelihood (and its gradient) are computed
        on a subsampled set of sites and need rescaling to the full-data
        scale before being combined with the full-scale KLD, sparsity,
-       and tree-prior contributions.  Rescaling avegrad/ave_nuis_grad
+       and tree-prior contributions.  Rescaling model_grad/ave_nuis_grad
        as a whole over-amplifies the (much smaller) tree-prior and
        flow-logdet contributions by the same factor; that error is
        bounded and small in magnitude compared to the previous bug
        (LL grad too small relative to regularizers, causing
        over-regularization). */
     if (data->subsample == TRUE) {
-      vec_scale(avegrad, subsamp_rescale);
+      vec_scale(model_grad, subsamp_rescale);
       if (ave_nuis_grad != NULL)
         vec_scale(ave_nuis_grad, subsamp_rescale);
       avell *= subsamp_rescale;
     }
 
     for (j = 0; j < sigmapar->size; j++)
-      vec_set(avegrad, fulld + j,
-              vec_get(avegrad, fulld + j) + vec_get(sigma_kldgrad, j));
-    vec_plus_eq(avegrad, sparsitygrad);
+      vec_set(model_grad, fulld + j,
+              vec_get(model_grad, fulld + j) + vec_get(sigma_kldgrad, j));
+    vec_plus_eq(model_grad, sigma_penalty_grad);
 
     /* store parameters if best yet */
     elb = avell + ave_lprior - kld - penalty + avemigll;
@@ -389,29 +393,29 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     /* rescale gradient by approximate inverse Fisher information to
        put on similar scales; seems to help with optimization */
     if (data->natural_grad == TRUE)
-      nj_rescale_grad(avegrad, rescaledgrad, mmvn, data);
+      nj_rescale_grad(model_grad, model_natgrad, mmvn, data);
     else
-      vec_copy(rescaledgrad, avegrad);
+      vec_copy(model_natgrad, model_grad);
     /* we won't do this with nuisance params */
 
     /* update scheduler with norm of the actual Adam update and clip if
        necessary.  Mean KLD gradients are stored by component, so include
-       them explicitly rather than measuring only rescaledgrad. */
+       them explicitly rather than measuring only model_natgrad. */
     grad_norm_sq = 0.0;
     for (k = 0; k < ncomponents; k++) {
       multi_MVN *kmmvn = mixmvn_get_component(mixmvn, k);
       for (j = 0; j < fulld; j++) {
-        double g = k == component ? vec_get(rescaledgrad, j) : 0.0;
+        double g = k == component ? vec_get(model_natgrad, j) : 0.0;
         g += nj_rescale_mean_grad_el(mu_kldgrad[k], kmmvn, data, j);
         grad_norm_sq += g * g;
       }
     }
     for (j = 0; j < sigmapar->size; j++)
-      grad_norm_sq += pow(vec_get(rescaledgrad, fulld + j), 2);
+      grad_norm_sq += pow(vec_get(model_natgrad, fulld + j), 2);
     sm->grad_norm = sqrt(grad_norm_sq);
     if (sd->clip_norm > 0 && sm->grad_norm > sd->clip_norm) {
       clip_scale = sd->clip_norm / sm->grad_norm;
-      vec_scale(rescaledgrad, clip_scale);
+      vec_scale(model_natgrad, clip_scale);
       clipped = TRUE;
     }
 
@@ -421,13 +425,13 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       component_t[k]++; /* track Adam update count for each component */
     data->variational_iter = t; /* useful for debugging in other routines */
 
-    /* update mu.  The selected component receives the likelihood/prior
-       gradient; all components receive their explicit mixture-KLD mean
-       gradient when fitting mixtures. */
+    /* Update mu.  The selected component receives the stochastic
+       likelihood/prior gradient; all components receive mixture-KLD mean
+       gradients because log q_mix depends on every component density. */
     for (k = 0; k < ncomponents; k++) {
       multi_MVN *kmmvn = mixmvn_get_component(mixmvn, k);
       for (j = 0; j < fulld; j++) {
-        double mhatj, vhatj, g = k == component ? vec_get(rescaledgrad, j) : 0.0;
+        double mhatj, vhatj, g = k == component ? vec_get(model_natgrad, j) : 0.0;
         g += clip_scale * nj_rescale_mean_grad_el(mu_kldgrad[k],
                                                   kmmvn, data, j);
         vec_set(m_mu[k], j, ADAM_BETA1 * vec_get(m_mu[k], j) + (1.0 - ADAM_BETA1) * g);
@@ -440,7 +444,7 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 
     /* update sigma (shared across components) */
     for (j = 0; j < sigmapar->size; j++) {
-      double mhatj, vhatj, g = vec_get(rescaledgrad, fulld + j);
+      double mhatj, vhatj, g = vec_get(model_natgrad, fulld + j);
       vec_set(m_sigma, j, ADAM_BETA1 * vec_get(m_sigma_prev, j) + (1.0 - ADAM_BETA1) * g);
       vec_set(v_sigma, j, ADAM_BETA2 * vec_get(v_sigma_prev, j) + (1.0 - ADAM_BETA2) * pow(g, 2));
       mhatj = vec_get(m_sigma, j) / (1.0 - pow(ADAM_BETA1, t));
@@ -534,7 +538,7 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   if (data->taylor != NULL && logf != NULL) {
     double dummy_lprior = 0, dummy_migll = 0;
     final_mc_ll = nj_elbo_montecarlo(mod, mixmvn, component, data, nminibatch,
-                                     avegrad, ave_nuis_grad, &dummy_lprior,
+                                     model_grad, ave_nuis_grad, &dummy_lprior,
                                      &dummy_migll, NULL, NULL, NULL);
   }
 
@@ -559,8 +563,8 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 
   if (!silent) fprintf(stderr, "Converged in %d iterations; ELBO=%.2f...\n", t, bestelb);
 
-  vec_free(avegrad); vec_free(rescaledgrad); vec_free(sigma_kldgrad);
-  vec_free(sparsitygrad); vec_free(m_sigma);
+  vec_free(model_grad); vec_free(model_natgrad); vec_free(sigma_kldgrad);
+  vec_free(sigma_penalty_grad); vec_free(m_sigma);
   vec_free(m_sigma_prev); vec_free(v_sigma); vec_free(v_sigma_prev); vec_free(best_sigmapar);
   for (k = 0; k < ncomponents; k++) {
     vec_free(m_mu[k]);
@@ -584,7 +588,7 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 
 /* estimate key components of the ELBO by Monte Carlo integration,
    over a minibatch of size nminibatch.  Returns the expected log
-   likelihood.  The avegrad, ave_nuis_grad, ave_lprior, and avemigll
+   likelihood.  The model_grad, ave_nuis_grad, ave_lprior, and avemigll
    parameters are updated.  For mixture models, kld is also updated 
    if not NULL. */ 
 static void nj_lowr_map_std(multi_MVN *mmvn, Vector *points_std,
@@ -840,17 +844,17 @@ static double nj_mix_kld_sample_grad(mixture_MVN *mixmvn, int component,
 
 double nj_elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
                           CovarData *data,
-                          int nminibatch, Vector *avegrad, Vector *ave_nuis_grad,
+                          int nminibatch, Vector *model_grad, Vector *ave_nuis_grad,
                           double *ave_lprior, double *avemigll, double *kld,
                           Vector *sigma_kldgrad, Vector **mu_kldgrad) {
-  Vector *grad = vec_new(avegrad->size), *nuis_grad = NULL, *points, *points_std;
+  Vector *grad = vec_new(model_grad->size), *nuis_grad = NULL, *points, *points_std;
   double ll, migll = 0, lprior = 0, avell = 0;
   int n = data->nseqs, dim = data->dim, fulld = n*dim;
   multi_MVN *mmvn = mixmvn_get_component(mixmvn, component);
   int estimate_kld = (mixmvn->ncomponents > 1 && kld != NULL);
   int estimate_kld_grad = (estimate_kld && sigma_kldgrad != NULL);
 
-  vec_zero(avegrad);
+  vec_zero(model_grad);
   if (estimate_kld_grad)
     vec_zero(sigma_kldgrad);
   if (mu_kldgrad != NULL)
@@ -894,7 +898,7 @@ double nj_elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
                                      points_std,
                                      estimate_kld_grad ? sigma_kldgrad : NULL,
                                      estimate_kld_grad ? mu_kldgrad : NULL);
-    vec_plus_eq(avegrad, grad);
+    vec_plus_eq(model_grad, grad);
 
     if (ave_nuis_grad != NULL) {
       vec_zero(nuis_grad);
@@ -904,7 +908,7 @@ double nj_elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
   }
 
   /* divide by nminibatch to get expected gradient */
-  vec_scale(avegrad, 1.0/nminibatch);
+  vec_scale(model_grad, 1.0/nminibatch);
   avell /= nminibatch;
   (*ave_lprior) /= nminibatch;
   (*avemigll) /= nminibatch;

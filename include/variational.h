@@ -44,7 +44,7 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 
 double nj_elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
                           CovarData *data,
-                          int nminibatch, Vector *avegrad,
+                          int nminibatch, Vector *model_grad,
                           Vector *ave_nuis_grad, double *ave_lprior,
                           double *avemigll, double *kld,
                           Vector *sigma_kldgrad,
