@@ -257,7 +257,7 @@ void nj_rescale_grad(Vector *grad, Vector *rsgrad, multi_MVN *mmvn, CovarData *d
         int d = i % mmvn->d; /* corresponding dimension */
         for (j = 0; j < mmvn->mvn->sigma->ncols; j++)
           dotp += mat_get(mmvn->mvn->sigma, sigmarow, j) * vec_get(grad, j*mmvn->d + d);
-        g *= dotp;
+        g = dotp;
       }
     }
     else { /* variance gradients */

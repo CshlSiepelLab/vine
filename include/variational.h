@@ -47,7 +47,8 @@ double nj_elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
                           int nminibatch, Vector *avegrad,
                           Vector *ave_nuis_grad, double *ave_lprior,
                           double *avemigll, double *kld,
-                          Vector *kldgrad);
+                          Vector *sigma_kldgrad,
+                          Vector **mu_kldgrad);
 
 List *nj_var_sample(int nsamples, mixture_MVN *mixmvn, CovarData *data,
                     char** names, Vector *logdens);
@@ -60,8 +61,8 @@ void nj_sample_points(multi_MVN *mmvn, Vector *points,
 void nj_apply_normalizing_flows(Vector *points_y, Vector *points_x,
                                 CovarData *data, double *logdet);
 
-void nj_set_kld_grad_LOWR(Vector *kldgrad, multi_MVN *mmvn);
+void nj_set_kld_sigma_grad_LOWR(Vector *sigma_kldgrad, multi_MVN *mmvn);
 
-void nj_set_entropy_grad_LOWR(Vector *entgrad, multi_MVN *mmvn);
+void nj_set_entropy_sigma_grad_LOWR(Vector *sigma_entgrad, multi_MVN *mmvn);
 
 #endif
