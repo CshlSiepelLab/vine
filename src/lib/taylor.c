@@ -64,6 +64,7 @@ TaylorData *tay_new(CovarData *data) {
   td->elbo_bias = 0.0;
   td->siggrad_cache = NULL; /* will be allocated later */
   td->nuis_bias_cache = NULL; /* allocated lazily in latent-clock mode */
+  td->component_last_refresh = -1;
   td->warmup = 50; /* number of iterations before updates begin */
   td->period = 30; /* update period */
   td->beta = 0.3;
@@ -882,6 +883,9 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
   int do_refresh =
       (td->iter >= td->warmup) &&
       ((td->iter - td->warmup) % td->period == 0);
+  int component_changed = (mixmvn->ncomponents > 1 &&
+                           td->component_last_refresh >= 0 &&
+                           td->component_last_refresh != component);
 
   /* If we are in CRISPR+migration mode and the migration warmup just
      ended (mig_warmup is FALSE this iter but the cached T_cache was
@@ -892,12 +896,23 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
   unsigned int mig_active_now =
       (data->crispr_mod != NULL && data->migtable != NULL &&
        !data->crispr_mod->mig_warmup);
-  if (mig_active_now != td->mig_active_last_refresh) {
+  if (mig_active_now != td->mig_active_last_refresh ||
+      component_changed) {
     do_refresh = TRUE;
   }
 
-  if (do_refresh && nj_var_at_floor(mmvn, data))
+  if (do_refresh && nj_var_at_floor(mmvn, data)) {
     do_refresh = FALSE;
+    if (component_changed) {
+      td->T_cache = 0.0;
+      td->elbo_bias = 0.0;
+      if (td->siggrad_cache != NULL)
+        vec_zero(td->siggrad_cache);
+      if (td->nuis_bias_cache != NULL)
+        vec_zero(td->nuis_bias_cache);
+      td->component_last_refresh = component;
+    }
+  }
 
   if (do_refresh) {
 
@@ -931,7 +946,8 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
       if (td->nuis_bias_cache == NULL)
         td->nuis_bias_cache = vec_new(nuis_grad->size);
       int nuis_reset = (td->iter == td->warmup) ||
-                       (mig_active_now != td->mig_active_last_refresh);
+                       (mig_active_now != td->mig_active_last_refresh) ||
+                       component_changed;
       for (int j = 0; j < nuis_grad->size; j++) {
         double b = vec_get(mc_nuis, j) - vec_get(nuis_mu, j);
         double old = vec_get(td->nuis_bias_cache, j);
@@ -952,13 +968,23 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
     double T = 2.0 * ((mc_ll + mc_migll + mc_lprior) -
                       (ll_mu + *migll + *lprior));
 
+    if (component_changed) {
+      td->T_cache = 0.0;
+      td->elbo_bias = 0.0;
+      if (td->siggrad_cache != NULL)
+        vec_zero(td->siggrad_cache);
+      if (td->nuis_bias_cache != NULL)
+        vec_zero(td->nuis_bias_cache);
+    }
+
     if (isfinite(T)) {
       /* When the migration-active state changes (typically the
          end-of-warmup transition), the cached T_cache reflects the
          previous regime and EMA-blending would drag the new value in
          too slowly; treat this refresh like the initial one. */
       int reset = (td->iter == td->warmup) ||
-                  (mig_active_now != td->mig_active_last_refresh);
+                  (mig_active_now != td->mig_active_last_refresh) ||
+                  component_changed;
       if (reset) {
         td->T_cache = T;
 
@@ -979,8 +1005,6 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
                              td->beta);
       }
     }
-    td->mig_active_last_refresh = mig_active_now;
-
     /* on refresh iterations, use MC nuisance gradient (averaged over
        samples) instead of the single mean-point evaluation */
     if (nuis_grad != NULL && mc_nuis != NULL)
@@ -1002,12 +1026,16 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
       /* Also reset the elbo_bias EMA when migration just turned on
          or off -- old bias estimate is stale for the new regime. */
       int reset_bias = (td->iter == td->warmup) ||
-                       (mig_active_now != td->mig_active_last_refresh);
+                       (mig_active_now != td->mig_active_last_refresh) ||
+                       component_changed;
       if (reset_bias)
         td->elbo_bias = bias;
       else
         td->elbo_bias = (1.0 - td->beta) * td->elbo_bias + td->beta * bias;
     }
+
+    td->mig_active_last_refresh = mig_active_now;
+    td->component_last_refresh = component;
 
     vec_free(mc_grad);
     if (mc_nuis) vec_free(mc_nuis);

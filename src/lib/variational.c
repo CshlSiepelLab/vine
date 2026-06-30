@@ -48,6 +48,12 @@ static double nj_rescale_mean_grad_el(Vector *grad, multi_MVN *mmvn,
   }
 }
 
+static double nj_elbo_mix_kld_montecarlo(mixture_MVN *mixmvn, int component,
+                                         CovarData *data, int nminibatch,
+                                         double *kld,
+                                         Vector *sigma_kldgrad,
+                                         Vector **mu_kldgrad);
+
 /* optimize variational model by stochastic gradient ascent using the
    Adam algorithm.  Takes initial tree model and alignment and
    distance matrix, dimensionality of Euclidean space to work in.
@@ -86,14 +92,6 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     *center = NULL;
   if (mmvn->d * mmvn->n != dim * n)
     die("ERROR in nj_variational_inf: bad dimensions\n");
-
-  /* TODO: implement Taylor approximation for mixture models */
-  if (ncomponents > 1 && data->taylor != NULL) {
-    if (!silent)
-      fprintf(stderr, "Disabling Taylor approximation for mixture model.\n");
-    tay_free(data->taylor);
-    data->taylor = NULL;
-  }
 
   graddim = fulld + data->params->size;
   sigma_kldgrad = vec_new(sigmapar->size);
@@ -334,6 +332,13 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
         reenable_taylor_t = t + 10;
         taylor_stash = data->taylor;
         data->taylor = NULL;
+      }
+      else if (ncomponents > 1) {
+        /* Taylor approximates only the likelihood/prior expectation.  The
+           mixture entropy term E[log q_mix(x)] has no simple closed form, so
+           keep estimating just the mixture KLD and its gradients by MC. */
+        nj_elbo_mix_kld_montecarlo(mixmvn, component, data, nminibatch,
+                                   &kld, sigma_kldgrad, mu_kldgrad);
       }
     }
     
@@ -842,6 +847,50 @@ static double nj_mix_kld_sample_grad(mixture_MVN *mixmvn, int component,
   return retval;
 }
 
+/* Estimate only the mixture KLD term used when Taylor supplies the
+   likelihood/prior model gradient.  This avoids the expensive model
+   likelihood calculation in nj_elbo_montecarlo while still handling
+   E_q[log q_mix(x)], whose mixture entropy has no simple closed form. */
+static double nj_elbo_mix_kld_montecarlo(mixture_MVN *mixmvn, int component,
+                                         CovarData *data, int nminibatch,
+                                         double *kld,
+                                         Vector *sigma_kldgrad,
+                                         Vector **mu_kldgrad) {
+  multi_MVN *mmvn = mixmvn_get_component(mixmvn, component);
+  int fulld = data->nseqs * data->dim;
+  Vector *points = vec_new(fulld), *points_std;
+  double kld_sum = 0.0;
+  double scale = data->kld_upweight /
+    (nminibatch * data->pointscale * data->pointscale);
+
+  if (data->type == LOWR)
+    points_std = vec_new(data->lowrank * data->dim);
+  else
+    points_std = vec_new(fulld);
+
+  vec_zero(sigma_kldgrad);
+  if (mu_kldgrad != NULL)
+    for (int c = 0; c < mixmvn->ncomponents; c++)
+      vec_zero(mu_kldgrad[c]);
+
+  for (int i = 0; i < nminibatch; i++) {
+    nj_sample_points(mmvn, points, points_std);
+    kld_sum += nj_mix_kld_sample_grad(mixmvn, component, data, points,
+                                      points_std, sigma_kldgrad,
+                                      mu_kldgrad);
+  }
+
+  *kld = kld_sum * scale;
+  vec_scale(sigma_kldgrad, scale);
+  if (mu_kldgrad != NULL)
+    for (int c = 0; c < mixmvn->ncomponents; c++)
+      vec_scale(mu_kldgrad[c], scale);
+
+  vec_free(points);
+  vec_free(points_std);
+  return *kld;
+}
+
 double nj_elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
                           CovarData *data,
                           int nminibatch, Vector *model_grad, Vector *ave_nuis_grad,
@@ -853,13 +902,16 @@ double nj_elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
   multi_MVN *mmvn = mixmvn_get_component(mixmvn, component);
   int estimate_kld = (mixmvn->ncomponents > 1 && kld != NULL);
   int estimate_kld_grad = (estimate_kld && sigma_kldgrad != NULL);
+  double scale = data->kld_upweight /
+    (nminibatch * data->pointscale * data->pointscale);
 
   vec_zero(model_grad);
-  if (estimate_kld_grad)
+  if (estimate_kld_grad) {
     vec_zero(sigma_kldgrad);
-  if (mu_kldgrad != NULL)
-    for (int c = 0; c < mixmvn->ncomponents; c++)
-      vec_zero(mu_kldgrad[c]);
+    if (mu_kldgrad != NULL)
+      for (int c = 0; c < mixmvn->ncomponents; c++)
+        vec_zero(mu_kldgrad[c]);
+  }
   if (ave_nuis_grad != NULL) {
     nuis_grad = vec_new(ave_nuis_grad->size);
     vec_zero(ave_nuis_grad);
@@ -913,15 +965,13 @@ double nj_elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
   (*ave_lprior) /= nminibatch;
   (*avemigll) /= nminibatch;
   if (estimate_kld)
-    *kld *= data->kld_upweight /
-      (nminibatch * data->pointscale * data->pointscale);
-  if (estimate_kld_grad)
-    vec_scale(sigma_kldgrad, data->kld_upweight /
-              (nminibatch * data->pointscale * data->pointscale));
-  if (mu_kldgrad != NULL)
-    for (int c = 0; c < mixmvn->ncomponents; c++)
-      vec_scale(mu_kldgrad[c], data->kld_upweight /
-                (nminibatch * data->pointscale * data->pointscale));
+    *kld *= scale;
+  if (estimate_kld_grad) {
+    vec_scale(sigma_kldgrad, scale);
+    if (mu_kldgrad != NULL)
+      for (int c = 0; c < mixmvn->ncomponents; c++)
+        vec_scale(mu_kldgrad[c], scale);
+  }
 
   /* same for nuisance grad if needed */
   if (ave_nuis_grad != NULL)

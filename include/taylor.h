@@ -79,6 +79,7 @@ typedef struct taylor_data {
                               per-branch rate nuisances a distribution-averaged
                               gradient every iteration instead of the biased
                               single-mean-tree estimate (size = nuis_grad) */
+  int component_last_refresh; /* mixture component used for cached Taylor correction */
   int iter;    /* current iteration */
   int warmup;  /* number of warmup iterations */
   int period;  /* period between updates */
