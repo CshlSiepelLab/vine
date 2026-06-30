@@ -576,8 +576,8 @@ int main(int argc, char *argv[]) {
   covar_data = nj_new_covar_data(covar_param, D, dim, msa, crispr_mod, names,
                                  natural_grad, kld_upweight, rank, var_reg,
                                  hyperbolic, negcurvature, ultrametric,
-                                 radial_flow, planar_flow, tprior, migtable,
-                                 use_taylor);
+                                 radial_flow, planar_flow, n_mixture_components,
+                                 tprior, migtable, use_taylor);
   if (is_crispr)
     covar_data->no_zero_br = TRUE;
   if (primary_state != NULL)

@@ -92,9 +92,12 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
                              int rank, double var_reg, unsigned int hyperbolic,
                              double negcurvature, unsigned int ultrametric,
                              unsigned int radial_flow, unsigned int planar_flow,
-                             TreePrior *treeprior, MigTable *mtable,
-                             unsigned int use_taylor) {
+                             int ncomponents, TreePrior *treeprior,
+                             MigTable *mtable, unsigned int use_taylor) {
   CovarData *retval = smalloc(sizeof(CovarData));
+  int i;
+  if (ncomponents <= 0)
+    die("ERROR in nj_new_covar_data: number of components must be positive.\n");
   retval->type = covar_param;
   retval->msa = msa;
   retval->crispr_mod = crispr_mod;
@@ -133,21 +136,23 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
   retval->variational_iter = 0;
   retval->nthreads = 1;
   retval->dgamma_cats = 1;
+  retval->nflow_components = ncomponents;
   
-  retval->rfs = smalloc(sizeof(RadialFlow*));
-  if (radial_flow == TRUE) {
-    retval->rfs[0] = rf_new(retval->nseqs, dim);
-    rf_rescale(retval->rfs[0], POINTSPAN_EUC/sqrt(2));
-  }
-  else
-    retval->rfs[0] = NULL;
+  retval->rfs = smalloc(ncomponents * sizeof(RadialFlow*));
+  retval->pfs = smalloc(ncomponents * sizeof(PlanarFlow*));
+  for (i = 0; i < ncomponents; i++) {
+    if (radial_flow == TRUE) {
+      retval->rfs[i] = rf_new(retval->nseqs, dim);
+      rf_rescale(retval->rfs[i], POINTSPAN_EUC/sqrt(2));
+    }
+    else
+      retval->rfs[i] = NULL;
 
-  retval->pfs = smalloc(sizeof(PlanarFlow*));
-  if (planar_flow == TRUE) {
-    retval->pfs[0] = pf_new(retval->nseqs, dim);
+    if (planar_flow == TRUE)
+      retval->pfs[i] = pf_new(retval->nseqs, dim);
+    else
+      retval->pfs[i] = NULL;
   }
-  else
-    retval->pfs[0] = NULL;
     
   nj_set_pointscale(retval);
 
@@ -199,6 +204,7 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
 }
 
 void nj_free_covar_data(CovarData *data) {
+  int i;
   if (data->dist != NULL)
     mat_free(data->dist);
   if (data->Lapl_pinv != NULL)
@@ -211,11 +217,13 @@ void nj_free_covar_data(CovarData *data) {
     mat_free(data->R);
   if (data->params != NULL)
     vec_free(data->params);
-  if (data->rfs[0] != NULL)
-    rf_free(data->rfs[0]);
+  for (i = 0; i < data->nflow_components; i++)
+    if (data->rfs[i] != NULL)
+      rf_free(data->rfs[i]);
   sfree(data->rfs);
-  if (data->pfs[0] != NULL)
-    pf_free(data->pfs[0]);
+  for (i = 0; i < data->nflow_components; i++)
+    if (data->pfs[i] != NULL)
+      pf_free(data->pfs[i]);
   sfree(data->pfs);
   if (data->taylor != NULL)
     tay_free(data->taylor);

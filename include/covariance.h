@@ -82,6 +82,7 @@ typedef struct cvdat {
                               sometimes needed with CRISPR model */
   RadialFlow **rfs; /* optional flow layers, indexed by mixture component */
   PlanarFlow **pfs;
+  int nflow_components; /* length of rfs/pfs */
   TreePrior *treeprior; /* optional prior for tree (NULL if none) */
   unsigned int subsample; /* whether or not to subsample sites in likelihood calculation */
   int subsampsize; /* size of subsample (number of sites) */
@@ -114,8 +115,8 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
                              int rank, double var_reg, unsigned int hyperbolic,
                              double negcurvature, unsigned int ultrametric,
                              unsigned int radial_flow, unsigned int planar_flow,
-                             TreePrior *treeprior, MigTable *mtable,
-                             unsigned int use_taylor);
+                             int ncomponents, TreePrior *treeprior,
+                             MigTable *mtable, unsigned int use_taylor);
 
 void nj_free_covar_data(CovarData *data);
 
