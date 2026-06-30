@@ -537,6 +537,225 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
    likelihood.  The avegrad, ave_nuis_grad, ave_lprior, and avemigll
    parameters are updated.  For mixture models, kld is also updated 
    if not NULL. */ 
+static void nj_lowr_map_std(multi_MVN *mmvn, Vector *points_std,
+                            Vector *points) {
+  int k = mmvn->mvn->lowR->ncols;
+  Vector *xcomp = vec_new(mmvn->n), *stdproj = vec_new(k);
+
+  for (int d = 0; d < mmvn->d; d++) {
+    mmvn_project_down(mmvn, points_std, stdproj, d);
+    mmvn->mvn->mu = mmvn->mu[d];
+    mvn_map_std(mmvn->mvn, xcomp, stdproj);
+    mmvn_project_up(mmvn, xcomp, points, d);
+  }
+
+  vec_free(xcomp);
+  vec_free(stdproj);
+}
+
+/* Return one sample's mixture KLD contribution.  If kldgrad is non-NULL,
+   also accumulate the corresponding gradient contribution for -KLD,
+   matching the sign convention used by the optimizer. */
+static double nj_mix_kld_sample_grad(mixture_MVN *mixmvn, int component,
+                                     CovarData *data, Vector *points,
+                                     Vector *points_std, Vector *kldgrad) {
+  multi_MVN *mmvn = mixmvn_get_component(mixmvn, component);
+  int fulld = data->nseqs * data->dim;
+  double max_ldens = -INFINITY, sum_exp = 0.0, log_qmix, retval;
+  double *ldens = smalloc(mixmvn->ncomponents * sizeof(double));
+  double *resp = kldgrad != NULL ?
+    smalloc(mixmvn->ncomponents * sizeof(double)) : NULL;
+
+  for (int c = 0; c < mixmvn->ncomponents; c++) {
+    ldens[c] = mmvn_log_dens(mixmvn_get_component(mixmvn, c), points);
+    if (ldens[c] > max_ldens)
+      max_ldens = ldens[c];
+  }
+  for (int c = 0; c < mixmvn->ncomponents; c++)
+    sum_exp += exp(ldens[c] - max_ldens);
+  log_qmix = max_ldens + log(sum_exp) - log((double)mixmvn->ncomponents);
+
+  retval = log_qmix;
+  if (data->treeprior == NULL)
+    retval += 0.5 * (fulld * log(2 * M_PI) +
+                     vec_inner_prod(points, points));
+
+  if (kldgrad != NULL) {
+    for (int c = 0; c < mixmvn->ncomponents; c++)
+      resp[c] = exp(ldens[c] - max_ldens) / sum_exp;
+
+    if (data->type != LOWR) {
+      Vector *kld_dL_dx = vec_new(fulld);
+      Vector **prec_resid = smalloc(mixmvn->ncomponents * sizeof(Vector*));
+
+      /* Pathwise part: derivative wrt the sampled point x, then through
+         x = mu_component + Sigma_component^(1/2) z. */
+      vec_zero(kld_dL_dx);
+      for (int c = 0; c < mixmvn->ncomponents; c++) {
+        multi_MVN *comp = mixmvn_get_component(mixmvn, c);
+        prec_resid[c] = vec_new(fulld);
+        vec_zero(prec_resid[c]);
+
+        if (data->type == CONST || data->type == DIAG) {
+          for (int pidx = 0; pidx < fulld; pidx++) {
+            double centered = vec_get(points, pidx) -
+              mmvn_get_mu_el(comp, pidx);
+            double var = data->type == CONST ? data->lambda :
+              mat_get(comp->mvn->sigma, pidx, pidx);
+            vec_set(prec_resid[c], pidx, centered / var);
+          }
+        }
+        else { /* DIST: use the eigendecomposition of the shared covariance */
+          for (int d = 0; d < comp->d; d++) {
+            for (int eig = 0; eig < comp->n; eig++) {
+              double coeff = 0.0;
+              for (int taxon = 0; taxon < comp->n; taxon++) {
+                int pidx = taxon * comp->d + d;
+                double centered = vec_get(points, pidx) -
+                  mmvn_get_mu_el(comp, pidx);
+                coeff += mat_get(comp->mvn->evecs, taxon, eig) * centered;
+              }
+              coeff /= vec_get(comp->mvn->evals, eig);
+              for (int taxon = 0; taxon < comp->n; taxon++) {
+                int pidx = taxon * comp->d + d;
+                vec_set(prec_resid[c], pidx,
+                        vec_get(prec_resid[c], pidx) +
+                        mat_get(comp->mvn->evecs, taxon, eig) * coeff);
+              }
+            }
+          }
+        }
+
+        for (int pidx = 0; pidx < fulld; pidx++)
+          vec_set(kld_dL_dx, pidx, vec_get(kld_dL_dx, pidx) +
+                  resp[c] * vec_get(prec_resid[c], pidx));
+      }
+      if (data->treeprior == NULL) {
+        for (int pidx = 0; pidx < fulld; pidx++)
+          vec_set(kld_dL_dx, pidx, vec_get(kld_dL_dx, pidx) -
+                  vec_get(points, pidx));
+      }
+
+      /* Explicit mean term from log q_mix(x; theta), for the selected
+         component only.  Other-component means are intentionally skipped. */
+      for (int pidx = 0; pidx < fulld; pidx++) {
+        double explicit_mu = -resp[component] *
+          vec_get(prec_resid[component], pidx);
+        vec_set(kldgrad, pidx, vec_get(kldgrad, pidx) +
+                vec_get(kld_dL_dx, pidx) + explicit_mu);
+      }
+
+      /* Explicit covariance derivative of log q_mix plus the pathwise
+         covariance derivative through the selected component sample. */
+      if (data->type == DIAG) {
+        for (int pidx = 0; pidx < fulld; pidx++) {
+          double selected_centered = vec_get(points, pidx) -
+            mmvn_get_mu_el(mmvn, pidx);
+          double explicit_sigma = 0.0;
+          for (int c = 0; c < mixmvn->ncomponents; c++) {
+            double centered = vec_get(points, pidx) -
+              mmvn_get_mu_el(mixmvn_get_component(mixmvn, c), pidx);
+            explicit_sigma += 0.5 * resp[c] *
+              (1.0 - centered * vec_get(prec_resid[c], pidx));
+          }
+          vec_set(kldgrad, fulld + pidx,
+                  vec_get(kldgrad, fulld + pidx) +
+                  0.5 * vec_get(kld_dL_dx, pidx) * selected_centered +
+                  explicit_sigma);
+        }
+      }
+      else {
+        double loglambda_grad = 0.0, explicit_sigma = 0.0;
+        for (int c = 0; c < mixmvn->ncomponents; c++) {
+          double quad = 0.0;
+          for (int pidx = 0; pidx < fulld; pidx++) {
+            double centered = vec_get(points, pidx) -
+              mmvn_get_mu_el(mixmvn_get_component(mixmvn, c), pidx);
+            quad += centered * vec_get(prec_resid[c], pidx);
+          }
+          explicit_sigma += 0.5 * resp[c] * (fulld - quad);
+        }
+        for (int pidx = 0; pidx < fulld; pidx++) {
+          double selected_centered = vec_get(points, pidx) -
+            mmvn_get_mu_el(mmvn, pidx);
+          loglambda_grad += 0.5 * vec_get(kld_dL_dx, pidx) *
+            selected_centered;
+        }
+        vec_set(kldgrad, fulld, vec_get(kldgrad, fulld) +
+                loglambda_grad + explicit_sigma);
+      }
+
+      for (int c = 0; c < mixmvn->ncomponents; c++)
+        vec_free(prec_resid[c]);
+      free(prec_resid);
+      vec_free(kld_dL_dx);
+    }
+    else {
+      Vector *points_tweak = vec_new(fulld);
+
+      /* LOWR fallback: finite-difference the terms involving R.  This keeps
+         the tricky projected-density derivative isolated from the MC loop. */
+      for (int pidx = 0; pidx < fulld; pidx++) {
+        double orig_mu = mmvn_get_mu_el(mmvn, pidx);
+        double orig_x = vec_get(points, pidx);
+        double fplus, fminus;
+
+        mmvn_set_mu_el(mmvn, pidx, orig_mu + DERIV_EPS);
+        vec_copy(points_tweak, points);
+        vec_set(points_tweak, pidx, orig_x + DERIV_EPS);
+        fplus = mixmvn_log_dens(mixmvn, points_tweak);
+        if (data->treeprior == NULL)
+          fplus += 0.5 * (fulld * log(2 * M_PI) +
+                          vec_inner_prod(points_tweak, points_tweak));
+
+        mmvn_set_mu_el(mmvn, pidx, orig_mu - DERIV_EPS);
+        vec_copy(points_tweak, points);
+        vec_set(points_tweak, pidx, orig_x - DERIV_EPS);
+        fminus = mixmvn_log_dens(mixmvn, points_tweak);
+        if (data->treeprior == NULL)
+          fminus += 0.5 * (fulld * log(2 * M_PI) +
+                           vec_inner_prod(points_tweak, points_tweak));
+
+        mmvn_set_mu_el(mmvn, pidx, orig_mu);
+        vec_set(kldgrad, pidx, vec_get(kldgrad, pidx) -
+                (fplus - fminus) / (2.0 * DERIV_EPS));
+      }
+      for (int pidx = 0; pidx < data->params->size; pidx++) {
+        double orig_param = vec_get(data->params, pidx);
+        double fplus, fminus;
+
+        vec_set(data->params, pidx, orig_param + DERIV_EPS);
+        mixmvn_update_covariance(mixmvn, data);
+        nj_lowr_map_std(mmvn, points_std, points_tweak);
+        fplus = mixmvn_log_dens(mixmvn, points_tweak);
+        if (data->treeprior == NULL)
+          fplus += 0.5 * (fulld * log(2 * M_PI) +
+                          vec_inner_prod(points_tweak, points_tweak));
+
+        vec_set(data->params, pidx, orig_param - DERIV_EPS);
+        mixmvn_update_covariance(mixmvn, data);
+        nj_lowr_map_std(mmvn, points_std, points_tweak);
+        fminus = mixmvn_log_dens(mixmvn, points_tweak);
+        if (data->treeprior == NULL)
+          fminus += 0.5 * (fulld * log(2 * M_PI) +
+                           vec_inner_prod(points_tweak, points_tweak));
+
+        vec_set(data->params, pidx, orig_param);
+        mixmvn_update_covariance(mixmvn, data);
+        vec_set(kldgrad, fulld + pidx, vec_get(kldgrad, fulld + pidx) -
+                (fplus - fminus) / (2.0 * DERIV_EPS));
+      }
+
+      vec_free(points_tweak);
+    }
+  }
+
+  free(ldens);
+  if (resp != NULL)
+    free(resp);
+  return retval;
+}
+
 double nj_elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
                           CovarData *data,
                           int nminibatch, Vector *avegrad, Vector *ave_nuis_grad,
@@ -547,10 +766,11 @@ double nj_elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
   int n = data->nseqs, dim = data->dim, fulld = n*dim;
   multi_MVN *mmvn = mixmvn_get_component(mixmvn, component);
   int estimate_kld = (mixmvn->ncomponents > 1 && kld != NULL);
-
-  (void)kldgrad; /* Mixture KLD gradient will be added separately later. */
+  int estimate_kld_grad = (estimate_kld && kldgrad != NULL);
 
   vec_zero(avegrad);
+  if (estimate_kld_grad)
+    vec_zero(kldgrad);
   if (ave_nuis_grad != NULL) {
     nuis_grad = vec_new(ave_nuis_grad->size);
     vec_zero(ave_nuis_grad);
@@ -584,12 +804,10 @@ double nj_elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
     avell += ll;
     (*avemigll) += migll;
     (*ave_lprior) += lprior;
-    if (estimate_kld) {
-      *kld += mixmvn_log_dens(mixmvn, points);
-      if (data->treeprior == NULL)
-        *kld += 0.5 * (fulld * log(2 * M_PI) +
-                       vec_inner_prod(points, points));
-    }
+    if (estimate_kld)
+      *kld += nj_mix_kld_sample_grad(mixmvn, component, data, points,
+                                     points_std,
+                                     estimate_kld_grad ? kldgrad : NULL);
     vec_plus_eq(avegrad, grad);
 
     if (ave_nuis_grad != NULL) {
@@ -607,6 +825,9 @@ double nj_elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
   if (estimate_kld)
     *kld *= data->kld_upweight /
       (nminibatch * data->pointscale * data->pointscale);
+  if (estimate_kld_grad)
+    vec_scale(kldgrad, data->kld_upweight /
+              (nminibatch * data->pointscale * data->pointscale));
 
   /* same for nuisance grad if needed */
   if (ave_nuis_grad != NULL)
