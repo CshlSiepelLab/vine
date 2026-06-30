@@ -1080,25 +1080,25 @@ void nj_apply_normalizing_flows(Vector *points_y, Vector *points_x,
   double ldet = 0;
   assert(points_x->size == points_y->size);
   
-  if (data->rf == NULL && data->pf == NULL) {
+  if (data->rfs[0] == NULL && data->pfs[0] == NULL) {
     if (logdet != NULL) *logdet = 0;
     vec_copy(points_y, points_x);
     return;
   }
 
-  if (data->rf != NULL && data->pf != NULL) {
+  if (data->rfs[0] != NULL && data->pfs[0] != NULL) {
     /* in this case we need an intermediate vector */
     Vector *tmp = vec_new(points_x->size);
-    ldet = rf_forward(data->rf, tmp, points_x);
-    ldet += pf_forward(data->pf, points_y, tmp);
+    ldet = rf_forward(data->rfs[0], tmp, points_x);
+    ldet += pf_forward(data->pfs[0], points_y, tmp);
     vec_free(tmp);
   }
  
-  else if (data->rf != NULL) 
-    ldet = rf_forward(data->rf, points_y, points_x);
+  else if (data->rfs[0] != NULL)
+    ldet = rf_forward(data->rfs[0], points_y, points_x);
 
-  else if (data->pf != NULL) 
-    ldet = pf_forward(data->pf, points_y, points_x);
+  else if (data->pfs[0] != NULL)
+    ldet = pf_forward(data->pfs[0], points_y, points_x);
 
   if (logdet != NULL)
     (*logdet) = ldet; 

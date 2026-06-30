@@ -776,27 +776,27 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
        Note that this is supported only in the Euclidean case for now;
        need to move this call outside of 'else' if hyperbolic support
        is added */
-    if (data->rf != NULL && data->pf != NULL) {
+    if (data->rfs[0] != NULL && data->pfs[0] != NULL) {
       /* forward order is x -> rf -> tmp -> pf -> y, so the reverse
          must be dL/dy -> pf_backprop (input was tmp) -> dL/dtmp ->
          rf_backprop (input was x) -> dL/dx.  Recompute tmp = rf(x)
          since the planar backprop needs it as the input vector. */
       Vector *tmp = vec_new(dL_dx->size);
       Vector *dL_dtmp = vec_new(dL_dx->size);
-      rf_forward(data->rf, tmp, x);
-      pf_backprop(data->pf, tmp, dL_dtmp, dL_dy);
-      rf_backprop(data->rf, x, dL_dx, dL_dtmp);
+      rf_forward(data->rfs[0], tmp, x);
+      pf_backprop(data->pfs[0], tmp, dL_dtmp, dL_dy);
+      rf_backprop(data->rfs[0], x, dL_dx, dL_dtmp);
       vec_free(tmp);
       vec_free(dL_dtmp);
     }
-    else if (data->rf != NULL) 
+    else if (data->rfs[0] != NULL)
       /* We need to back-propagate through the radial flow to obtain
          the real dL_dx */
-      rf_backprop(data->rf, x, dL_dx, dL_dy);
+      rf_backprop(data->rfs[0], x, dL_dx, dL_dy);
       /* note that the gradients wrt the parameters a, b, and ctr are
          computed as side-effects and stored inside rf */
-    else if (data->pf != NULL)
-      pf_backprop(data->pf, x, dL_dx, dL_dy);
+    else if (data->pfs[0] != NULL)
+      pf_backprop(data->pfs[0], x, dL_dx, dL_dy);
       /* similar for planar flow */
     else
       vec_copy(dL_dx, dL_dy);
@@ -808,7 +808,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
      through the full forward pipeline.  Mutates data->dist /
      mod->tree during the sweep; restored to the original-x pipeline
      state at the end. */
-  if ((data->rf != NULL || data->pf != NULL) &&
+  if ((data->rfs[0] != NULL || data->pfs[0] != NULL) &&
       getenv("CHECK_FLOW") != NULL) {
     static int check_done = 0;
     if (!check_done) {
@@ -839,16 +839,16 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
               max_diff_x, worst_x);
 
       /* radial flow: center, a, b */
-      if (data->rf != NULL) {
-        for (idim = 0; idim < data->rf->ctr->size; idim++) {
-          double orig = vec_get(data->rf->ctr, idim);
-          vec_set(data->rf->ctr, idim, orig + eps);
+      if (data->rfs[0] != NULL) {
+        for (idim = 0; idim < data->rfs[0]->ctr->size; idim++) {
+          double orig = vec_get(data->rfs[0]->ctr, idim);
+          vec_set(data->rfs[0]->ctr, idim, orig + eps);
           double Lp = check_flow_pipeline_L(x, mod, data);
-          vec_set(data->rf->ctr, idim, orig - eps);
+          vec_set(data->rfs[0]->ctr, idim, orig - eps);
           double Lm = check_flow_pipeline_L(x, mod, data);
-          vec_set(data->rf->ctr, idim, orig);
+          vec_set(data->rfs[0]->ctr, idim, orig);
           double num = (Lp - Lm) / (2 * eps);
-          double ana = vec_get(data->rf->ctr_grad, idim);
+          double ana = vec_get(data->rfs[0]->ctr_grad, idim);
           double diff = fabs(num - ana);
           if (diff > max_diff_ctr) { max_diff_ctr = diff; worst_ctr = idim; }
         }
@@ -858,73 +858,73 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
 
         /* a */
         {
-          double orig = data->rf->a;
-          data->rf->a = orig + eps; rf_update(data->rf);
+          double orig = data->rfs[0]->a;
+          data->rfs[0]->a = orig + eps; rf_update(data->rfs[0]);
           double Lp = check_flow_pipeline_L(x, mod, data);
-          data->rf->a = orig - eps; rf_update(data->rf);
+          data->rfs[0]->a = orig - eps; rf_update(data->rfs[0]);
           double Lm = check_flow_pipeline_L(x, mod, data);
-          data->rf->a = orig; rf_update(data->rf);
+          data->rfs[0]->a = orig; rf_update(data->rfs[0]);
           double num = (Lp - Lm) / (2 * eps);
           fprintf(stderr,
                   "[flow-check] rf->a_grad: anal=%.6e num=%.6e diff=%.6e\n",
-                  data->rf->a_grad, num, fabs(num - data->rf->a_grad));
+                  data->rfs[0]->a_grad, num, fabs(num - data->rfs[0]->a_grad));
         }
         /* b */
         {
-          double orig = data->rf->b;
-          data->rf->b = orig + eps; rf_update(data->rf);
+          double orig = data->rfs[0]->b;
+          data->rfs[0]->b = orig + eps; rf_update(data->rfs[0]);
           double Lp = check_flow_pipeline_L(x, mod, data);
-          data->rf->b = orig - eps; rf_update(data->rf);
+          data->rfs[0]->b = orig - eps; rf_update(data->rfs[0]);
           double Lm = check_flow_pipeline_L(x, mod, data);
-          data->rf->b = orig; rf_update(data->rf);
+          data->rfs[0]->b = orig; rf_update(data->rfs[0]);
           double num = (Lp - Lm) / (2 * eps);
           fprintf(stderr,
                   "[flow-check] rf->b_grad: anal=%.6e num=%.6e diff=%.6e\n",
-                  data->rf->b_grad, num, fabs(num - data->rf->b_grad));
+                  data->rfs[0]->b_grad, num, fabs(num - data->rfs[0]->b_grad));
         }
       }
 
       /* planar flow: u, w, b */
-      if (data->pf != NULL) {
-        for (idim = 0; idim < data->pf->u->size; idim++) {
-          double orig = vec_get(data->pf->u, idim);
-          vec_set(data->pf->u, idim, orig + eps);
+      if (data->pfs[0] != NULL) {
+        for (idim = 0; idim < data->pfs[0]->u->size; idim++) {
+          double orig = vec_get(data->pfs[0]->u, idim);
+          vec_set(data->pfs[0]->u, idim, orig + eps);
           double Lp = check_flow_pipeline_L(x, mod, data);
-          vec_set(data->pf->u, idim, orig - eps);
+          vec_set(data->pfs[0]->u, idim, orig - eps);
           double Lm = check_flow_pipeline_L(x, mod, data);
-          vec_set(data->pf->u, idim, orig);
+          vec_set(data->pfs[0]->u, idim, orig);
           double num = (Lp - Lm) / (2 * eps);
-          double ana = vec_get(data->pf->u_grad, idim);
+          double ana = vec_get(data->pfs[0]->u_grad, idim);
           double diff = fabs(num - ana);
           if (diff > max_diff_pf) { max_diff_pf = diff; worst_pf = idim; }
         }
-        for (idim = 0; idim < data->pf->w->size; idim++) {
-          double orig = vec_get(data->pf->w, idim);
-          vec_set(data->pf->w, idim, orig + eps);
+        for (idim = 0; idim < data->pfs[0]->w->size; idim++) {
+          double orig = vec_get(data->pfs[0]->w, idim);
+          vec_set(data->pfs[0]->w, idim, orig + eps);
           double Lp = check_flow_pipeline_L(x, mod, data);
-          vec_set(data->pf->w, idim, orig - eps);
+          vec_set(data->pfs[0]->w, idim, orig - eps);
           double Lm = check_flow_pipeline_L(x, mod, data);
-          vec_set(data->pf->w, idim, orig);
+          vec_set(data->pfs[0]->w, idim, orig);
           double num = (Lp - Lm) / (2 * eps);
-          double ana = vec_get(data->pf->w_grad, idim);
+          double ana = vec_get(data->pfs[0]->w_grad, idim);
           double diff = fabs(num - ana);
           if (diff > max_diff_pf)
-            { max_diff_pf = diff; worst_pf = data->pf->u->size + idim; }
+            { max_diff_pf = diff; worst_pf = data->pfs[0]->u->size + idim; }
         }
         fprintf(stderr,
                 "[flow-check] pf u/w grad: max |anal-num| = %.6e at idx %d\n",
                 max_diff_pf, worst_pf);
         {
-          double orig = data->pf->b;
-          data->pf->b = orig + eps;
+          double orig = data->pfs[0]->b;
+          data->pfs[0]->b = orig + eps;
           double Lp = check_flow_pipeline_L(x, mod, data);
-          data->pf->b = orig - eps;
+          data->pfs[0]->b = orig - eps;
           double Lm = check_flow_pipeline_L(x, mod, data);
-          data->pf->b = orig;
+          data->pfs[0]->b = orig;
           double num = (Lp - Lm) / (2 * eps);
           fprintf(stderr,
                   "[flow-check] pf->b_grad: anal=%.6e num=%.6e diff=%.6e\n",
-                  data->pf->b_grad, num, fabs(num - data->pf->b_grad));
+                  data->pfs[0]->b_grad, num, fabs(num - data->pfs[0]->b_grad));
         }
       }
 

@@ -449,7 +449,7 @@ void tay_prep_jacobians(TaylorData *tay_data, TreeModel *mod, Vector *x_mean) {
    data->nb      neighbor tape (from mean tree)
    data->dist    distances at mean
    data->y       embedding at mean
-   data->rf, pf  flows
+   data->rfs[0], pfs[0]  flows
    Everything else must be precomputed.
 
    This is JUST the reverse-mode Jacobian chain for the mean point.
@@ -585,18 +585,18 @@ void tay_dx_from_dt(Vector *dL_dt, Vector *dL_dx, TreeModel *mod,
        x->rf->tmp->pf->y, so the reverse must visit planar first
        (input was tmp = rf_forward(x)) and then radial (input was x). */
     Vector *x_in = tay_data->x;
-    if (data->rf != NULL && data->pf != NULL) {
+    if (data->rfs[0] != NULL && data->pfs[0] != NULL) {
       Vector *tmp = tay_data->tmp_extra;
       Vector *dL_dtmp = tay_data->tmp_x1;
-      rf_forward(data->rf, tmp, x_in);
-      pf_backprop(data->pf, tmp, dL_dtmp, dL_dy);
-      rf_backprop(data->rf, x_in, dL_dx, dL_dtmp);
+      rf_forward(data->rfs[0], tmp, x_in);
+      pf_backprop(data->pfs[0], tmp, dL_dtmp, dL_dy);
+      rf_backprop(data->rfs[0], x_in, dL_dx, dL_dtmp);
     }
-    else if (data->rf != NULL) {
-      rf_backprop(data->rf, x_in, dL_dx, dL_dy);
+    else if (data->rfs[0] != NULL) {
+      rf_backprop(data->rfs[0], x_in, dL_dx, dL_dy);
     }
-    else if (data->pf != NULL) {
-      pf_backprop(data->pf, x_in, dL_dx, dL_dy);
+    else if (data->pfs[0] != NULL) {
+      pf_backprop(data->pfs[0], x_in, dL_dx, dL_dy);
     }
     else {
       vec_copy(dL_dx, dL_dy);

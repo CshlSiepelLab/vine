@@ -80,8 +80,8 @@ typedef struct cvdat {
   char **names;
   unsigned int no_zero_br; /* force all branches to be nonzero;
                               sometimes needed with CRISPR model */
-  RadialFlow *rf; /* optional flow layers (NULL if none) */
-  PlanarFlow *pf;
+  RadialFlow **rfs; /* optional flow layers, indexed by mixture component */
+  PlanarFlow **pfs;
   TreePrior *treeprior; /* optional prior for tree (NULL if none) */
   unsigned int subsample; /* whether or not to subsample sites in likelihood calculation */
   int subsampsize; /* size of subsample (number of sites) */

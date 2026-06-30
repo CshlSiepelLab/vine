@@ -37,11 +37,11 @@ int nj_get_num_nuisance_params(TreeModel *mod, CovarData *data) {
   if (data->dgamma_cats > 1)
     retval += 1;
   
-  if (data->rf != NULL)
-    retval += data->rf->ctr->size + 2;
+  if (data->rfs[0] != NULL)
+    retval += data->rfs[0]->ctr->size + 2;
 
-  if (data->pf != NULL)
-    retval += data->pf->ndim * 2 + 1;
+  if (data->pfs[0] != NULL)
+    retval += data->pfs[0]->ndim * 2 + 1;
 
   if (data->treeprior != NULL && data->treeprior->relclock == TRUE && data->ultrametric == FALSE)
     retval += (1 + (mod->tree->nnodes + 1)/2 - 1);
@@ -86,13 +86,13 @@ char *nj_get_nuisance_param_name(TreeModel *mod, CovarData *data, int idx) {
     idx -= 1;
   }
 
-  if (data->rf != NULL) {
-    if (idx < data->rf->ctr->size) {
+  if (data->rfs[0] != NULL) {
+    if (idx < data->rfs[0]->ctr->size) {
       char *tmp = smalloc(15 * sizeof(char));
       snprintf(tmp, 15, "rf_ctr[%d]", idx);
       return tmp;
     }
-    idx -= data->rf->ctr->size;
+    idx -= data->rfs[0]->ctr->size;
     if (idx == 0)
       return "rf_a";
     if (idx == 1)
@@ -100,19 +100,19 @@ char *nj_get_nuisance_param_name(TreeModel *mod, CovarData *data, int idx) {
     idx -= 2;
   }
 
-  if (data->pf != NULL) {
-    if (idx < data->pf->ndim) {
+  if (data->pfs[0] != NULL) {
+    if (idx < data->pfs[0]->ndim) {
       tmp = smalloc(15 * sizeof(char));
       snprintf(tmp, 15, "pf_u[%d]", idx);
       return tmp;
     }
-    idx -= data->pf->ndim;
-    if (idx < data->pf->ndim) {
+    idx -= data->pfs[0]->ndim;
+    if (idx < data->pfs[0]->ndim) {
       tmp = smalloc(15 * sizeof(char));
       snprintf(tmp, 15, "pf_w[%d]", idx);
       return tmp;
     }
-    idx -= data->pf->ndim;
+    idx -= data->pfs[0]->ndim;
     if (idx == 0)
       return "pf_b";
     idx--;
@@ -187,19 +187,19 @@ void nj_update_nuis_grad(TreeModel *mod, CovarData *data, Vector *nuis_grad) {
   if (data->dgamma_cats > 1)
     vec_set(nuis_grad, idx++, data->deriv_dgamma_alpha);
   
-  if (data->rf != NULL) {
-    for (i = 0; i < data->rf->ctr_grad->size; i++)
-      vec_set(nuis_grad, idx++, vec_get(data->rf->ctr_grad, i));
-    vec_set(nuis_grad, idx++, data->rf->a_grad);
-    vec_set(nuis_grad, idx++, data->rf->b_grad);
+  if (data->rfs[0] != NULL) {
+    for (i = 0; i < data->rfs[0]->ctr_grad->size; i++)
+      vec_set(nuis_grad, idx++, vec_get(data->rfs[0]->ctr_grad, i));
+    vec_set(nuis_grad, idx++, data->rfs[0]->a_grad);
+    vec_set(nuis_grad, idx++, data->rfs[0]->b_grad);
   }
 
-  if (data->pf != NULL) {
-    for (i = 0; i < data->pf->ndim; i++)
-      vec_set(nuis_grad, idx++, vec_get(data->pf->u_grad, i));
-    for (i = 0; i < data->pf->ndim; i++)
-      vec_set(nuis_grad, idx++, vec_get(data->pf->w_grad, i));
-    vec_set(nuis_grad, idx++, data->pf->b_grad);
+  if (data->pfs[0] != NULL) {
+    for (i = 0; i < data->pfs[0]->ndim; i++)
+      vec_set(nuis_grad, idx++, vec_get(data->pfs[0]->u_grad, i));
+    for (i = 0; i < data->pfs[0]->ndim; i++)
+      vec_set(nuis_grad, idx++, vec_get(data->pfs[0]->w_grad, i));
+    vec_set(nuis_grad, idx++, data->pfs[0]->b_grad);
   }
 
   if (data->treeprior != NULL && data->treeprior->relclock == TRUE && data->ultrametric == FALSE) {
@@ -241,19 +241,19 @@ void nj_save_nuis_params(Vector *stored_vals, TreeModel *mod, CovarData *data) {
   if (data->dgamma_cats > 1)
     vec_set(stored_vals, idx++, mod->alpha);
   
-  if (data->rf != NULL) {
-    for (i = 0; i < data->rf->ctr->size; i++)
-      vec_set(stored_vals, idx++, vec_get(data->rf->ctr, i));
-    vec_set(stored_vals, idx++, data->rf->a);
-    vec_set(stored_vals, idx++, data->rf->b);
+  if (data->rfs[0] != NULL) {
+    for (i = 0; i < data->rfs[0]->ctr->size; i++)
+      vec_set(stored_vals, idx++, vec_get(data->rfs[0]->ctr, i));
+    vec_set(stored_vals, idx++, data->rfs[0]->a);
+    vec_set(stored_vals, idx++, data->rfs[0]->b);
   }
 
-  if (data->pf != NULL) {
-    for (i = 0; i < data->pf->ndim; i++)
-      vec_set(stored_vals, idx++, vec_get(data->pf->u, i));
-    for (i = 0; i < data->pf->ndim; i++)
-      vec_set(stored_vals, idx++, vec_get(data->pf->w, i));
-    vec_set(stored_vals, idx++, data->pf->b);
+  if (data->pfs[0] != NULL) {
+    for (i = 0; i < data->pfs[0]->ndim; i++)
+      vec_set(stored_vals, idx++, vec_get(data->pfs[0]->u, i));
+    for (i = 0; i < data->pfs[0]->ndim; i++)
+      vec_set(stored_vals, idx++, vec_get(data->pfs[0]->w, i));
+    vec_set(stored_vals, idx++, data->pfs[0]->b);
   }
 
   if (data->treeprior != NULL && data->treeprior->relclock == TRUE && data->ultrametric == FALSE) {
@@ -305,24 +305,24 @@ void nj_update_nuis_params(Vector *stored_vals, TreeModel *mod, CovarData *data)
                   mod->nratecats, 0); 
   }
   
-  if (data->rf != NULL) {
-    if (data->rf->center_update == TRUE)
-      for (i = 0; i < data->rf->ctr->size; i++)
-        vec_set(data->rf->ctr, i, vec_get(stored_vals, idx++));
+  if (data->rfs[0] != NULL) {
+    if (data->rfs[0]->center_update == TRUE)
+      for (i = 0; i < data->rfs[0]->ctr->size; i++)
+        vec_set(data->rfs[0]->ctr, i, vec_get(stored_vals, idx++));
     else
-      idx += data->rf->ctr->size;
+      idx += data->rfs[0]->ctr->size;
     
-    data->rf->a = vec_get(stored_vals, idx++);
-    data->rf->b = vec_get(stored_vals, idx++);
-    rf_update(data->rf);
+    data->rfs[0]->a = vec_get(stored_vals, idx++);
+    data->rfs[0]->b = vec_get(stored_vals, idx++);
+    rf_update(data->rfs[0]);
   }
 
-  if (data->pf != NULL) {
-    for (i = 0; i < data->pf->ndim; i++)
-      vec_set(data->pf->u, i, vec_get(stored_vals, idx++)); 
-    for (i = 0; i < data->pf->ndim; i++)
-      vec_set(data->pf->w, i, vec_get(stored_vals, idx++)); 
-    data->pf->b = vec_get(stored_vals, idx++);
+  if (data->pfs[0] != NULL) {
+    for (i = 0; i < data->pfs[0]->ndim; i++)
+      vec_set(data->pfs[0]->u, i, vec_get(stored_vals, idx++));
+    for (i = 0; i < data->pfs[0]->ndim; i++)
+      vec_set(data->pfs[0]->w, i, vec_get(stored_vals, idx++));
+    data->pfs[0]->b = vec_get(stored_vals, idx++);
   }
 
   if (data->treeprior != NULL && data->treeprior->relclock == TRUE && data->ultrametric == FALSE) {
@@ -401,40 +401,40 @@ void nj_nuis_param_pluseq(TreeModel *mod, CovarData *data, int idx, double inc) 
     idx -= 1;
   }
   
-  if (data->rf != NULL) {
-    if (data->rf->center_update == TRUE) {
-      if (idx < data->rf->ctr->size) {
-        vec_set(data->rf->ctr, idx, vec_get(data->rf->ctr, idx) + inc);
+  if (data->rfs[0] != NULL) {
+    if (data->rfs[0]->center_update == TRUE) {
+      if (idx < data->rfs[0]->ctr->size) {
+        vec_set(data->rfs[0]->ctr, idx, vec_get(data->rfs[0]->ctr, idx) + inc);
         return;
       }
-      idx -= data->rf->ctr->size;
+      idx -= data->rfs[0]->ctr->size;
     }
     if (idx == 0) {
-      data->rf->a += inc;
-      rf_update(data->rf);
+      data->rfs[0]->a += inc;
+      rf_update(data->rfs[0]);
       return;
     }
     if (idx == 1) {
-      data->rf->b += inc;
-      rf_update(data->rf);
+      data->rfs[0]->b += inc;
+      rf_update(data->rfs[0]);
       return;
     }
     idx -= 2;
   }
 
-  if (data->pf != NULL) {
-    if (idx < data->pf->ndim) {
-      vec_set(data->pf->u, idx, vec_get(data->pf->u, idx) + inc);
+  if (data->pfs[0] != NULL) {
+    if (idx < data->pfs[0]->ndim) {
+      vec_set(data->pfs[0]->u, idx, vec_get(data->pfs[0]->u, idx) + inc);
       return;
     }
-    idx -= data->pf->ndim;
-    if (idx < data->pf->ndim) {
-      vec_set(data->pf->w, idx, vec_get(data->pf->w, idx) + inc);
+    idx -= data->pfs[0]->ndim;
+    if (idx < data->pfs[0]->ndim) {
+      vec_set(data->pfs[0]->w, idx, vec_get(data->pfs[0]->w, idx) + inc);
       return;
     }
-    idx -= data->pf->ndim;
+    idx -= data->pfs[0]->ndim;
     if (idx == 0) {
-      data->pf->b += inc;
+      data->pfs[0]->b += inc;
       return;
     }
     idx--;
@@ -508,28 +508,28 @@ double nj_nuis_param_get(TreeModel *mod, CovarData *data, int idx) {
     idx -= 1;
   }
   
-  if (data->rf != NULL) {
-    if (data->rf->center_update == TRUE) {
-      if (idx < data->rf->ctr->size) 
-        return vec_get(data->rf->ctr, idx);      
-      idx -= data->rf->ctr->size;
+  if (data->rfs[0] != NULL) {
+    if (data->rfs[0]->center_update == TRUE) {
+      if (idx < data->rfs[0]->ctr->size)
+        return vec_get(data->rfs[0]->ctr, idx);
+      idx -= data->rfs[0]->ctr->size;
     }
     if (idx == 0)
-      return data->rf->a;
+      return data->rfs[0]->a;
     if (idx == 1)
-      return data->rf->b;
+      return data->rfs[0]->b;
     idx -= 2;
   }
 
-  if (data->pf != NULL) {
-    if (idx < data->pf->ndim) 
-      return vec_get(data->pf->u, idx);
-    idx -= data->pf->ndim;
-    if (idx < data->pf->ndim) 
-      return vec_get(data->pf->w, idx);    
-    idx -= data->pf->ndim;
+  if (data->pfs[0] != NULL) {
+    if (idx < data->pfs[0]->ndim)
+      return vec_get(data->pfs[0]->u, idx);
+    idx -= data->pfs[0]->ndim;
+    if (idx < data->pfs[0]->ndim)
+      return vec_get(data->pfs[0]->w, idx);
+    idx -= data->pfs[0]->ndim;
     if (idx == 0)
-      return data->pf->b;
+      return data->pfs[0]->b;
     idx--;
   }
 
@@ -559,4 +559,3 @@ double nj_nuis_param_get(TreeModel *mod, CovarData *data, int idx) {
   die("ERROR in nuis_param_get: index out of bounds.\n");
   return -1;
 }
-

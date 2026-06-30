@@ -134,17 +134,20 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
   retval->nthreads = 1;
   retval->dgamma_cats = 1;
   
+  retval->rfs = smalloc(sizeof(RadialFlow*));
   if (radial_flow == TRUE) {
-    retval->rf = rf_new(retval->nseqs, dim);
-    rf_rescale(retval->rf, POINTSPAN_EUC/sqrt(2));
+    retval->rfs[0] = rf_new(retval->nseqs, dim);
+    rf_rescale(retval->rfs[0], POINTSPAN_EUC/sqrt(2));
   }
   else
-    retval->rf = NULL;
+    retval->rfs[0] = NULL;
 
-  if (planar_flow == TRUE) 
-    retval->pf = pf_new(retval->nseqs, dim);
+  retval->pfs = smalloc(sizeof(PlanarFlow*));
+  if (planar_flow == TRUE) {
+    retval->pfs[0] = pf_new(retval->nseqs, dim);
+  }
   else
-    retval->pf = NULL;
+    retval->pfs[0] = NULL;
     
   nj_set_pointscale(retval);
 
@@ -208,10 +211,12 @@ void nj_free_covar_data(CovarData *data) {
     mat_free(data->R);
   if (data->params != NULL)
     vec_free(data->params);
-  if (data->rf != NULL)
-    rf_free(data->rf);
-  if (data->pf != NULL)
-    pf_free(data->pf);
+  if (data->rfs[0] != NULL)
+    rf_free(data->rfs[0]);
+  sfree(data->rfs);
+  if (data->pfs[0] != NULL)
+    pf_free(data->pfs[0]);
+  sfree(data->pfs);
   if (data->taylor != NULL)
     tay_free(data->taylor);
   if (data->tuplecdf != NULL)
