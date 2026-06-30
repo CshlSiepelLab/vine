@@ -53,6 +53,21 @@ static double check_flow_pipeline_L(Vector *x_local, TreeModel *mod,
   return ll + logdet;
 }
 
+static void nj_zero_flow_grads(CovarData *data) {
+  for (int c = 0; c < data->nflow_components; c++) {
+    if (data->rfs[c] != NULL) {
+      vec_zero(data->rfs[c]->ctr_grad);
+      data->rfs[c]->a_grad = 0;
+      data->rfs[c]->b_grad = 0;
+    }
+    if (data->pfs[c] != NULL) {
+      vec_zero(data->pfs[c]->u_grad);
+      vec_zero(data->pfs[c]->w_grad);
+      data->pfs[c]->b_grad = 0;
+    }
+  }
+}
+
 /* compute the gradient of the log likelihood for a tree model with
    respect to the free parameters of the MVN averaging distribution,
    starting from a given MVN sample (points). Returns log likelihood
@@ -77,6 +92,10 @@ double nj_compute_model_grad(TreeModel *mod, multi_MVN *mmvn, Vector *points,
     die("ERROR in nj_compute_model_grad: Laplacian pseudoinverse and eigendecomposition required in DIST case.\n");
   else if (data->type == LOWR && data->R == NULL)
     die("ERROR in nj_compute_model_grad: low-rank matrix R required in LOWR case.\n");
+
+  /* Each sample evaluates one component's flows.  Clear all flow-gradient
+     buffers so inactive components contribute zero nuisance gradient. */
+  nj_zero_flow_grads(data);
   
   /* obtain gradient with respect to points, dL/dx */
   ll_base = nj_dL_dx_smartest(points, dL_dx, mod, data, component, nf_logdet,
