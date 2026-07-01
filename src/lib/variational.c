@@ -789,21 +789,21 @@ static double nj_mix_kld_sample_grad(mixture_MVN *mixmvn, int component,
         for (int pidx = 0; pidx < fulld; pidx++) {
           double selected_centered = vec_get(points, pidx) -
             mmvn_get_mu_el(mmvn, pidx);
-          double explicit_sigma = 0.0;
           for (int c = 0; c < mixmvn->ncomponents; c++) {
             double centered = vec_get(points, pidx) -
               mmvn_get_mu_el(mixmvn_get_component(mixmvn, c), pidx);
-            explicit_sigma += 0.5 * resp[c] *
+            double explicit_sigma = 0.5 * resp[c] *
               (1.0 - centered * vec_get(prec_resid[c], pidx));
+            vec_set(sigma_kldgrad[c], pidx,
+                    vec_get(sigma_kldgrad[c], pidx) + explicit_sigma);
           }
           vec_set(sigma_kldgrad[component], pidx,
                   vec_get(sigma_kldgrad[component], pidx) +
-                  0.5 * vec_get(kld_dL_dx, pidx) * selected_centered +
-                  explicit_sigma);
+                  0.5 * vec_get(kld_dL_dx, pidx) * selected_centered);
         }
       }
       else {
-        double loglambda_grad = 0.0, explicit_sigma = 0.0;
+        double loglambda_grad = 0.0;
         for (int c = 0; c < mixmvn->ncomponents; c++) {
           double quad = 0.0;
           for (int pidx = 0; pidx < fulld; pidx++) {
@@ -811,7 +811,9 @@ static double nj_mix_kld_sample_grad(mixture_MVN *mixmvn, int component,
               mmvn_get_mu_el(mixmvn_get_component(mixmvn, c), pidx);
             quad += centered * vec_get(prec_resid[c], pidx);
           }
-          explicit_sigma += 0.5 * resp[c] * (fulld - quad);
+          vec_set(sigma_kldgrad[c], 0,
+                  vec_get(sigma_kldgrad[c], 0) +
+                  0.5 * resp[c] * (fulld - quad));
         }
         for (int pidx = 0; pidx < fulld; pidx++) {
           double selected_centered = vec_get(points, pidx) -
@@ -821,7 +823,7 @@ static double nj_mix_kld_sample_grad(mixture_MVN *mixmvn, int component,
         }
         vec_set(sigma_kldgrad[component], 0,
                 vec_get(sigma_kldgrad[component], 0) +
-                loglambda_grad + explicit_sigma);
+                loglambda_grad);
       }
 
       for (int c = 0; c < mixmvn->ncomponents; c++)
@@ -883,31 +885,49 @@ static double nj_mix_kld_sample_grad(mixture_MVN *mixmvn, int component,
           }
         }
       }
-      for (int pidx = 0; pidx < data->covar_params[component]->size; pidx++) {
-        double orig_param = vec_get(data->covar_params[component], pidx);
-        double fplus, fminus;
+      for (int c = 0; c < mixmvn->ncomponents; c++) {
+        for (int pidx = 0; pidx < data->covar_params[c]->size; pidx++) {
+          double orig_param = vec_get(data->covar_params[c], pidx);
+          double fplus, fminus;
 
-        vec_set(data->covar_params[component], pidx, orig_param + DERIV_EPS);
-        mixmvn_update_covariance(mixmvn, data);
-        nj_lowr_map_std(mmvn, points_std, points_tweak);
-        fplus = mixmvn_log_dens(mixmvn, points_tweak);
-        if (data->treeprior == NULL)
-          fplus += 0.5 * (fulld * log(2 * M_PI) +
-                          vec_inner_prod(points_tweak, points_tweak));
+          vec_set(data->covar_params[c], pidx, orig_param + DERIV_EPS);
+          mixmvn_update_covariance(mixmvn, data);
+          if (c == component) {
+            nj_lowr_map_std(mmvn, points_std, points_tweak);
+            fplus = mixmvn_log_dens(mixmvn, points_tweak);
+            if (data->treeprior == NULL)
+              fplus += 0.5 * (fulld * log(2 * M_PI) +
+                              vec_inner_prod(points_tweak, points_tweak));
+          }
+          else {
+            fplus = mixmvn_log_dens(mixmvn, points);
+            if (data->treeprior == NULL)
+              fplus += 0.5 * (fulld * log(2 * M_PI) +
+                              vec_inner_prod(points, points));
+          }
 
-        vec_set(data->covar_params[component], pidx, orig_param - DERIV_EPS);
-        mixmvn_update_covariance(mixmvn, data);
-        nj_lowr_map_std(mmvn, points_std, points_tweak);
-        fminus = mixmvn_log_dens(mixmvn, points_tweak);
-        if (data->treeprior == NULL)
-          fminus += 0.5 * (fulld * log(2 * M_PI) +
-                           vec_inner_prod(points_tweak, points_tweak));
+          vec_set(data->covar_params[c], pidx, orig_param - DERIV_EPS);
+          mixmvn_update_covariance(mixmvn, data);
+          if (c == component) {
+            nj_lowr_map_std(mmvn, points_std, points_tweak);
+            fminus = mixmvn_log_dens(mixmvn, points_tweak);
+            if (data->treeprior == NULL)
+              fminus += 0.5 * (fulld * log(2 * M_PI) +
+                               vec_inner_prod(points_tweak, points_tweak));
+          }
+          else {
+            fminus = mixmvn_log_dens(mixmvn, points);
+            if (data->treeprior == NULL)
+              fminus += 0.5 * (fulld * log(2 * M_PI) +
+                               vec_inner_prod(points, points));
+          }
 
-        vec_set(data->covar_params[component], pidx, orig_param);
-        mixmvn_update_covariance(mixmvn, data);
-        vec_set(sigma_kldgrad[component], pidx,
-                vec_get(sigma_kldgrad[component], pidx) -
-                (fplus - fminus) / (2.0 * DERIV_EPS));
+          vec_set(data->covar_params[c], pidx, orig_param);
+          mixmvn_update_covariance(mixmvn, data);
+          vec_set(sigma_kldgrad[c], pidx,
+                  vec_get(sigma_kldgrad[c], pidx) -
+                  (fplus - fminus) / (2.0 * DERIV_EPS));
+        }
       }
 
       vec_free(points_tweak);
