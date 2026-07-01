@@ -487,9 +487,15 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
         g += nj_rescale_mean_grad_el(mu_kldgrad[k], kmmvn, data, j);
         grad_norm_sq += g * g;
       }
+      for (j = 0; j < data->covar_params[k]->size; j++) {
+        double g;
+        if (k == component)
+          g = vec_get(model_natgrad, fulld + j);
+        else
+          g = nj_rescale_sigma_grad_el(sigma_kldgrad[k], kmmvn, data, j);
+        grad_norm_sq += g * g;
+      }
     }
-    for (j = 0; j < data->covar_params[component]->size; j++)
-      grad_norm_sq += pow(vec_get(model_natgrad, fulld + j), 2);
     sm->grad_norm = sqrt(grad_norm_sq);
     if (sd->clip_norm > 0 && sm->grad_norm > sd->clip_norm) {
       clip_scale = sd->clip_norm / sm->grad_norm;
