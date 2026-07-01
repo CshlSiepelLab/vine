@@ -25,36 +25,36 @@
 
 /* update covariance matrix based on the parameters and auxiliary
    data */
-void nj_update_covariance(multi_MVN *mmvn, CovarData *data) {
+void nj_update_covariance(multi_MVN *mmvn, CovarData *data, int component) {
   int i, j;
-  Vector *sigma_params = data->covar_params[0];
+  assert(component >= 0 && component < data->n_covar_components);
   
   /* Note: variance parameters now stored as log values and must
      be exponentiated */
   if (data->type == CONST) {
-    data->lambda = exp(vec_get(sigma_params, 0));
+    data->lambda = exp(vec_get(data->covar_params[component], 0));
     if (!isfinite(data->lambda) || data->lambda < VARFLOOR) {
       data->lambda = VARFLOOR;
-      vec_set(sigma_params, 0, log(VARFLOOR)); /* keeps param from running away */
+      vec_set(data->covar_params[component], 0, log(VARFLOOR)); /* keeps param from running away */
     }
     for (i = 0; i < mmvn->mvn->sigma->nrows; i++)
       mat_set(mmvn->mvn->sigma, i, i, data->lambda);
   }
   else if (data->type == DIAG) {
-    for (i = 0; i < sigma_params->size; i++) {
-      double lambda_i = exp(vec_get(sigma_params, i));
+    for (i = 0; i < data->covar_params[component]->size; i++) {
+      double lambda_i = exp(vec_get(data->covar_params[component], i));
       if (lambda_i < VARFLOOR) {
         lambda_i = VARFLOOR;
-        vec_set(sigma_params, i, log(VARFLOOR));
+        vec_set(data->covar_params[component], i, log(VARFLOOR));
       }
       mat_set(mmvn->mvn->sigma, i, i, lambda_i);
     }
   }
   else if (data->type == DIST) {
-    data->lambda = exp(vec_get(sigma_params, 0));
+    data->lambda = exp(vec_get(data->covar_params[component], 0));
     if (!isfinite(data->lambda) || data->lambda < VARFLOOR) {
       data->lambda = VARFLOOR;
-      vec_set(sigma_params, 0, log(VARFLOOR)); 
+      vec_set(data->covar_params[component], 0, log(VARFLOOR)); 
     }
     mat_copy(mmvn->mvn->sigma, data->Lapl_pinv);
     mat_scale(mmvn->mvn->sigma, data->lambda);
@@ -72,7 +72,7 @@ void nj_update_covariance(multi_MVN *mmvn, CovarData *data) {
     assert(data->type == LOWR);
     for (i = 0; i < data->R->nrows; i++)
       for (j = 0; j < data->R->ncols; j++)
-        mat_set(data->R, i, j, vec_get(data->covar_params[0],
+        mat_set(data->R, i, j, vec_get(data->covar_params[component],
                                        i*data->R->ncols + j));
                                  /* note not log in this case */
 
@@ -318,16 +318,17 @@ void nj_laplacian_pinv(CovarData *data) {
 }
 
 /* chck whether all variance parameters are at floor */
-unsigned int nj_var_at_floor(multi_MVN *mmvn, CovarData *data) {
+unsigned int nj_var_at_floor(multi_MVN *mmvn, CovarData *data, int component) {
   int i;
+  assert(component >= 0 && component < data->n_covar_components);
   
   if (data->type == CONST || data->type == DIST) {
-    double lambda = exp(vec_get(data->covar_params[0], 0));
+    double lambda = exp(vec_get(data->covar_params[component], 0));
     return (lambda <= VARFLOOR + 1e-10);
   }
   else if (data->type == DIAG) {
-    for (i = 0; i < data->covar_params[0]->size; i++) {
-      double lambda_i = exp(vec_get(data->covar_params[0], i));
+    for (i = 0; i < data->covar_params[component]->size; i++) {
+      double lambda_i = exp(vec_get(data->covar_params[component], i));
       if (lambda_i > VARFLOOR + 1e-10)
         return FALSE;
     }

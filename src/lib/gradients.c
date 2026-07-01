@@ -85,7 +85,7 @@ double nj_compute_model_grad(TreeModel *mod, multi_MVN *mmvn, Vector *points,
   double porig, ll_base, loglambda_grad;
   Vector *dL_dx = vec_new(dim);
 
-  if (grad->size != dim + data->covar_params[0]->size)
+  if (grad->size != dim + data->covar_params[component]->size)
     die("ERROR in nj_compute_model_grad: bad gradient dimension.\n");
   
   if (data->type == DIST && data->Lapl_pinv_evals == NULL)
@@ -235,7 +235,7 @@ double nj_compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn,
   for (i = 0; i < sigmapar->size; i++) {
     double dL_dp = 0, origp = vec_get(sigmapar, i);    
     vec_set(sigmapar, i, origp + DERIV_EPS);
-    nj_update_covariance(mmvn, data);
+    nj_update_covariance(mmvn, data, 0);
     vec_copy(points_tweak, points_std);
     mmvn_map_std(mmvn, points_tweak);
     vec_minus_eq(points_tweak, points);
@@ -251,7 +251,7 @@ double nj_compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn,
     vec_set(sigmapar, i, origp); /* restore orig */
   }
   
-  nj_update_covariance(mmvn, data); /* make sure to leave it in original state */
+  nj_update_covariance(mmvn, data, 0); /* make sure to leave it in original state */
 
   nj_reset_tree_model(mod, orig_tree);
   vec_free(points_tweak);
@@ -319,13 +319,14 @@ void nj_rescale_grad(Vector *grad, Vector *rsgrad, multi_MVN *mmvn, CovarData *d
 
 /* Compute penalty for variance and its gradient  */
 void nj_compute_variance_penalty(Vector *grad, multi_MVN *mmvn,
-                               CovarData *data) {  
+                                 CovarData *data, int component) {  
   int i, j, n = mmvn->n, d = mmvn->d;
   int start_idx = n*d;  /* starting index for variance parameters */
+  assert(component >= 0 && component < data->n_covar_components);
   
   if (data->type == CONST || data->type == DIST) {
     /* L2 penalty applied to log lambda (which is the free parameter) */
-    double loglambda = log(data->lambda);
+    double loglambda = vec_get(data->covar_params[component], 0);
     double mult = data->var_reg * PENALTY_LOGLAMBDA_CONST;  /* constant applied to log lambda */
     data->var_pen = mult * loglambda * loglambda; /* L2 penalty */
     vec_set(grad, start_idx, -2.0 * mult * loglambda); /* derivative of L2 penalty; 
@@ -336,8 +337,8 @@ void nj_compute_variance_penalty(Vector *grad, multi_MVN *mmvn,
     /* similar to above but L2 penalty applied to each diagonal element */
     data->var_pen = 0;
     double mult = data->var_reg * PENALTY_LOGLAMBDA_DIAG;
-    for (i = 0; i < data->covar_params[0]->size; i++) {
-      double loglambda_i = vec_get(data->covar_params[0], i);
+    for (i = 0; i < data->covar_params[component]->size; i++) {
+      double loglambda_i = vec_get(data->covar_params[component], i);
       data->var_pen += mult * loglambda_i * loglambda_i;
       vec_set(grad, start_idx + i, -2.0 * mult * loglambda_i); 
     }

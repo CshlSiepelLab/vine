@@ -169,7 +169,7 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, int component,
   int do_refresh = (td->iter >= td->warmup) && ((td->iter - td->warmup) % td->period == 0);
 
   /* if variance has hit its floor, there's no sense in updating the trace */
-  if (do_refresh && nj_var_at_floor(mmvn, data))
+  if (do_refresh && nj_var_at_floor(mmvn, data, component))
     do_refresh = FALSE;
 
   if (do_refresh) {
@@ -212,18 +212,19 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, int component,
 
   /* add covariance part of gradient into grad.
 
-     NOTE (O36): the 'data->lambda' factor here looks like a
+     NOTE (O36): the lambda factor here looks like a
      double-multiplication.  td->siggrad_cache was filled from the
      output of hutch_tr_plus_grad, whose tay_Sigmafun /
-     tay_sigma_vec_mult already apply data->lambda in the CONST/DIST
+     tay_sigma_vec_mult already apply lambda in the CONST/DIST
      parameterizations (see tay_sigma_vec_mult).  This function
      (nj_elbo_taylor) is currently DEAD CODE -- the active path goes
      through nj_elbo_hybrid in variational.c -- so the issue is
      latent; revisit if this entry point is ever re-enabled. */
   int offset = data->taylor->fulld;
+  double lambda = exp(vec_get(data->covar_params[component], 0));
   for (int j = 0; j < sigdim; j++)
     vec_set(grad, offset + j, vec_get(grad, offset + j)
-                              + 0.5 * data->lambda * vec_get(td->siggrad_cache, j));
+                              + 0.5 * lambda * vec_get(td->siggrad_cache, j));
   
   /* free everything and return */
   vec_free(mu);
@@ -396,7 +397,8 @@ void tay_SVP(Vector *out, Vector *v, void *dat) {
   mat_vec_mult(tay_data->tmp_x1, tay_data->JbxT, v);
 
   /* tmp_x2 = Sigma * tmp_x_1 */
-  tay_sigma_vec_mult(tay_data->tmp_x2, tay_data->mmvn, tay_data->tmp_x1, tay_data->covar_data);
+  tay_sigma_vec_mult(tay_data->tmp_x2, tay_data->mmvn, tay_data->tmp_x1,
+                     tay_data->covar_data, tay_data->component);
 
   /* out = Jbx * tmp_x2 */
   mat_vec_mult(out, tay_data->Jbx, tay_data->tmp_x2);
@@ -608,16 +610,19 @@ void tay_dx_from_dt(Vector *dL_dt, Vector *dL_dx, TreeModel *mod,
 }
 
 /* Sigma * v depending on parameterization */
-void tay_sigma_vec_mult(Vector *out, multi_MVN *mmvn, Vector *v, CovarData *data) {
+void tay_sigma_vec_mult(Vector *out, multi_MVN *mmvn, Vector *v,
+                        CovarData *data, int component) {
   int n = mmvn->n;
   int d = mmvn->d;     /* embedding dimension */
   int nx = n * d;
+  assert(component >= 0 && component < data->n_covar_components);
 
   assert(out->size == nx && v->size == nx);
 
   if (data->type == CONST || data->type == DIST) {
+    double lambda = exp(vec_get(data->covar_params[component], 0));
     for (int i = 0; i < nx; i++)
-      vec_set(out, i, data->lambda * vec_get(v, i)); 
+      vec_set(out, i, lambda * vec_get(v, i)); 
     return;
   }
 
@@ -678,10 +683,10 @@ void tay_sigma_vec_mult(Vector *out, multi_MVN *mmvn, Vector *v, CovarData *data
 }
 
 /* Compute gradient of uᵀ Σ u wrt the covariance parameters.  Adds
-   results into out (size = data->covar_params[0]->size).  u is the
+   results into out (size = data->covar_params[component]->size).  u is the
    latent-space vector Jᵀ z. */
 void tay_sigma_grad_mult(Vector *out, Vector *p, Vector *q, multi_MVN *mmvn,
-                         CovarData *data) {
+                         CovarData *data, int component) {
 
   int n = mmvn->n;
   int d = mmvn->d;
@@ -689,6 +694,7 @@ void tay_sigma_grad_mult(Vector *out, Vector *p, Vector *q, multi_MVN *mmvn,
 
   assert(p->size == nx);
   assert(q->size == nx);
+  assert(component >= 0 && component < data->n_covar_components);
   
   /* CONST and DIST share a scalar λ */
   if (data->type == CONST || data->type == DIST) {
@@ -770,7 +776,7 @@ void tay_JTfun(Vector *out, Vector *v, void *userdata)
 void tay_Sigmafun(Vector *out, Vector *v, void *userdata)
 {
     TaylorData *td = (TaylorData *)userdata;
-    tay_sigma_vec_mult(out, td->mmvn, v, td->covar_data);
+    tay_sigma_vec_mult(out, td->mmvn, v, td->covar_data, td->component);
 }
 
 /* grad_sigma += ∂/∂σ ( v_lat^T Σ v_lat )
@@ -781,7 +787,8 @@ void tay_SigmaGradfun(Vector *grad_sigma, Vector *p_lat, Vector *q_lat, void *us
     TaylorData *td = (TaylorData *)userdata;
 
     /* add contribution of this probe */
-    tay_sigma_grad_mult(grad_sigma, p_lat, q_lat, td->mmvn, td->covar_data);
+    tay_sigma_grad_mult(grad_sigma, p_lat, q_lat, td->mmvn,
+                        td->covar_data, td->component);
 }
 
 
@@ -905,7 +912,7 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
     do_refresh = TRUE;
   }
 
-  if (do_refresh && nj_var_at_floor(mmvn, data)) {
+  if (do_refresh && nj_var_at_floor(mmvn, data, component)) {
     do_refresh = FALSE;
     if (component_changed) {
       td->T_cache = 0.0;

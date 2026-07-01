@@ -104,7 +104,7 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   Vector *sigma_penalty_grad;  /* variance-penalty gradient, sigma block only */
   Vector **mu_kldgrad = NULL;  /* per-component KLD mean gradients */
   Vector *m_sigma, *m_sigma_prev, *v_sigma, *v_sigma_prev,
-    *best_sigmapar, *sigmapar = data->covar_params[0];
+    *best_sigmapar, *sigmapar;
   Vector **m_mu = NULL, **v_mu = NULL, **best_mu = NULL;
   int n = data->nseqs, j, k, t, stop = FALSE, bestt = -1, graddim,
     dim = data->dim, fulld = n*dim, reenable_taylor_t = -1,
@@ -129,7 +129,8 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   if (mmvn->d * mmvn->n != dim * n)
     die("ERROR in nj_variational_inf: bad dimensions\n");
 
-  graddim = fulld + data->covar_params[0]->size;
+  sigmapar = data->covar_params[component];
+  graddim = fulld + sigmapar->size;
   sigma_kldgrad = vec_new(sigmapar->size);
   model_grad = vec_new(graddim);
   model_natgrad = vec_new(graddim);
@@ -232,6 +233,7 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     /* Sample which component to use this iteration */
     component = mixmvn_sample_component(mixmvn);
     mmvn = mixmvn_get_component(mixmvn, component);
+    sigmapar = data->covar_params[component];
 
     /* simple update to user */
     if (t > 0 && t % 100 == 0) {
@@ -309,7 +311,7 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     /* can also pre-compute variance penalty, which is okay in the mixture case
     when the covariance is shared across components */
     vec_zero(sigma_penalty_grad);
-    nj_compute_variance_penalty(sigma_penalty_grad, mmvn, data);
+    nj_compute_variance_penalty(sigma_penalty_grad, mmvn, data, component);
     penalty = data->var_pen;
 
     if (ncomponents == 1) {
@@ -708,8 +710,7 @@ static double nj_mix_kld_sample_grad(mixture_MVN *mixmvn, int component,
           for (int pidx = 0; pidx < fulld; pidx++) {
             double centered = vec_get(points, pidx) -
               mmvn_get_mu_el(comp, pidx);
-            double var = data->type == CONST ? data->lambda :
-              mat_get(comp->mvn->sigma, pidx, pidx);
+            double var = mat_get(comp->mvn->sigma, pidx, pidx);
             vec_set(prec_resid[c], pidx, centered / var);
           }
         }
@@ -857,11 +858,11 @@ static double nj_mix_kld_sample_grad(mixture_MVN *mixmvn, int component,
           }
         }
       }
-      for (int pidx = 0; pidx < data->covar_params[0]->size; pidx++) {
-        double orig_param = vec_get(data->covar_params[0], pidx);
+      for (int pidx = 0; pidx < data->covar_params[component]->size; pidx++) {
+        double orig_param = vec_get(data->covar_params[component], pidx);
         double fplus, fminus;
 
-        vec_set(data->covar_params[0], pidx, orig_param + DERIV_EPS);
+        vec_set(data->covar_params[component], pidx, orig_param + DERIV_EPS);
         mixmvn_update_covariance(mixmvn, data);
         nj_lowr_map_std(mmvn, points_std, points_tweak);
         fplus = mixmvn_log_dens(mixmvn, points_tweak);
@@ -869,7 +870,7 @@ static double nj_mix_kld_sample_grad(mixture_MVN *mixmvn, int component,
           fplus += 0.5 * (fulld * log(2 * M_PI) +
                           vec_inner_prod(points_tweak, points_tweak));
 
-        vec_set(data->covar_params[0], pidx, orig_param - DERIV_EPS);
+        vec_set(data->covar_params[component], pidx, orig_param - DERIV_EPS);
         mixmvn_update_covariance(mixmvn, data);
         nj_lowr_map_std(mmvn, points_std, points_tweak);
         fminus = mixmvn_log_dens(mixmvn, points_tweak);
@@ -877,7 +878,7 @@ static double nj_mix_kld_sample_grad(mixture_MVN *mixmvn, int component,
           fminus += 0.5 * (fulld * log(2 * M_PI) +
                            vec_inner_prod(points_tweak, points_tweak));
 
-        vec_set(data->covar_params[0], pidx, orig_param);
+        vec_set(data->covar_params[component], pidx, orig_param);
         mixmvn_update_covariance(mixmvn, data);
         vec_set(sigma_kldgrad, pidx,
                 vec_get(sigma_kldgrad, pidx) -

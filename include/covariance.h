@@ -109,7 +109,7 @@ typedef struct cvdat {
   double deriv_dgamma_alpha; /* derivative wrt alpha if >1 category */
 } CovarData;
 
-void nj_update_covariance(multi_MVN *mmvn, CovarData *data);
+void nj_update_covariance(multi_MVN *mmvn, CovarData *data, int component);
 
 CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
                              MSA *msa, CrisprMutModel *crispr_mod, char **names,
@@ -126,6 +126,6 @@ void nj_dump_covar_data(CovarData *data, FILE *F);
 
 void nj_laplacian_pinv(CovarData *data);
 
-unsigned int nj_var_at_floor(multi_MVN *mmvn, CovarData *data);
+unsigned int nj_var_at_floor(multi_MVN *mmvn, CovarData *data, int component);
 
 #endif

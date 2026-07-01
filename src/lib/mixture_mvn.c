@@ -88,7 +88,7 @@ void mixmvn_update_covariance(mixture_MVN *mix, CovarData *data) {
   int k;
 
   for (k = 0; k < mix->ncomponents; k++)
-    nj_update_covariance(mixmvn_get_component(mix, k), data);
+    nj_update_covariance(mixmvn_get_component(mix, k), data, k);
 }
 
 /* Sample a component from the mixture. */

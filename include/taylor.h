@@ -105,10 +105,10 @@ void tay_dx_from_dt(Vector *dL_dt, Vector *dL_dx, TreeModel *mod,
                     TaylorData *data);
 
 void tay_sigma_vec_mult(Vector *out, multi_MVN *mmvn, Vector *v,
-                        struct cvdat *data);
+                        struct cvdat *data, int component);
 
 void tay_sigma_grad_mult(Vector *out, Vector *p, Vector *q,
-                         multi_MVN *mmvn, struct cvdat *data);
+                         multi_MVN *mmvn, struct cvdat *data, int component);
 
 void tay_JTfun(Vector *out, Vector *v, void *userdata);
 

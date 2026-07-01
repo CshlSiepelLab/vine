@@ -43,7 +43,8 @@ double nj_compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn,
 void nj_rescale_grad(Vector *grad, Vector *rsgrad, multi_MVN *mmvn,
                      CovarData *data);
 
-void nj_compute_variance_penalty(Vector *grad, multi_MVN *mmvn, CovarData *data);
+void nj_compute_variance_penalty(Vector *grad, multi_MVN *mmvn,
+                                 CovarData *data, int component);
 
 double nj_dL_dx_dumb(Vector *x, Vector *dL_dx, TreeModel *mod, 
                      CovarData *data);

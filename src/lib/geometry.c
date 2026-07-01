@@ -201,7 +201,7 @@ void nj_estimate_mmvn_from_distances_euclidean(CovarData *data, multi_MVN *mmvn)
   mmvn_set_mu(mmvn, mu_full);
 
   /* covariance parameters should already be initialized */
-  nj_update_covariance(mmvn, data);
+  nj_update_covariance(mmvn, data, 0);
   
   mat_free(Dsq);
   mat_free(G);
@@ -260,7 +260,7 @@ void nj_estimate_mmvn_from_distances_hyperbolic(CovarData *data, multi_MVN *mmvn
   mmvn_set_mu(mmvn, mu_full); 
   
   /* covariance parameters should already be initialized */
-  nj_update_covariance(mmvn, data);
+  nj_update_covariance(mmvn, data, 0);
   
   mat_free(A);
   vec_free(eval_real);
