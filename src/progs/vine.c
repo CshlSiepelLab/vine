@@ -25,6 +25,7 @@
 #include <phast/dgamma.h>
 #include <phast/subst_mods.h>
 #include <phast/sufficient_stats.h>
+#include <openblas/cblas.h>
 #include <mvn.h>
 #include <mcmc.h>
 #include <tree_prior.h>
@@ -409,6 +410,8 @@ int main(int argc, char *argv[]) {
 
   if (init_tree != NULL && indistfile != NULL)
     die("Cannot specify both --tree/-treemod and --distances\n");
+
+  openblas_set_num_threads(nthreads);
 
   set_seed(seed);
 
