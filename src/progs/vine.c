@@ -673,6 +673,7 @@ int main(int argc, char *argv[]) {
       
       /* initialize all other components with jitter */
       mixmvn_init_jitter_from_component(mixmvn, 0, DEFAULT_MIXTURE_JITTER_SD);
+      mixmvn_update_covariance(mixmvn, covar_data);
 
       if (use_taylor && !silent)
         fprintf(stderr, "Using Taylor approximation for ELBO...\n");
