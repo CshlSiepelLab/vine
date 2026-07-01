@@ -181,7 +181,7 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 
   /* set up log file */
   if (logf != NULL) {
-    fprintf(logf, "state\tll\telbo\t");
+    fprintf(logf, "state\tll\telbo\tcomponent\t");
     if (data->treeprior != NULL)
       fprintf(logf, "prior\t");
     else
@@ -198,13 +198,15 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       for (j = 0; j < fulld; j++)
         fprintf(logf, "mu.%d\t", j);
       if (data->type == LOWR || data->type == DIAG) {
-        for (j = 0; j < data->covar_params[component]->size; j++)
-          fprintf(logf, "sigma.%d\t", j);
+        for (k = 0; k < ncomponents; k++)
+          for (j = 0; j < data->covar_params[k]->size; j++)
+            fprintf(logf, "sigma.%d.%d\t", k, j);
       }
     }
     if (data->type == CONST || data->type == DIST) {
-      for (j = 0; j < data->covar_params[component]->size; j++)
-        fprintf(logf, "sigma.%d\t", j);
+      for (k = 0; k < ncomponents; k++)
+        for (j = 0; j < data->covar_params[k]->size; j++)
+          fprintf(logf, "sigma.%d.%d\t", k, j);
     }
     for (j = 0; j < n_nuisance_params; j++)
       fprintf(logf, "%s\t", nj_get_nuisance_param_name(mod, data, j));
@@ -534,7 +536,7 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     
     /* report to log file */
     if (logf != NULL) {
-      fprintf(logf, "%d\t%f\t%f\t", t, avell, elb);
+      fprintf(logf, "%d\t%f\t%f\t%d\t", t, avell, elb, component);
       if (data->treeprior != NULL)
         fprintf(logf, "%f\t", ave_lprior);
       else
@@ -554,13 +556,15 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       if (log_all) {
         mmvn_print(mmvn, logf, TRUE, FALSE);
         if (data->type == LOWR || data->type == DIAG) {
-          for (j = 0; j < data->covar_params[component]->size; j++)
-            fprintf(logf, "%f\t", vec_get(data->covar_params[component], j));
+          for (k = 0; k < ncomponents; k++)
+            for (j = 0; j < data->covar_params[k]->size; j++)
+              fprintf(logf, "%f\t", vec_get(data->covar_params[k], j));
         }
       }
       if (data->type == CONST || data->type == DIST) {
-        for (j = 0; j < data->covar_params[component]->size; j++)
-          fprintf(logf, "%f\t", vec_get(data->covar_params[component], j));
+        for (k = 0; k < ncomponents; k++)
+          for (j = 0; j < data->covar_params[k]->size; j++)
+            fprintf(logf, "%f\t", vec_get(data->covar_params[k], j));
       }
       for (j = 0; j < n_nuisance_params; j++)
         fprintf(logf, "%f\t", nj_nuis_param_get(mod, data, j));
