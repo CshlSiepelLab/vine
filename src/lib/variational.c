@@ -48,6 +48,30 @@ static double nj_rescale_mean_grad_el(Vector *grad, multi_MVN *mmvn,
   }
 }
 
+static double nj_rescale_sigma_grad_el(Vector *grad, multi_MVN *mmvn,
+                                       CovarData *data, int i) {
+  double g = vec_get(grad, i);
+
+  if (data->natural_grad != TRUE)
+    return g;
+
+  if (data->type == CONST)
+    return g * 2.0/(mmvn->n * mmvn->d);
+  else if (data->type == DIAG)
+    return g * 2.0;
+  else if (data->type == DIST)
+    return g * 2.0/(mmvn->n-1);
+  else {
+    double dotp = 0.0;
+    int row = i / data->lowrank, col = i % data->lowrank;
+    assert(data->type == LOWR);
+    for (int j = 0; j < mmvn->mvn->sigma->ncols; j++)
+      dotp += mat_get(mmvn->mvn->sigma, row, j) *
+        vec_get(grad, j*data->lowrank + col);
+    return dotp;
+  }
+}
+
 static double nj_elbo_mix_kld_montecarlo(mixture_MVN *mixmvn, int component,
                                          CovarData *data, int nminibatch,
                                          double *kld,
@@ -496,23 +520,34 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       }
     }
 
-    /* update sigma for the selected component */
-    sigma_t[component]++;
-    for (j = 0; j < data->covar_params[component]->size; j++) {
-      double mhatj, vhatj, g = vec_get(model_natgrad, fulld + j);
-      vec_set(m_sigma[component], j,
-              ADAM_BETA1 * vec_get(m_sigma[component], j) +
-              (1.0 - ADAM_BETA1) * g);
-      vec_set(v_sigma[component], j,
-              ADAM_BETA2 * vec_get(v_sigma[component], j) +
-              (1.0 - ADAM_BETA2) * pow(g, 2));
-      mhatj = vec_get(m_sigma[component], j) /
-        (1.0 - pow(ADAM_BETA1, sigma_t[component]));
-      vhatj = vec_get(v_sigma[component], j) /
-        (1.0 - pow(ADAM_BETA2, sigma_t[component]));
-      vec_set(data->covar_params[component], j,
-              vec_get(data->covar_params[component], j) +
-              sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS));
+    /* Update sigma.  The selected component receives the stochastic
+       likelihood/prior gradient; all components receive mixture-KLD
+       covariance gradients because log q_mix depends on every component
+       density. */
+    for (k = 0; k < ncomponents; k++) {
+      multi_MVN *kmmvn = mixmvn_get_component(mixmvn, k);
+      sigma_t[k]++;
+      for (j = 0; j < data->covar_params[k]->size; j++) {
+        double mhatj, vhatj, g;
+        if (k == component)
+          g = vec_get(model_natgrad, fulld + j);
+        else
+          g = clip_scale * nj_rescale_sigma_grad_el(sigma_kldgrad[k],
+                                                    kmmvn, data, j);
+        vec_set(m_sigma[k], j,
+                ADAM_BETA1 * vec_get(m_sigma[k], j) +
+                (1.0 - ADAM_BETA1) * g);
+        vec_set(v_sigma[k], j,
+                ADAM_BETA2 * vec_get(v_sigma[k], j) +
+                (1.0 - ADAM_BETA2) * pow(g, 2));
+        mhatj = vec_get(m_sigma[k], j) /
+          (1.0 - pow(ADAM_BETA1, sigma_t[k]));
+        vhatj = vec_get(v_sigma[k], j) /
+          (1.0 - pow(ADAM_BETA2, sigma_t[k]));
+        vec_set(data->covar_params[k], j,
+                vec_get(data->covar_params[k], j) +
+                sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS));
+      }
     }
     mixmvn_update_covariance(mixmvn, data);
 
