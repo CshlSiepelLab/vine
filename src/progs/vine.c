@@ -589,7 +589,7 @@ int main(int argc, char *argv[]) {
       die("ERROR: must use --out-dists with --dist-embedding\n");
 
     mmvn = mmvn_new(ntips, dim, covar_data->mvn_type);
-    nj_estimate_mmvn_from_distances(covar_data, mmvn);
+    nj_estimate_mmvn_from_distances(covar_data, mmvn, 0);
   }
 
   else {
@@ -608,7 +608,7 @@ int main(int argc, char *argv[]) {
 
       if (embeddingfile != NULL) {  /* set up initial embedding for output below */
         mmvn = mmvn_new(ntips, dim, covar_data->mvn_type);
-        nj_estimate_mmvn_from_distances(covar_data, mmvn);
+        nj_estimate_mmvn_from_distances(covar_data, mmvn, 0);
       }
     }
 
@@ -669,7 +669,7 @@ int main(int argc, char *argv[]) {
         vec_scale(mmvn->mvn->mu, 0.1);
       }
       else 
-        nj_estimate_mmvn_from_distances(covar_data, mmvn); 
+        nj_estimate_mmvn_from_distances(covar_data, mmvn, 0); 
       
       /* initialize all other components with jitter */
       mixmvn_init_jitter_from_component(mixmvn, 0, DEFAULT_MIXTURE_JITTER_SD);

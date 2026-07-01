@@ -169,7 +169,8 @@ double nj_compute_model_grad(TreeModel *mod, multi_MVN *mmvn, Vector *points,
    just uses a brute force numerical calculation */
 double nj_compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn, 
                                    Vector *points, Vector *points_std,
-                                   Vector *grad, CovarData *data) {
+                                   Vector *grad, CovarData *data,
+                                   int component) {
   int n = data->msa->nseqs; /* number of taxa */
   int d = mmvn->n * mmvn->d / n; /* dimensionality; have to accommodate diagonal case */
   int dim = n*d; /* full dimension of point vector */
@@ -177,11 +178,11 @@ double nj_compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn,
   double porig, ll_base, ll, deriv;
   TreeNode *tree, *orig_tree;   /* has to be rebuilt repeatedly; restore at end */
   Vector *points_tweak = vec_new(points->size);
-  Vector *sigmapar = data->covar_params[0];
+  Vector *sigmapar = data->covar_params[component];
   Vector *dL_dx = vec_new(points->size);
   Matrix *D = data->dist;
   
-  if (grad->size != dim + data->covar_params[0]->size)
+  if (grad->size != dim + data->covar_params[component]->size)
     die("ERROR in nj_compute_model_grad_check: bad gradient dimension.\n");
   
   /* set up tree model and get baseline log likelihood */
@@ -235,7 +236,7 @@ double nj_compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn,
   for (i = 0; i < sigmapar->size; i++) {
     double dL_dp = 0, origp = vec_get(sigmapar, i);    
     vec_set(sigmapar, i, origp + DERIV_EPS);
-    nj_update_covariance(mmvn, data, 0);
+    nj_update_covariance(mmvn, data, component);
     vec_copy(points_tweak, points_std);
     mmvn_map_std(mmvn, points_tweak);
     vec_minus_eq(points_tweak, points);
@@ -251,7 +252,7 @@ double nj_compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn,
     vec_set(sigmapar, i, origp); /* restore orig */
   }
   
-  nj_update_covariance(mmvn, data, 0); /* make sure to leave it in original state */
+  nj_update_covariance(mmvn, data, component); /* make sure to leave it in original state */
 
   nj_reset_tree_model(mod, orig_tree);
   vec_free(points_tweak);

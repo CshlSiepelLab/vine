@@ -44,11 +44,16 @@ void nj_points_to_distances_euclidean(Vector *points, CovarData *data);
 
 void nj_points_to_distances_hyperbolic(Vector *points, CovarData *data);
 
-void nj_estimate_mmvn_from_distances(CovarData *data, multi_MVN *mmvn);
+void nj_estimate_mmvn_from_distances(CovarData *data, multi_MVN *mmvn,
+                                     int component);
 
-void nj_estimate_mmvn_from_distances_euclidean(CovarData *data, multi_MVN *mmvn);
+void nj_estimate_mmvn_from_distances_euclidean(CovarData *data,
+                                               multi_MVN *mmvn,
+                                               int component);
 
-void nj_estimate_mmvn_from_distances_hyperbolic(CovarData *data, multi_MVN *mmvn);
+void nj_estimate_mmvn_from_distances_hyperbolic(CovarData *data,
+                                                multi_MVN *mmvn,
+                                                int component);
 
 void nj_mmvn_to_distances(multi_MVN *mmvn, CovarData *data);
 

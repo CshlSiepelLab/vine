@@ -189,12 +189,14 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
   }
   else if (covar_param == LOWR) {
     double sdev;
+    Vector *init_params;
     int i, j;
     
     retval->lowrank = rank;
     retval->mvn_type = MVN_LOWR;
     for (i = 0; i < ncomponents; i++)
       retval->covar_params[i] = vec_new(retval->lowrank * retval->nseqs);
+    init_params = vec_new(retval->lowrank * retval->nseqs);
     retval->R = mat_new(retval->nseqs, retval->lowrank);
 
     /* initialization is tricky; we want variances on the order of
@@ -207,11 +209,12 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
       for (j = 0; j < retval->lowrank; j++) {
         double draw = norm_draw(0, sdev);
         mat_set(retval->R, i, j, draw);
-        vec_set(retval->covar_params[0], i*retval->lowrank + j, draw);
+        vec_set(init_params, i*retval->lowrank + j, draw);
       }
     }
-    for (i = 1; i < ncomponents; i++)
-      vec_copy(retval->covar_params[i], retval->covar_params[0]);
+    for (i = 0; i < ncomponents; i++)
+      vec_copy(retval->covar_params[i], init_params);
+    vec_free(init_params);
   }
   else
     die("ERROR in nj_new_covar_data: unrecognized type.\n");
@@ -260,8 +263,10 @@ void nj_dump_covar_data(CovarData *data, FILE *F) {
   fprintf(F, "CovarData\nnseqs: %d\ndim: %d\nlambda: %f\n", data->nseqs, data->dim, data->lambda);
   fprintf(F, "distance matrix:\n");
   mat_print(data->dist, F);
-  fprintf(F, "Free parameters: ");
-  vec_print(data->covar_params[0], F);
+  for (int c = 0; c < data->n_covar_components; c++) {
+    fprintf(F, "Free parameters component %d: ", c);
+    vec_print(data->covar_params[c], F);
+  }
   if (data->type == DIST) {
     fprintf(F, "Laplacian pseudoinverse:\n");
     mat_print(data->Lapl_pinv, F);

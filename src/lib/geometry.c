@@ -141,16 +141,19 @@ void nj_points_to_distances_hyperbolic(Vector *points, CovarData *data) {
 /* generate an approximate multivariate normal distribution from a
    distance matrix, for use in initializing the variational inference
    algorithm.  */
-void nj_estimate_mmvn_from_distances(CovarData *data, multi_MVN *mmvn) {
+void nj_estimate_mmvn_from_distances(CovarData *data, multi_MVN *mmvn,
+                                     int component) {
   if (data->hyperbolic)
-    nj_estimate_mmvn_from_distances_hyperbolic(data, mmvn);
+    nj_estimate_mmvn_from_distances_hyperbolic(data, mmvn, component);
   else
-    nj_estimate_mmvn_from_distances_euclidean(data, mmvn);  
+    nj_estimate_mmvn_from_distances_euclidean(data, mmvn, component);  
 }
 
 /* generate an approximate multivariate normal distribution from a distance matrix, for
    use in initializing the variational inference algorithm. Uses multidimensional scaling  */
-void nj_estimate_mmvn_from_distances_euclidean(CovarData *data, multi_MVN *mmvn) {
+void nj_estimate_mmvn_from_distances_euclidean(CovarData *data,
+                                               multi_MVN *mmvn,
+                                               int component) {
   Matrix *D = data->dist;
   int n = D->nrows;
   Matrix *Dsq, *G, *revec_real;
@@ -201,7 +204,7 @@ void nj_estimate_mmvn_from_distances_euclidean(CovarData *data, multi_MVN *mmvn)
   mmvn_set_mu(mmvn, mu_full);
 
   /* covariance parameters should already be initialized */
-  nj_update_covariance(mmvn, data, 0);
+  nj_update_covariance(mmvn, data, component);
   
   mat_free(Dsq);
   mat_free(G);
@@ -215,7 +218,9 @@ void nj_estimate_mmvn_from_distances_euclidean(CovarData *data, multi_MVN *mmvn)
    version, use the 'hydra' algorithm to solve the problem
    approximately in hyperbolic space (Keller-Ressel & Nargang,
    arXiv:1903.08977, 2019) */
-void nj_estimate_mmvn_from_distances_hyperbolic(CovarData *data, multi_MVN *mmvn) {
+void nj_estimate_mmvn_from_distances_hyperbolic(CovarData *data,
+                                                multi_MVN *mmvn,
+                                                int component) {
   Matrix *D = data->dist;
   int n = D->nrows;
   Matrix *A, *revec_real;
@@ -260,7 +265,7 @@ void nj_estimate_mmvn_from_distances_hyperbolic(CovarData *data, multi_MVN *mmvn
   mmvn_set_mu(mmvn, mu_full); 
   
   /* covariance parameters should already be initialized */
-  nj_update_covariance(mmvn, data, 0);
+  nj_update_covariance(mmvn, data, component);
   
   mat_free(A);
   vec_free(eval_real);

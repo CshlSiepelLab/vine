@@ -37,7 +37,8 @@ double nj_compute_model_grad(TreeModel *mod, multi_MVN *mmvn,
 
 double nj_compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn, 
                                    Vector *points, Vector *points_std,
-                                   Vector *grad, CovarData *data);
+                                   Vector *grad, CovarData *data,
+                                   int component);
 
 
 void nj_rescale_grad(Vector *grad, Vector *rsgrad, multi_MVN *mmvn,
