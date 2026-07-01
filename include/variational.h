@@ -56,7 +56,7 @@ List *nj_var_sample(int nsamples, mixture_MVN *mixmvn, CovarData *data,
 TreeNode *nj_mean(Vector *mu, char **names, CovarData *data);
 
 void nj_sample_points(multi_MVN *mmvn, Vector *points,
-                      Vector *points_std);
+                      Vector *points_std, int sample_idx);
 
 void nj_apply_normalizing_flows(Vector *points_y, Vector *points_x,
                                 CovarData *data, int component,

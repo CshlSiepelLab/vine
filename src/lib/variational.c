@@ -1024,7 +1024,7 @@ static double nj_elbo_mix_kld_montecarlo(mixture_MVN *mixmvn, int component,
       vec_zero(mu_kldgrad[c]);
 
   for (int i = 0; i < nminibatch; i++) {
-    nj_sample_points(mmvn, points, points_std);
+    nj_sample_points(mmvn, points, points_std, i);
     kld_sum += nj_mix_kld_sample_grad(mixmvn, component, data, points,
                                       points_std, sigma_kldgrad,
                                       mu_kldgrad);
@@ -1086,7 +1086,7 @@ double nj_elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
     lprior = 0;
     vec_zero(grad);
 
-    nj_sample_points(mmvn, points, points_std);
+    nj_sample_points(mmvn, points, points_std, i);
     /* Prior contribution to grad is routed inside nj_compute_model_grad
        via dL_dt -> Jacobian -> dL_dx; the prior's nuisance grads
        (relclock_sig_grad, nodetimes_grad) are then picked up below by
@@ -1159,7 +1159,7 @@ List *nj_var_sample(int nsamples, mixture_MVN *mixmvn, CovarData *data, char** n
   for (i = 0; i < nsamples; i++) {
     component = mixmvn_sample_component(mixmvn);
     mmvn = mixmvn_get_component(mixmvn, component);
-    nj_sample_points(mmvn, points_x, NULL);
+    nj_sample_points(mmvn, points_x, NULL, 0);
     
     if (logdens != NULL) 
       vec_set(logdens, i, mixmvn_log_dens(mixmvn, points_x));
@@ -1193,26 +1193,27 @@ TreeNode *nj_mean(Vector *mu, char **names, CovarData *data) {
    non-NULL, it will be used to store the baseline standard normal
    variate for use in downstream calculations in variational
    inference. Antithetic sampling is only used in this case */
-void nj_sample_points(multi_MVN *mmvn, Vector *points, Vector *points_std) {
-  static int i = 0;
+void nj_sample_points(multi_MVN *mmvn, Vector *points, Vector *points_std,
+                      int sample_idx) {
   static Vector *cachedpoints = NULL, *cachedstd = NULL;  
-      
+
   if (points_std == NULL) 
     mmvn_sample(mmvn, points); /* simple in this case */
   else {
     /* otherwise we have to make use of caching for antithetic sampling */
-    if (cachedpoints != NULL && cachedpoints->size != points->size) {
+    if (cachedpoints != NULL &&
+        (cachedpoints->size != points->size ||
+         cachedstd->size != points_std->size)) {
       vec_free(cachedpoints);
       vec_free(cachedstd);
       cachedpoints = NULL; /* force realloc */
     }
     if (cachedpoints == NULL) {
       cachedpoints = vec_new(points->size);
-      cachedstd = vec_new(points_std->size);   
-      i = 0; /* force new sample */
+      cachedstd = vec_new(points_std->size);
     }
     
-    if (i % 2 == 0) { /* new sample, update caches */
+    if (sample_idx % 2 == 0) { /* new sample, update caches */
       mmvn_sample_anti_keep(mmvn, points, cachedpoints, points_std);
       vec_copy(cachedstd, points_std);
 
@@ -1222,7 +1223,6 @@ void nj_sample_points(multi_MVN *mmvn, Vector *points, Vector *points_std) {
       vec_copy(points_std, cachedstd);
       vec_scale(points_std, -1.0);
     }
-    i++;
   }
 }
 
