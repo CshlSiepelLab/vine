@@ -353,8 +353,11 @@ void nj_compute_variance_penalty(Vector *grad, multi_MVN *mmvn,
     assert(Rmvn->evals != NULL);
     data->var_pen = 0;
     double mult = data->var_reg * PENALTY_LOGLAMBDA_LOWR;
+    double eval_floor = 1.0e-6;
     for (i = 0; i < Rmvn->dim; i++) {
-      double logeval = log(vec_get(Rmvn->evals, i));
+      double eval = vec_get(Rmvn->evals, i);
+      if (eval < eval_floor) eval = eval_floor;
+      double logeval = log(eval);
       data->var_pen += mult * logeval * logeval;
     }
     
@@ -366,7 +369,7 @@ void nj_compute_variance_penalty(Vector *grad, multi_MVN *mmvn,
     Vector *logdiag = vec_new(Rmvn->dim);
     for (i = 0; i < Rmvn->dim; i++) {
       double eval = vec_get(Rmvn->evals, i);
-      if (eval < 1.0e-6) eval = 1.0e-6;
+      if (eval < eval_floor) eval = eval_floor;
       vec_set(logdiag, i, log(eval) / eval);
     }
     mat_mult_diag_transp(tmp, Rmvn->evecs, logdiag);
