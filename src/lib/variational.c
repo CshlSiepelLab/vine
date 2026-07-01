@@ -54,6 +54,41 @@ static double nj_elbo_mix_kld_montecarlo(mixture_MVN *mixmvn, int component,
                                          Vector *sigma_kldgrad,
                                          Vector **mu_kldgrad);
 
+/* Return the flow component owning nuisance parameter idx, or -1 for
+   non-flow nuisance parameters.  This mirrors nuisance.c's parameter order. */
+static int nj_nuis_flow_component(TreeModel *mod, CovarData *data, int idx) {
+  if (data->crispr_mod != NULL)
+    idx -= 2;
+  else if (mod->subst_mod == HKY85)
+    idx -= 1;
+  else if (mod->subst_mod == REV)
+    idx -= data->gtr_params->size;
+
+  if (data->dgamma_cats > 1)
+    idx -= 1;
+
+  if (idx < 0)
+    return -1;
+
+  for (int c = 0; c < data->nflow_components; c++) {
+    if (data->rfs[c] != NULL) {
+      int nrf = data->rfs[c]->ctr->size + 2;
+      if (idx < nrf)
+        return c;
+      idx -= nrf;
+    }
+
+    if (data->pfs[c] != NULL) {
+      int npf = data->pfs[c]->ndim * 2 + 1;
+      if (idx < npf)
+        return c;
+      idx -= npf;
+    }
+  }
+
+  return -1;
+}
+
 /* optimize variational model by stochastic gradient ascent using the
    Adam algorithm.  Takes initial tree model and alignment and
    distance matrix, dimensionality of Euclidean space to work in.
@@ -90,6 +125,7 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   Vector *ave_nuis_grad = NULL, *m_nuis = NULL, *v_nuis = NULL,
     *m_nuis_prev = NULL, *v_nuis_prev = NULL, *best_nuis_params = NULL,
     *center = NULL;
+  int *nuis_t = NULL;
   if (mmvn->d * mmvn->n != dim * n)
     die("ERROR in nj_variational_inf: bad dimensions\n");
 
@@ -116,6 +152,9 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     m_nuis_prev = vec_new(n_nuisance_params);
     v_nuis_prev = vec_new(n_nuisance_params);
     best_nuis_params = vec_new(n_nuisance_params);
+    nuis_t = smalloc(n_nuisance_params * sizeof(int));
+    for (j = 0; j < n_nuisance_params; j++)
+      nuis_t[j] = 0;
   }
   
   best_sigmapar = vec_new(sigmapar->size);
@@ -463,11 +502,18 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 
     /* same thing for nuisance params, if necessary */
     for (j = 0; j < n_nuisance_params; j++) {   
-      double mhatj_nuis, vhatj_nuis, g = vec_get(ave_nuis_grad, j);
+      int flow_component = nj_nuis_flow_component(mod, data, j);
+      double mhatj_nuis, vhatj_nuis, g;
+
+      if (flow_component >= 0 && flow_component != component)
+        continue;
+
+      g = vec_get(ave_nuis_grad, j);
+      nuis_t[j]++;
       vec_set(m_nuis, j, ADAM_BETA1 * vec_get(m_nuis_prev, j) + (1.0 - ADAM_BETA1) * g);
       vec_set(v_nuis, j, ADAM_BETA2 * vec_get(v_nuis_prev, j) + (1.0 - ADAM_BETA2) * pow(g,2));
-      mhatj_nuis = vec_get(m_nuis, j) / (1.0 - pow(ADAM_BETA1, t));
-      vhatj_nuis = vec_get(v_nuis, j) / (1.0 - pow(ADAM_BETA2, t));
+      mhatj_nuis = vec_get(m_nuis, j) / (1.0 - pow(ADAM_BETA1, nuis_t[j]));
+      vhatj_nuis = vec_get(v_nuis, j) / (1.0 - pow(ADAM_BETA2, nuis_t[j]));
       nj_nuis_param_pluseq(mod, data, j, sd->lr * 0.3 * mhatj_nuis / (sqrt(vhatj_nuis) + ADAM_EPS));
       /* factor of 0.3 above to slow learning of nuisance params */
     }
@@ -588,6 +634,7 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   if (n_nuisance_params > 0) {
     vec_free(ave_nuis_grad); vec_free(m_nuis); vec_free(v_nuis);
     vec_free(m_nuis_prev); vec_free(v_nuis_prev); vec_free(best_nuis_params);
+    sfree(nuis_t);
   }    
 }
 
