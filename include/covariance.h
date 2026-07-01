@@ -49,7 +49,9 @@ typedef struct cvdat {
   int nseqs; /* number of taxa in tree */
   int dim; /* dimension of point embedding */
   enum mvn_type mvn_type;
-  Vector *params; /* vector of free parameters */
+  Vector **covar_params; /* covariance parameter vectors, indexed by mixture
+                            component */
+  int n_covar_components; /* length of covar_params */
   double lambda;  /* scale parameter for covariance matrix 
                      (DIST or CONST cases) */
   double pointscale; /* scale factor for geometry */

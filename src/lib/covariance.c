@@ -27,7 +27,7 @@
    data */
 void nj_update_covariance(multi_MVN *mmvn, CovarData *data) {
   int i, j;
-  Vector *sigma_params = data->params;
+  Vector *sigma_params = data->covar_params[0];
   
   /* Note: variance parameters now stored as log values and must
      be exponentiated */
@@ -72,7 +72,7 @@ void nj_update_covariance(multi_MVN *mmvn, CovarData *data) {
     assert(data->type == LOWR);
     for (i = 0; i < data->R->nrows; i++)
       for (j = 0; j < data->R->ncols; j++)
-        mat_set(data->R, i, j, vec_get(data->params,
+        mat_set(data->R, i, j, vec_get(data->covar_params[0],
                                        i*data->R->ncols + j));
                                  /* note not log in this case */
 
@@ -136,6 +136,10 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
   retval->variational_iter = 0;
   retval->nthreads = 1;
   retval->dgamma_cats = 1;
+  retval->n_covar_components = ncomponents;
+  retval->covar_params = smalloc(ncomponents * sizeof(Vector*));
+  for (i = 0; i < ncomponents; i++)
+    retval->covar_params[i] = NULL;
   retval->nflow_components = ncomponents;
   
   retval->rfs = smalloc(ncomponents * sizeof(RadialFlow*));
@@ -158,17 +162,26 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
 
   if (covar_param == CONST) {
     /* store constant */
-    retval->params = vec_new(1);
-    vec_set(retval->params, 0, log(max(retval->lambda-VARFLOOR, VARFLOOR)));  /* use lambda for scale; log parameterization */
+    for (i = 0; i < ncomponents; i++) {
+      retval->covar_params[i] = vec_new(1);
+      vec_set(retval->covar_params[i], 0,
+              log(max(retval->lambda-VARFLOOR, VARFLOOR)));
+    }
   }
   else if (covar_param == DIAG) {
-    retval->params = vec_new(retval->dim * retval->nseqs);
-    vec_set_all(retval->params, log(max(retval->lambda-VARFLOOR, VARFLOOR)));
+    for (i = 0; i < ncomponents; i++) {
+      retval->covar_params[i] = vec_new(retval->dim * retval->nseqs);
+      vec_set_all(retval->covar_params[i],
+                  log(max(retval->lambda-VARFLOOR, VARFLOOR)));
+    }
   }  
   else if (covar_param == DIST) {
     retval->mvn_type = MVN_GEN;
-    retval->params = vec_new(1);
-    vec_set(retval->params, 0, log(max(retval->lambda-VARFLOOR, VARFLOOR)));
+    for (i = 0; i < ncomponents; i++) {
+      retval->covar_params[i] = vec_new(1);
+      vec_set(retval->covar_params[i], 0,
+              log(max(retval->lambda-VARFLOOR, VARFLOOR)));
+    }
     retval->Lapl_pinv = mat_new(dist->nrows, dist->ncols);
     retval->Lapl_pinv_evals = vec_new(dist->nrows);
     retval->Lapl_pinv_evecs = mat_new(dist->nrows, dist->nrows);
@@ -180,7 +193,8 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
     
     retval->lowrank = rank;
     retval->mvn_type = MVN_LOWR;
-    retval->params = vec_new(retval->lowrank * retval->nseqs);
+    for (i = 0; i < ncomponents; i++)
+      retval->covar_params[i] = vec_new(retval->lowrank * retval->nseqs);
     retval->R = mat_new(retval->nseqs, retval->lowrank);
 
     /* initialization is tricky; we want variances on the order of
@@ -193,9 +207,11 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
       for (j = 0; j < retval->lowrank; j++) {
         double draw = norm_draw(0, sdev);
         mat_set(retval->R, i, j, draw);
-        vec_set(retval->params, i*retval->lowrank + j, draw);
+        vec_set(retval->covar_params[0], i*retval->lowrank + j, draw);
       }
     }
+    for (i = 1; i < ncomponents; i++)
+      vec_copy(retval->covar_params[i], retval->covar_params[0]);
   }
   else
     die("ERROR in nj_new_covar_data: unrecognized type.\n");
@@ -215,8 +231,12 @@ void nj_free_covar_data(CovarData *data) {
     mat_free(data->Lapl_pinv_evecs);
   if (data->R != NULL)
     mat_free(data->R);
-  if (data->params != NULL)
-    vec_free(data->params);
+  if (data->covar_params != NULL) {
+    for (i = 0; i < data->n_covar_components; i++)
+      if (data->covar_params[i] != NULL)
+        vec_free(data->covar_params[i]);
+    sfree(data->covar_params);
+  }
   for (i = 0; i < data->nflow_components; i++)
     if (data->rfs[i] != NULL)
       rf_free(data->rfs[i]);
@@ -241,7 +261,7 @@ void nj_dump_covar_data(CovarData *data, FILE *F) {
   fprintf(F, "distance matrix:\n");
   mat_print(data->dist, F);
   fprintf(F, "Free parameters: ");
-  vec_print(data->params, F);
+  vec_print(data->covar_params[0], F);
   if (data->type == DIST) {
     fprintf(F, "Laplacian pseudoinverse:\n");
     mat_print(data->Lapl_pinv, F);
@@ -302,12 +322,12 @@ unsigned int nj_var_at_floor(multi_MVN *mmvn, CovarData *data) {
   int i;
   
   if (data->type == CONST || data->type == DIST) {
-    double lambda = exp(vec_get(data->params, 0));
+    double lambda = exp(vec_get(data->covar_params[0], 0));
     return (lambda <= VARFLOOR + 1e-10);
   }
   else if (data->type == DIAG) {
-    for (i = 0; i < data->params->size; i++) {
-      double lambda_i = exp(vec_get(data->params, i));
+    for (i = 0; i < data->covar_params[0]->size; i++) {
+      double lambda_i = exp(vec_get(data->covar_params[0], i));
       if (lambda_i > VARFLOOR + 1e-10)
         return FALSE;
     }

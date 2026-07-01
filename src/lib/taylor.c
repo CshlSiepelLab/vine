@@ -678,7 +678,7 @@ void tay_sigma_vec_mult(Vector *out, multi_MVN *mmvn, Vector *v, CovarData *data
 }
 
 /* Compute gradient of uᵀ Σ u wrt the covariance parameters.  Adds
-   results into out (size = data->params->size).  u is the
+   results into out (size = data->covar_params[0]->size).  u is the
    latent-space vector Jᵀ z. */
 void tay_sigma_grad_mult(Vector *out, Vector *p, Vector *q, multi_MVN *mmvn,
                          CovarData *data) {

@@ -85,7 +85,7 @@ double nj_compute_model_grad(TreeModel *mod, multi_MVN *mmvn, Vector *points,
   double porig, ll_base, loglambda_grad;
   Vector *dL_dx = vec_new(dim);
 
-  if (grad->size != dim + data->params->size)
+  if (grad->size != dim + data->covar_params[0]->size)
     die("ERROR in nj_compute_model_grad: bad gradient dimension.\n");
   
   if (data->type == DIST && data->Lapl_pinv_evals == NULL)
@@ -177,11 +177,11 @@ double nj_compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn,
   double porig, ll_base, ll, deriv;
   TreeNode *tree, *orig_tree;   /* has to be rebuilt repeatedly; restore at end */
   Vector *points_tweak = vec_new(points->size);
-  Vector *sigmapar = data->params;
+  Vector *sigmapar = data->covar_params[0];
   Vector *dL_dx = vec_new(points->size);
   Matrix *D = data->dist;
   
-  if (grad->size != dim + data->params->size)
+  if (grad->size != dim + data->covar_params[0]->size)
     die("ERROR in nj_compute_model_grad_check: bad gradient dimension.\n");
   
   /* set up tree model and get baseline log likelihood */
@@ -336,8 +336,8 @@ void nj_compute_variance_penalty(Vector *grad, multi_MVN *mmvn,
     /* similar to above but L2 penalty applied to each diagonal element */
     data->var_pen = 0;
     double mult = data->var_reg * PENALTY_LOGLAMBDA_DIAG;
-    for (i = 0; i < data->params->size; i++) {
-      double loglambda_i = vec_get(data->params, i);
+    for (i = 0; i < data->covar_params[0]->size; i++) {
+      double loglambda_i = vec_get(data->covar_params[0], i);
       data->var_pen += mult * loglambda_i * loglambda_i;
       vec_set(grad, start_idx + i, -2.0 * mult * loglambda_i); 
     }
