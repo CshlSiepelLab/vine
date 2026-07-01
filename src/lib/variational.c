@@ -660,10 +660,14 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
      variance is at floor), so this gives an accurate final value. */
   double final_mc_ll = 0;
   if (data->taylor != NULL && logf != NULL) {
-    double dummy_lprior = 0, dummy_migll = 0;
-    final_mc_ll = nj_elbo_montecarlo(mod, mixmvn, component, data, nminibatch,
-                                     model_grad, ave_nuis_grad, &dummy_lprior,
-                                     &dummy_migll, NULL, NULL, NULL);
+    for (k = 0; k < ncomponents; k++) {
+      double dummy_lprior = 0, dummy_migll = 0;
+      final_mc_ll += nj_elbo_montecarlo(mod, mixmvn, k, data, nminibatch,
+                                        model_grad, ave_nuis_grad,
+                                        &dummy_lprior, &dummy_migll,
+                                        NULL, NULL, NULL);
+    }
+    final_mc_ll /= ncomponents;
   }
 
   if (logf != NULL) {
