@@ -52,8 +52,6 @@ typedef struct cvdat {
   Vector **covar_params; /* covariance parameter vectors, indexed by mixture
                             component */
   int n_covar_components; /* length of covar_params */
-  double lambda;  /* scale parameter for covariance matrix 
-                     (DIST or CONST cases) */
   double pointscale; /* scale factor for geometry */
   unsigned int natural_grad; /* whether to rescale for natural
                                 gradients during optimization */

@@ -32,13 +32,13 @@ void nj_update_covariance(multi_MVN *mmvn, CovarData *data, int component) {
   /* Note: variance parameters now stored as log values and must
      be exponentiated */
   if (data->type == CONST) {
-    data->lambda = exp(vec_get(data->covar_params[component], 0));
-    if (!isfinite(data->lambda) || data->lambda < VARFLOOR) {
-      data->lambda = VARFLOOR;
+    double lambda = exp(vec_get(data->covar_params[component], 0));
+    if (!isfinite(lambda) || lambda < VARFLOOR) {
+      lambda = VARFLOOR;
       vec_set(data->covar_params[component], 0, log(VARFLOOR)); /* keeps param from running away */
     }
     for (i = 0; i < mmvn->mvn->sigma->nrows; i++)
-      mat_set(mmvn->mvn->sigma, i, i, data->lambda);
+      mat_set(mmvn->mvn->sigma, i, i, lambda);
   }
   else if (data->type == DIAG) {
     for (i = 0; i < data->covar_params[component]->size; i++) {
@@ -51,13 +51,13 @@ void nj_update_covariance(multi_MVN *mmvn, CovarData *data, int component) {
     }
   }
   else if (data->type == DIST) {
-    data->lambda = exp(vec_get(data->covar_params[component], 0));
-    if (!isfinite(data->lambda) || data->lambda < VARFLOOR) {
-      data->lambda = VARFLOOR;
+    double lambda = exp(vec_get(data->covar_params[component], 0));
+    if (!isfinite(lambda) || lambda < VARFLOOR) {
+      lambda = VARFLOOR;
       vec_set(data->covar_params[component], 0, log(VARFLOOR)); 
     }
     mat_copy(mmvn->mvn->sigma, data->Lapl_pinv);
-    mat_scale(mmvn->mvn->sigma, data->lambda);
+    mat_scale(mmvn->mvn->sigma, lambda);
 
     if (mmvn->mvn->evecs == NULL) {
       mmvn->mvn->evecs = mat_new(mmvn->n, mmvn->n);
@@ -66,7 +66,7 @@ void nj_update_covariance(multi_MVN *mmvn, CovarData *data, int component) {
     mat_copy(mmvn->mvn->evecs, data->Lapl_pinv_evecs); /* can simply derive eigendecomposition 
                                                           from Lapl_pinv */
     vec_copy(mmvn->mvn->evals, data->Lapl_pinv_evals);
-    vec_scale(mmvn->mvn->evals, data->lambda);
+    vec_scale(mmvn->mvn->evals, lambda);
   }
   else {
     assert(data->type == LOWR);
@@ -102,7 +102,6 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
   retval->msa = msa;
   retval->crispr_mod = crispr_mod;
   retval->names = names;
-  retval->lambda = LAMBDA_INIT;
   retval->mvn_type = MVN_DIAG;
   retval->dist = dist;
   retval->nseqs = dist->nrows;
@@ -161,26 +160,29 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
   nj_set_pointscale(retval);
 
   if (covar_param == CONST) {
+    double init_lambda = LAMBDA_INIT;
     /* store constant */
     for (i = 0; i < ncomponents; i++) {
       retval->covar_params[i] = vec_new(1);
       vec_set(retval->covar_params[i], 0,
-              log(max(retval->lambda-VARFLOOR, VARFLOOR)));
+              log(max(init_lambda-VARFLOOR, VARFLOOR)));
     }
   }
   else if (covar_param == DIAG) {
+    double init_lambda = LAMBDA_INIT;
     for (i = 0; i < ncomponents; i++) {
       retval->covar_params[i] = vec_new(retval->dim * retval->nseqs);
       vec_set_all(retval->covar_params[i],
-                  log(max(retval->lambda-VARFLOOR, VARFLOOR)));
+                  log(max(init_lambda-VARFLOOR, VARFLOOR)));
     }
   }  
   else if (covar_param == DIST) {
+    double init_lambda = LAMBDA_INIT;
     retval->mvn_type = MVN_GEN;
     for (i = 0; i < ncomponents; i++) {
       retval->covar_params[i] = vec_new(1);
       vec_set(retval->covar_params[i], 0,
-              log(max(retval->lambda-VARFLOOR, VARFLOOR)));
+              log(max(init_lambda-VARFLOOR, VARFLOOR)));
     }
     retval->Lapl_pinv = mat_new(dist->nrows, dist->ncols);
     retval->Lapl_pinv_evals = vec_new(dist->nrows);
@@ -260,7 +262,7 @@ void nj_free_covar_data(CovarData *data) {
 }
 
 void nj_dump_covar_data(CovarData *data, FILE *F) {
-  fprintf(F, "CovarData\nnseqs: %d\ndim: %d\nlambda: %f\n", data->nseqs, data->dim, data->lambda);
+  fprintf(F, "CovarData\nnseqs: %d\ndim: %d\n", data->nseqs, data->dim);
   fprintf(F, "distance matrix:\n");
   mat_print(data->dist, F);
   for (int c = 0; c < data->n_covar_components; c++) {
