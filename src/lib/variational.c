@@ -735,7 +735,8 @@ static void nj_lowr_map_std(multi_MVN *mmvn, Vector *points_std,
   Vector *xcomp = vec_new(mmvn->n), *stdproj = vec_new(k);
 
   for (int d = 0; d < mmvn->d; d++) {
-    mmvn_project_down(mmvn, points_std, stdproj, d);
+    for (int j = 0; j < k; j++)
+      vec_set(stdproj, j, vec_get(points_std, j*mmvn->d + d));
     mmvn->mvn->mu = mmvn->mu[d];
     mvn_map_std(mmvn->mvn, xcomp, stdproj);
     mmvn_project_up(mmvn, xcomp, points, d);
