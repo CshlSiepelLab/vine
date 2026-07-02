@@ -31,9 +31,9 @@
    allows tree topology to converge before migration inference activates */
 #define CPR_MIG_WARMUP_ITERS 150
 
-/* Symmetric Dirichlet prior on mixture weights.  This prevents premature
-   component collapse while still allowing unequal weights when supported. */
-#define MIXTURE_WEIGHT_PRIOR_ALPHA 100.0
+/* Mild symmetric Dirichlet prior on mixture weights.  This discourages
+   premature component collapse without forcing nearly uniform weights. */
+#define MIXTURE_WEIGHT_PRIOR_ALPHA 2.0
 
 static double nj_rescale_mean_grad_el(Vector *grad, multi_MVN *mmvn,
                                       CovarData *data, int i) {
