@@ -82,6 +82,25 @@ static void print_embedding(multi_MVN *mmvn, char **names, int n, int d, FILE *F
   vec_free(mu_full);
 }
 
+static void print_mixture_embedding(mixture_MVN *mixmvn, char **names, int n,
+                                    int d, FILE *F) {
+  int k, i, j;
+  Vector *mu_full = vec_new(n * d);
+
+  for (k = 0; k < mixmvn->ncomponents; k++) {
+    multi_MVN *mmvn = mixmvn_get_component(mixmvn, k);
+    mmvn_save_mu(mmvn, mu_full);
+    for (i = 0; i < n; i++) {
+      fprintf(F, "%d\t%s", k, names[i]);
+      for (j = 0; j < d; j++)
+        fprintf(F, "\t%f", vec_get(mu_full, i*d + j));
+      fprintf(F, "\n");
+    }
+  }
+
+  vec_free(mu_full);
+}
+
 int main(int argc, char *argv[]) {
   signed char c;
   int opt_idx, i, ntips = 0, nsamples = DEFAULT_NSAMPLES, dim = -1,
@@ -802,7 +821,12 @@ int main(int argc, char *argv[]) {
 
   if (embeddingfile != NULL) {
     if (!silent) fprintf(stderr, "Dumping embedding...\n");
-    print_embedding(mmvn, names, covar_data->nseqs, covar_data->dim, embeddingfile);
+    if (mixmvn != NULL && mixmvn->ncomponents > 1)
+      print_mixture_embedding(mixmvn, names, covar_data->nseqs,
+                              covar_data->dim, embeddingfile);
+    else
+      print_embedding(mmvn, names, covar_data->nseqs, covar_data->dim,
+                      embeddingfile);
   }
   
   /* free everything */
