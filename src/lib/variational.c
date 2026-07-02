@@ -37,9 +37,9 @@
 
 /* Smooth close-means penalty for mixture components.  The penalty is bounded
    by STRENGTH per component pair and fades once component RMS mean distance is
-   larger than SCALE. */
+   larger than SCALE times the RMS mean magnitude. */
 #define MIXTURE_MEAN_REPULSION_STRENGTH 2.0
-#define MIXTURE_MEAN_REPULSION_SCALE 0.5
+#define MIXTURE_MEAN_REPULSION_SCALE 0.05
 
 static double nj_rescale_mean_grad_el(Vector *grad, multi_MVN *mmvn,
                                       CovarData *data, int i) {
@@ -94,7 +94,22 @@ static double nj_add_mixture_mean_repulsion(mixture_MVN *mixmvn,
                                             Vector **model_grad_components,
                                             int fulld) {
   double penalty = 0.0;
-  double scale2 = MIXTURE_MEAN_REPULSION_SCALE * MIXTURE_MEAN_REPULSION_SCALE;
+  int npairs = mixmvn->ncomponents * (mixmvn->ncomponents - 1) / 2;
+  double mu2 = 0.0, scale2;
+
+  for (int a = 0; a < mixmvn->ncomponents; a++) {
+    double wa = vec_get(mixmvn->weights, a);
+    multi_MVN *ma = mixmvn_get_component(mixmvn, a);
+    for (int j = 0; j < fulld; j++) {
+      double mu = mmvn_get_mu_el(ma, j);
+      mu2 += wa * mu * mu;
+    }
+  }
+
+  scale2 = MIXTURE_MEAN_REPULSION_SCALE * MIXTURE_MEAN_REPULSION_SCALE *
+    mu2 / fulld;
+  if (scale2 <= 0.0 || !isfinite(scale2))
+    scale2 = MIXTURE_MEAN_REPULSION_SCALE * MIXTURE_MEAN_REPULSION_SCALE;
 
   for (int a = 0; a < mixmvn->ncomponents; a++) {
     multi_MVN *ma = mixmvn_get_component(mixmvn, a);
@@ -106,9 +121,10 @@ static double nj_add_mixture_mean_repulsion(mixture_MVN *mixmvn,
         double diff = mmvn_get_mu_el(ma, j) - mmvn_get_mu_el(mb, j);
         dist2 += diff * diff;
       }
+      dist2 /= fulld;
 
       pair_penalty = MIXTURE_MEAN_REPULSION_STRENGTH *
-        exp(-0.5 * dist2 / (scale2 * fulld));
+        exp(-0.5 * dist2 / scale2) / npairs;
       penalty += pair_penalty;
 
       grad_scale = pair_penalty / (scale2 * fulld);
