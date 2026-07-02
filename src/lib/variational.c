@@ -31,6 +31,10 @@
    allows tree topology to converge before migration inference activates */
 #define CPR_MIG_WARMUP_ITERS 150
 
+/* Symmetric Dirichlet prior on mixture weights.  This prevents premature
+   component collapse while still allowing unequal weights when supported. */
+#define MIXTURE_WEIGHT_PRIOR_ALPHA 100.0
+
 static double nj_rescale_mean_grad_el(Vector *grad, multi_MVN *mmvn,
                                       CovarData *data, int i) {
   if (data->natural_grad != TRUE)
@@ -531,11 +535,20 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       }
 
       sampled_penalty = penalty;
-      for (j = 0; j < ncomponents; j++)
+      double mix_elb = elb, weight_log_prior = 0.0;
+      for (j = 0; j < ncomponents; j++) {
+        double wj = vec_get(mixmvn->weights, j);
+        weight_log_prior += (MIXTURE_WEIGHT_PRIOR_ALPHA - 1.0) * log(wj);
+      }
+      elb += weight_log_prior;
+      for (j = 0; j < ncomponents; j++) {
+        double wj = vec_get(mixmvn->weights, j);
         vec_set(weight_grad, j,
                 vec_get(weight_kldgrad, j) +
-                vec_get(mixmvn->weights, j) *
-                (vec_get(component_elbo, j) - elb));
+                wj * (vec_get(component_elbo, j) - mix_elb) +
+                (MIXTURE_WEIGHT_PRIOR_ALPHA - 1.0) *
+                (1.0 - ncomponents * wj));
+      }
     }
     else {
       if (data->taylor != NULL) {
