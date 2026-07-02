@@ -66,6 +66,13 @@ typedef struct taylor_data {
 
   /* scheduling */
   double T_cache;
+  int cache_ncomponents;
+  double *T_cache_components;
+  double *elbo_bias_components;
+  unsigned int *mig_active_last_refresh_components;
+  unsigned int *component_cache_initialized;
+  Vector **siggrad_cache_components;
+  Vector **nuis_bias_cache_components;
   unsigned int mig_active_last_refresh; /* whether migration was
                                            active when T_cache was
                                            last refreshed; if this

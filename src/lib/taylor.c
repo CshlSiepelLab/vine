@@ -61,6 +61,13 @@ TaylorData *tay_new(CovarData *data) {
   /* scheduling directives */
   td->iter = 0;
   td->T_cache = 0.0;
+  td->cache_ncomponents = 0;
+  td->T_cache_components = NULL;
+  td->elbo_bias_components = NULL;
+  td->mig_active_last_refresh_components = NULL;
+  td->component_cache_initialized = NULL;
+  td->siggrad_cache_components = NULL;
+  td->nuis_bias_cache_components = NULL;
   td->mig_active_last_refresh = FALSE;
   td->elbo_bias = 0.0;
   td->siggrad_cache = NULL; /* will be allocated later */
@@ -86,11 +93,94 @@ void tay_free(TaylorData *td) {
     vec_free(td->siggrad_cache);
   if (td->nuis_bias_cache != NULL)
     vec_free(td->nuis_bias_cache);
+  if (td->siggrad_cache_components != NULL) {
+    for (int k = 0; k < td->cache_ncomponents; k++)
+      if (td->siggrad_cache_components[k] != NULL)
+        vec_free(td->siggrad_cache_components[k]);
+    sfree(td->siggrad_cache_components);
+  }
+  if (td->nuis_bias_cache_components != NULL) {
+    for (int k = 0; k < td->cache_ncomponents; k++)
+      if (td->nuis_bias_cache_components[k] != NULL)
+        vec_free(td->nuis_bias_cache_components[k]);
+    sfree(td->nuis_bias_cache_components);
+  }
+  if (td->T_cache_components != NULL)
+    sfree(td->T_cache_components);
+  if (td->elbo_bias_components != NULL)
+    sfree(td->elbo_bias_components);
+  if (td->mig_active_last_refresh_components != NULL)
+    sfree(td->mig_active_last_refresh_components);
+  if (td->component_cache_initialized != NULL)
+    sfree(td->component_cache_initialized);
   vec_free(td->y);
   vec_free(td->x);
   if (td->nb != NULL)
     nj_free_neighbors(td->nb);
   sfree(td);
+}
+
+static void tay_ensure_component_cache(TaylorData *td, int ncomponents,
+                                       int sigdim) {
+  if (ncomponents <= 1)
+    return;
+
+  if (td->cache_ncomponents == ncomponents &&
+      td->T_cache_components != NULL &&
+      td->elbo_bias_components != NULL &&
+      td->mig_active_last_refresh_components != NULL &&
+      td->component_cache_initialized != NULL &&
+      td->siggrad_cache_components != NULL &&
+      td->nuis_bias_cache_components != NULL) {
+    for (int k = 0; k < ncomponents; k++) {
+      if (td->siggrad_cache_components[k] == NULL)
+        td->siggrad_cache_components[k] = vec_new(sigdim);
+      else
+        assert(td->siggrad_cache_components[k]->size == sigdim);
+    }
+    return;
+  }
+
+  if (td->siggrad_cache_components != NULL) {
+    for (int k = 0; k < td->cache_ncomponents; k++)
+      if (td->siggrad_cache_components[k] != NULL)
+        vec_free(td->siggrad_cache_components[k]);
+    sfree(td->siggrad_cache_components);
+  }
+  if (td->nuis_bias_cache_components != NULL) {
+    for (int k = 0; k < td->cache_ncomponents; k++)
+      if (td->nuis_bias_cache_components[k] != NULL)
+        vec_free(td->nuis_bias_cache_components[k]);
+    sfree(td->nuis_bias_cache_components);
+  }
+  if (td->T_cache_components != NULL)
+    sfree(td->T_cache_components);
+  if (td->elbo_bias_components != NULL)
+    sfree(td->elbo_bias_components);
+  if (td->mig_active_last_refresh_components != NULL)
+    sfree(td->mig_active_last_refresh_components);
+  if (td->component_cache_initialized != NULL)
+    sfree(td->component_cache_initialized);
+
+  td->cache_ncomponents = ncomponents;
+  td->T_cache_components = smalloc(ncomponents * sizeof(double));
+  td->elbo_bias_components = smalloc(ncomponents * sizeof(double));
+  td->mig_active_last_refresh_components =
+    smalloc(ncomponents * sizeof(unsigned int));
+  td->component_cache_initialized =
+    smalloc(ncomponents * sizeof(unsigned int));
+  td->siggrad_cache_components = smalloc(ncomponents * sizeof(Vector*));
+  td->nuis_bias_cache_components = smalloc(ncomponents * sizeof(Vector*));
+
+  for (int k = 0; k < ncomponents; k++) {
+    td->T_cache_components[k] = 0.0;
+    td->elbo_bias_components[k] = 0.0;
+    td->mig_active_last_refresh_components[k] = FALSE;
+    td->component_cache_initialized[k] = FALSE;
+    td->siggrad_cache_components[k] = vec_new(sigdim);
+    vec_zero(td->siggrad_cache_components[k]);
+    td->nuis_bias_cache_components[k] = NULL;
+  }
 }
 
 /* estimate key components of the ELBO by a Taylor approximation
@@ -840,6 +930,26 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
 
   int fulld  = td->fulld;
   int sigdim = grad->size - fulld;
+  int ncomponents = mixmvn->ncomponents;
+  int iter = ncomponents > 1 ? data->variational_iter : td->iter;
+  double *T_cache = &td->T_cache;
+  double *elbo_bias = &td->elbo_bias;
+  unsigned int *mig_active_last_refresh = &td->mig_active_last_refresh;
+  unsigned int *cache_initialized = NULL;
+  Vector **siggrad_cache = &td->siggrad_cache;
+  Vector **nuis_bias_cache = &td->nuis_bias_cache;
+
+  if (ncomponents > 1) {
+    tay_ensure_component_cache(td, ncomponents, sigdim);
+    T_cache = &td->T_cache_components[component];
+    elbo_bias = &td->elbo_bias_components[component];
+    mig_active_last_refresh =
+      &td->mig_active_last_refresh_components[component];
+    cache_initialized = &td->component_cache_initialized[component];
+    siggrad_cache = &td->siggrad_cache_components[component];
+    nuis_bias_cache = &td->nuis_bias_cache_components[component];
+    td->component = component;
+  }
 
   /* ---------------------------------------
    * 1. Log likelihood and gradient at mean
@@ -892,11 +1002,8 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
    * --------------------------------------- */
 
   int do_refresh =
-      (td->iter >= td->warmup) &&
-      ((td->iter - td->warmup) % td->period == 0);
-  int component_changed = (mixmvn->ncomponents > 1 &&
-                           td->component_last_refresh >= 0 &&
-                           td->component_last_refresh != component);
+      (iter >= td->warmup) &&
+      ((iter - td->warmup) % td->period == 0);
 
   /* If we are in CRISPR+migration mode and the migration warmup just
      ended (mig_warmup is FALSE this iter but the cached T_cache was
@@ -907,22 +1014,12 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
   unsigned int mig_active_now =
       (data->crispr_mod != NULL && data->migtable != NULL &&
        !data->crispr_mod->mig_warmup);
-  if (mig_active_now != td->mig_active_last_refresh ||
-      component_changed) {
+  if (mig_active_now != *mig_active_last_refresh) {
     do_refresh = TRUE;
   }
 
   if (do_refresh && nj_var_at_floor(mmvn, data, component)) {
     do_refresh = FALSE;
-    if (component_changed) {
-      td->T_cache = 0.0;
-      td->elbo_bias = 0.0;
-      if (td->siggrad_cache != NULL)
-        vec_zero(td->siggrad_cache);
-      if (td->nuis_bias_cache != NULL)
-        vec_zero(td->nuis_bias_cache);
-      td->component_last_refresh = component;
-    }
   }
 
   if (do_refresh) {
@@ -955,15 +1052,15 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
        mode.  Computed here, before mig_active_last_refresh is updated below,
        so the reset condition is still valid. */
     if (latent_clock && nuis_grad != NULL && mc_nuis != NULL && nuis_mu != NULL) {
-      if (td->nuis_bias_cache == NULL)
-        td->nuis_bias_cache = vec_new(nuis_grad->size);
-      int nuis_reset = (td->iter == td->warmup) ||
-                       (mig_active_now != td->mig_active_last_refresh) ||
-                       component_changed;
+      if (*nuis_bias_cache == NULL)
+        *nuis_bias_cache = vec_new(nuis_grad->size);
+      int nuis_reset = (iter == td->warmup) ||
+                       (mig_active_now != *mig_active_last_refresh) ||
+                       (cache_initialized != NULL && !*cache_initialized);
       for (int j = 0; j < nuis_grad->size; j++) {
         double b = vec_get(mc_nuis, j) - vec_get(nuis_mu, j);
-        double old = vec_get(td->nuis_bias_cache, j);
-        vec_set(td->nuis_bias_cache, j,
+        double old = vec_get(*nuis_bias_cache, j);
+        vec_set(*nuis_bias_cache, j,
                 nuis_reset ? b : (1.0 - td->beta) * old + td->beta * b);
       }
     }
@@ -980,38 +1077,29 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
     double T = 2.0 * ((mc_ll + mc_migll + mc_lprior) -
                       (ll_mu + *migll + *lprior));
 
-    if (component_changed) {
-      td->T_cache = 0.0;
-      td->elbo_bias = 0.0;
-      if (td->siggrad_cache != NULL)
-        vec_zero(td->siggrad_cache);
-      if (td->nuis_bias_cache != NULL)
-        vec_zero(td->nuis_bias_cache);
-    }
-
     if (isfinite(T)) {
       /* When the migration-active state changes (typically the
          end-of-warmup transition), the cached T_cache reflects the
          previous regime and EMA-blending would drag the new value in
          too slowly; treat this refresh like the initial one. */
-      int reset = (td->iter == td->warmup) ||
-                  (mig_active_now != td->mig_active_last_refresh) ||
-                  component_changed;
+      int reset = (iter == td->warmup) ||
+                  (mig_active_now != *mig_active_last_refresh) ||
+                  (cache_initialized != NULL && !*cache_initialized);
       if (reset) {
-        td->T_cache = T;
+        *T_cache = T;
 
-        if (td->siggrad_cache == NULL)
-          td->siggrad_cache = vec_new(sigdim);
+        if (*siggrad_cache == NULL)
+          *siggrad_cache = vec_new(sigdim);
 
         /* initialize variance gradient cache */
         for (int j = 0; j < sigdim; j++)
-          vec_set(td->siggrad_cache, j, vec_get(mc_grad, fulld + j));
+          vec_set(*siggrad_cache, j, vec_get(mc_grad, fulld + j));
       }
       else {
-        td->T_cache =
-          (1.0 - td->beta) * td->T_cache + td->beta * T;
+        *T_cache =
+          (1.0 - td->beta) * (*T_cache) + td->beta * T;
 
-        blend_variance_block(td->siggrad_cache,
+        blend_variance_block(*siggrad_cache,
                              mc_grad,
                              fulld,
                              td->beta);
@@ -1031,22 +1119,24 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
        that the caller will add back via *migll and *lprior, otherwise
        the bias EMA "cancels" them and they get double-counted in the
        final ELBO. */
-    double taylor_elbo = ll_mu + 0.5 * td->T_cache + (*migll) + (*lprior);
+    double taylor_elbo = ll_mu + 0.5 * (*T_cache) + (*migll) + (*lprior);
     double mc_elbo = mc_ll + mc_migll + mc_lprior;
     double bias = taylor_elbo - mc_elbo;
     if (isfinite(bias)) {
       /* Also reset the elbo_bias EMA when migration just turned on
          or off -- old bias estimate is stale for the new regime. */
-      int reset_bias = (td->iter == td->warmup) ||
-                       (mig_active_now != td->mig_active_last_refresh) ||
-                       component_changed;
+      int reset_bias = (iter == td->warmup) ||
+                       (mig_active_now != *mig_active_last_refresh) ||
+                       (cache_initialized != NULL && !*cache_initialized);
       if (reset_bias)
-        td->elbo_bias = bias;
+        *elbo_bias = bias;
       else
-        td->elbo_bias = (1.0 - td->beta) * td->elbo_bias + td->beta * bias;
+        *elbo_bias = (1.0 - td->beta) * (*elbo_bias) + td->beta * bias;
     }
 
-    td->mig_active_last_refresh = mig_active_now;
+    *mig_active_last_refresh = mig_active_now;
+    if (cache_initialized != NULL)
+      *cache_initialized = TRUE;
     td->component_last_refresh = component;
 
     vec_free(mc_grad);
@@ -1057,25 +1147,35 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
      rate gradients are distribution-averaged (fresh mean-point base + EMA bias)
      rather than the biased single-mean-tree estimate.  MC still runs only on
      refresh iters, so Taylor's speed is preserved. */
-  if (latent_clock && nuis_grad != NULL && td->nuis_bias_cache != NULL && nuis_mu != NULL)
+  if (latent_clock && nuis_grad != NULL && *nuis_bias_cache != NULL && nuis_mu != NULL)
     for (int j = 0; j < nuis_grad->size; j++)
-      vec_set(nuis_grad, j, vec_get(nuis_mu, j) + vec_get(td->nuis_bias_cache, j));
+      vec_set(nuis_grad, j, vec_get(nuis_mu, j) + vec_get(*nuis_bias_cache, j));
   if (nuis_mu != NULL) vec_free(nuis_mu);
 
-  td->iter++;
+  if (ncomponents == 1)
+    td->iter++;
+  else {
+    td->T_cache = 0.0;
+    td->elbo_bias = 0.0;
+    for (int k = 0; k < ncomponents; k++) {
+      double wk = vec_get(mixmvn->weights, k);
+      td->T_cache += wk * td->T_cache_components[k];
+      td->elbo_bias += wk * td->elbo_bias_components[k];
+    }
+  }
 
   /* ---------------------------------------
    * 4. Assemble final gradient
    * --------------------------------------- */
 
-  if (td->siggrad_cache != NULL)
-    add_cached_variance_grad(grad, td->siggrad_cache, fulld);
+  if (*siggrad_cache != NULL)
+    add_cached_variance_grad(grad, *siggrad_cache, fulld);
 
   /* ---------------------------------------
    * 5. Final ELBO value (debiased)
    * --------------------------------------- */
 
-  double elbo = ll_mu + 0.5 * td->T_cache - td->elbo_bias;
+  double elbo = ll_mu + 0.5 * (*T_cache) - (*elbo_bias);
 
   /* ---------------------------------------
    * 6. Cleanup
