@@ -948,6 +948,7 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
                          &mc_migll,
                          NULL,
                          NULL,
+                         NULL,
                          NULL);
 
     /* M2: EMA the nuisance-gradient bias (MC - mean-point) for latent-clock

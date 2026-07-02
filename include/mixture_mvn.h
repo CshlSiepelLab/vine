@@ -18,6 +18,8 @@
 typedef struct mixture_MVN {
   int ncomponents;
   multi_MVN **components;
+  Vector *logits;
+  Vector *weights;
 } mixture_MVN;
 
 mixture_MVN *mixmvn_new(int ncomponents, int n, int d, enum mvn_type type);
@@ -30,6 +32,8 @@ void mixmvn_init_jitter_from_component(mixture_MVN *mix, int component,
                                   double jitter_sd);
 
 void mixmvn_update_covariance(mixture_MVN *mix, CovarData *data);
+
+void mixmvn_update_weights(mixture_MVN *mix);
 
 int mixmvn_sample_component(mixture_MVN *mix);
 

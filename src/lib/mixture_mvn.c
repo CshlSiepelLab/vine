@@ -27,10 +27,14 @@ mixture_MVN *mixmvn_new(int ncomponents, int n, int d, enum mvn_type type) {
   mix = smalloc(sizeof(mixture_MVN));
   mix->ncomponents = ncomponents;
   mix->components = smalloc(ncomponents * sizeof(multi_MVN*));
+  mix->logits = vec_new(ncomponents);
+  mix->weights = vec_new(ncomponents);
+  vec_zero(mix->logits);
 
   for (k = 0; k < ncomponents; k++)
     mix->components[k] = mmvn_new(n, d, type);
 
+  mixmvn_update_weights(mix);
   return mix;
 }
 
@@ -43,6 +47,8 @@ void mixmvn_free(mixture_MVN *mix) {
       mmvn_free(mix->components[k]);
 
   free(mix->components);
+  vec_free(mix->logits);
+  vec_free(mix->weights);
   free(mix);
 }
 
@@ -91,23 +97,38 @@ void mixmvn_update_covariance(mixture_MVN *mix, CovarData *data) {
     nj_update_covariance(mixmvn_get_component(mix, k), data, k);
 }
 
+/* Normalize unconstrained component logits into mixture probabilities. */
+void mixmvn_update_weights(mixture_MVN *mix) {
+  int k;
+  double max_logit = -INFINITY, sum_exp = 0.0;
+
+  for (k = 0; k < mix->ncomponents; k++)
+    if (vec_get(mix->logits, k) > max_logit)
+      max_logit = vec_get(mix->logits, k);
+
+  for (k = 0; k < mix->ncomponents; k++)
+    sum_exp += exp(vec_get(mix->logits, k) - max_logit);
+
+  for (k = 0; k < mix->ncomponents; k++)
+    vec_set(mix->weights, k,
+            exp(vec_get(mix->logits, k) - max_logit) / sum_exp);
+}
+
 /* Sample a component from the mixture. */
 int mixmvn_sample_component(mixture_MVN *mix) {
   int component;
+  double draw = unif_rand(), cdf = 0.0;
 
-  /* Sample a component from the mixture, truncating down the random draw to nearest int. */
-  component = (int)(unif_rand() * mix->ncomponents);
+  for (component = 0; component < mix->ncomponents; component++) {
+    cdf += vec_get(mix->weights, component);
+    if (draw <= cdf)
+      return component;
+  }
 
-  /* Handle the edge case where the random draw is 1.0 component equals the number of components 
-      which is out of bounds in our 0-based indexing */
-  if (component >= mix->ncomponents)
-    component = mix->ncomponents - 1;
-
-  return component;
+  return mix->ncomponents - 1;
 }
 
-/* Wrapper to compute the log density of the mixture via log-sum-exp,
-assuming equal mixture weights here. */
+/* Wrapper to compute the log density of the mixture via log-sum-exp. */
 double mixmvn_log_dens(mixture_MVN *mix, Vector *x) {
   int k;
   double max_ldens = -INFINITY, sum_exp = 0;
@@ -117,7 +138,8 @@ double mixmvn_log_dens(mixture_MVN *mix, Vector *x) {
 
   /* Compute the log density of each component and find the maximum. */
   for (k = 0; k < mix->ncomponents; k++) {
-    ldens[k] = mmvn_log_dens(mix->components[k], x);
+    ldens[k] = log(vec_get(mix->weights, k)) +
+      mmvn_log_dens(mix->components[k], x);
     if (ldens[k] > max_ldens)
       max_ldens = ldens[k];
   }
@@ -129,5 +151,5 @@ double mixmvn_log_dens(mixture_MVN *mix, Vector *x) {
   free(ldens);
 
   /* log-sum-exp */
-  return max_ldens + log(sum_exp) - log((double)mix->ncomponents);
+  return max_ldens + log(sum_exp);
 }

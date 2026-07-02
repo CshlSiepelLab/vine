@@ -48,7 +48,8 @@ double nj_elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
                           Vector *ave_nuis_grad, double *ave_lprior,
                           double *avemigll, double *kld,
                           Vector **sigma_kldgrad,
-                          Vector **mu_kldgrad);
+                          Vector **mu_kldgrad,
+                          Vector *weight_kldgrad);
 
 List *nj_var_sample(int nsamples, mixture_MVN *mixmvn, CovarData *data,
                     char** names, Vector *logdens);
