@@ -23,18 +23,18 @@
    distance matrix.  Assumes each taxon is represented as a point in
    d-dimensional space.  Wrapper for versions that assume either
    Euclidean or hyperbolic geometry */
-void nj_points_to_distances(Vector *points, CovarData *data) {
+void points_to_distances(Vector *points, CovarData *data) {
   if (data->hyperbolic)
-    nj_points_to_distances_hyperbolic(points, data);
+    points_to_distances_hyperbolic(points, data);
   else
-    nj_points_to_distances_euclidean(points, data);
+    points_to_distances_euclidean(points, data);
 }
   
 /* convert an nd-dimensional vector to an nxn upper triangular
    distance matrix.  Assumes each taxon is represented as a point in
    d-dimensional space and computes Euclidean distances between these
    points */ 
-void nj_points_to_distances_euclidean(Vector *points, CovarData *data) {
+void points_to_distances_euclidean(Vector *points, CovarData *data) {
   int i, j, k, vidx1, vidx2, n, d;
   double sum;
   double dist, maxdist = 0;
@@ -44,7 +44,7 @@ void nj_points_to_distances_euclidean(Vector *points, CovarData *data) {
   d = points->size / n;
 
   if (points->size != n*d || D->nrows != D->ncols) 
-    die("ERROR nj_points_to_distances_euclidean: bad dimensions\n");
+    die("ERROR points_to_distances_euclidean: bad dimensions\n");
 
   mat_zero(D);
   for (i = 0; i < n; i++) {
@@ -68,8 +68,8 @@ void nj_points_to_distances_euclidean(Vector *points, CovarData *data) {
   }
 }
 
-/* wrapper for nj_points_to_distances functions */
-void nj_mmvn_to_distances(multi_MVN *mmvn, CovarData *data) {
+/* wrapper for points_to_distances functions */
+void mmvn_to_distances(multi_MVN *mmvn, CovarData *data) {
   Vector *full_mu;
   if (mmvn->type != MVN_GEN && mmvn->type != MVN_LOWR) 
     full_mu = mmvn->mvn->mu;
@@ -78,7 +78,7 @@ void nj_mmvn_to_distances(multi_MVN *mmvn, CovarData *data) {
     mmvn_save_mu(mmvn, full_mu);
   }
 
-  nj_points_to_distances(full_mu, data);
+  points_to_distances(full_mu, data);
 
   if (mmvn->type == MVN_GEN || mmvn->type == MVN_LOWR)
     vec_free(full_mu);
@@ -88,7 +88,7 @@ void nj_mmvn_to_distances(multi_MVN *mmvn, CovarData *data) {
    distance matrix.  Assumes each taxon is represented as a point in
    d-dimensional space and computes hyperbolic distances between these
    points */ 
-void nj_points_to_distances_hyperbolic(Vector *points, CovarData *data) {
+void points_to_distances_hyperbolic(Vector *points, CovarData *data) {
   int i, j, k, vidx1, vidx2, n, d;
   double lor_inner, ss1, ss2, x0_1, x0_2, Dij, u, maxdist = 0;
   Matrix *D = data->dist;
@@ -98,7 +98,7 @@ void nj_points_to_distances_hyperbolic(Vector *points, CovarData *data) {
   d = points->size / n;
   
   if (points->size != n*d || D->nrows != D->ncols) {
-    die("ERROR nj_points_to_distances_hyperbolic: bad dimensions\n");
+    die("ERROR points_to_distances_hyperbolic: bad dimensions\n");
   }
 
   mat_zero(D);
@@ -141,17 +141,17 @@ void nj_points_to_distances_hyperbolic(Vector *points, CovarData *data) {
 /* generate an approximate multivariate normal distribution from a
    distance matrix, for use in initializing the variational inference
    algorithm.  */
-void nj_estimate_mmvn_from_distances(CovarData *data, multi_MVN *mmvn,
+void estimate_mmvn_from_distances(CovarData *data, multi_MVN *mmvn,
                                      int component) {
   if (data->hyperbolic)
-    nj_estimate_mmvn_from_distances_hyperbolic(data, mmvn, component);
+    estimate_mmvn_from_distances_hyperbolic(data, mmvn, component);
   else
-    nj_estimate_mmvn_from_distances_euclidean(data, mmvn, component);  
+    estimate_mmvn_from_distances_euclidean(data, mmvn, component);  
 }
 
 /* generate an approximate multivariate normal distribution from a distance matrix, for
    use in initializing the variational inference algorithm. Uses multidimensional scaling  */
-void nj_estimate_mmvn_from_distances_euclidean(CovarData *data,
+void estimate_mmvn_from_distances_euclidean(CovarData *data,
                                                multi_MVN *mmvn,
                                                int component) {
   Matrix *D = data->dist;
@@ -162,7 +162,7 @@ void nj_estimate_mmvn_from_distances_euclidean(CovarData *data,
   Vector *mu_full = vec_new(data->dim * n);
   
   if (D->nrows != D->ncols || mmvn->d * mmvn->n != data->dim * n)
-    die("ERROR in nj_estimate_points_from_distances: bad dimensions\n");
+    die("ERROR in estimate_mmvn_from_distances_euclidean: bad dimensions\n");
 
   /* build matrix of squared distances; note that D is upper
      triangular but Dsq must be symmetric */
@@ -184,7 +184,7 @@ void nj_estimate_mmvn_from_distances_euclidean(CovarData *data,
   eval_real = vec_new(n); vec_zero(eval_real);
   revec_real = mat_new(n, n); mat_zero(revec_real);
   if (mat_diagonalize_sym(G, eval_real, revec_real) != 0)
-    die("ERROR in nj_estimate_mmvn_from_distances_euclidean: diagonalization failed.\n");
+    die("ERROR in estimate_mmvn_from_distances_euclidean: diagonalization failed.\n");
   
   /* create a vector of points based on the first 'dim' eigenvalues */
   for (d = 0; d < data->dim; d++) {
@@ -204,7 +204,7 @@ void nj_estimate_mmvn_from_distances_euclidean(CovarData *data,
   mmvn_set_mu(mmvn, mu_full);
 
   /* covariance parameters should already be initialized */
-  nj_update_covariance(mmvn, data, component);
+  update_covariance(mmvn, data, component);
   
   mat_free(Dsq);
   mat_free(G);
@@ -218,7 +218,7 @@ void nj_estimate_mmvn_from_distances_euclidean(CovarData *data,
    version, use the 'hydra' algorithm to solve the problem
    approximately in hyperbolic space (Keller-Ressel & Nargang,
    arXiv:1903.08977, 2019) */
-void nj_estimate_mmvn_from_distances_hyperbolic(CovarData *data,
+void estimate_mmvn_from_distances_hyperbolic(CovarData *data,
                                                 multi_MVN *mmvn,
                                                 int component) {
   Matrix *D = data->dist;
@@ -229,7 +229,7 @@ void nj_estimate_mmvn_from_distances_hyperbolic(CovarData *data,
   Vector *mu_full = vec_new(data->dim*n);
     
   if (D->nrows != D->ncols || mmvn->d * mmvn->n != data->dim * n)
-    die("ERROR in nj_estimate_points_from_distances_hyperbolic: bad dimensions\n");
+    die("ERROR in estimate_mmvn_from_distances_hyperbolic: bad dimensions\n");
   
   /* build matrix A of transformed distances; note that D is upper
      triangular but A must be symmetric */
@@ -247,7 +247,7 @@ void nj_estimate_mmvn_from_distances_hyperbolic(CovarData *data,
   eval_real = vec_new(n);
   revec_real = mat_new(n, n);
   if (mat_diagonalize_sym(A, eval_real, revec_real) != 0)
-    die("ERROR in nj_estimate_mmvn_from_distances_hyperbolic: diagonalization failed.\n");
+    die("ERROR in estimate_mmvn_from_distances_hyperbolic: diagonalization failed.\n");
 
   /* create a vector of points based on the first 'dim' eigenvalues */
   for (d = 0; d < data->dim; d++) {
@@ -265,7 +265,7 @@ void nj_estimate_mmvn_from_distances_hyperbolic(CovarData *data,
   mmvn_set_mu(mmvn, mu_full); 
   
   /* covariance parameters should already be initialized */
-  nj_update_covariance(mmvn, data, component);
+  update_covariance(mmvn, data, component);
   
   mat_free(A);
   vec_free(eval_real);
@@ -275,23 +275,23 @@ void nj_estimate_mmvn_from_distances_hyperbolic(CovarData *data,
 
 /* ensure a distance matrix is square, upper triangular, has zeroes on
    main diagonal, and has all non-negative entries.  */
-void nj_test_D(Matrix *D) {
+void test_D(Matrix *D) {
   int n = D->nrows;
   int i, j;
   if (n != D->ncols)
-    die("ERROR in nj_test_D: bad dimensions in distance matrix D\n");
+    die("ERROR in test_D: bad dimensions in distance matrix D\n");
   for (i = 0; i < n; i++) {
     for (j = 0; j < n; j++) {
       if (j <= i && mat_get(D, i, j) != 0)
-        die("ERROR in nj_test_D: distance matrix must be upper triangular and have zeroes on main diagonal.\n");
+        die("ERROR in test_D: distance matrix must be upper triangular and have zeroes on main diagonal.\n");
       else if (mat_get(D, i, j) < 0 || !isfinite(mat_get(D, i, j)))
-        die("ERROR in nj_test_D: entries in distance matrix must be nonnegative and finite\n");
+        die("ERROR in test_D: entries in distance matrix must be nonnegative and finite\n");
     }
   }
 }
 
 /* set scale factor for geometry depending on starting distance matrix */
-void nj_set_pointscale(CovarData *data) {
+void set_pointscale(CovarData *data) {
   /* find median pairwise distance */
   double medianD = mat_median_upper_triang(data->dist);  /* off-diagonal median */
   if (medianD <= 0.0 || !isfinite(medianD)) 

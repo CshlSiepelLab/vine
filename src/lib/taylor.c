@@ -187,7 +187,7 @@ static void tay_ensure_component_cache(TaylorData *td, int ncomponents,
    around the mean.  Returns the expected log likelihood.  If
    non-NULL, &half_tr will be populated with 1/2 tr(H S), which is the
    second-order term in the Taylor expansion. */
-double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, int component,
+double elbo_taylor(TreeModel *mod, multi_MVN *mmvn, int component,
                       CovarData *data, Vector *grad, Vector *nuis_grad,
                       double *lprior, double *migll, double *ll_at_mean) {
   double ll;
@@ -203,13 +203,13 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, int component,
   Vector *mu = vec_new(mmvn->n * mmvn->d);
   mmvn_save_mu(mmvn, mu); /* express mean as a single vector */
 
-  /* Prior contribution is routed via dL_dt inside nj_compute_model_grad
+  /* Prior contribution is routed via dL_dt inside compute_model_grad
      and its nuisance grads (relclock_sig_grad, nodetimes_grad) are read
-     out via nj_update_nuis_grad below. */
-  ll = nj_compute_model_grad(mod, mmvn, mu, NULL,
+     out via update_nuis_grad below. */
+  ll = compute_model_grad(mod, mmvn, mu, NULL,
                              grad, data, component, NULL, migll, lprior);
 
-  /* do after calling nj_compute_model_grad so tree is defined */
+  /* do after calling compute_model_grad so tree is defined */
   assert(mod->tree->nnodes - 1 == td->nbranches);
 
   if (!isfinite(ll)) {
@@ -219,7 +219,7 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, int component,
 
   if (nuis_grad != NULL) {
     vec_zero(nuis_grad);
-    nj_update_nuis_grad(mod, data, nuis_grad);
+    update_nuis_grad(mod, data, nuis_grad);
   }
   
   /* note that there is no first-order term in the Taylor approximation
@@ -259,7 +259,7 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, int component,
   int do_refresh = (td->iter >= td->warmup) && ((td->iter - td->warmup) % td->period == 0);
 
   /* if variance has hit its floor, there's no sense in updating the trace */
-  if (do_refresh && nj_var_at_floor(mmvn, data, component))
+  if (do_refresh && var_at_floor(mmvn, data, component))
     do_refresh = FALSE;
 
   if (do_refresh) {
@@ -307,8 +307,8 @@ double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, int component,
      output of hutch_tr_plus_grad, whose tay_Sigmafun /
      tay_sigma_vec_mult already apply lambda in the CONST/DIST
      parameterizations (see tay_sigma_vec_mult).  This function
-     (nj_elbo_taylor) is currently DEAD CODE -- the active path goes
-     through nj_elbo_hybrid in variational.c -- so the issue is
+     (elbo_taylor) is currently DEAD CODE -- the active path goes
+     through elbo_hybrid in variational.c -- so the issue is
      latent; revisit if this entry point is ever re-enabled. */
   int offset = data->taylor->fulld;
   double lambda = exp(vec_get(data->covar_params[component], 0));
@@ -455,7 +455,7 @@ void tay_HVP(Vector *out, Vector *v, void *dat)
   if (data->crispr_mod != NULL)
     cpr_compute_log_likelihood(data->crispr_mod, out);
   else
-    nj_compute_log_likelihood(mod, data, out);
+    compute_log_likelihood(mod, data, out);
 
   /* out = (g1 - g0)/eps_eff */
   vec_minus_eq(out, g0);
@@ -674,7 +674,7 @@ void tay_dx_from_dt(Vector *dL_dt, Vector *dL_dx, TreeModel *mod,
 
     /* Backprop through flows: y → x.  rf/pf_backprop expect the
        pre-flow input, not y (which is post-flow); the pre-flow
-       embedding is saved alongside y by nj_dL_dx_smartest in
+       embedding is saved alongside y by dL_dx_smartest in
        tay_data->x.  For the combined case the forward order is
        x->rf->tmp->pf->y, so the reverse must visit planar first
        (input was tmp = rf_forward(x)) and then radial (input was x). */
@@ -920,7 +920,7 @@ static inline void add_cached_variance_grad(Vector *grad,
    - Mean gradient from Taylor (log likelihood at mu)
    - Variance gradient + curvature correction from MC (cached + smoothed)
 */
-double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
+double elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
                       CovarData *data, int nminibatch, Vector *grad,
                       Vector *nuis_grad, double *lprior, double *migll,
                       double *ll_at_mean) {
@@ -960,10 +960,10 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
   Vector *mu = vec_new(fulld);
   mmvn_save_mu(mmvn, mu);
 
-  /* Prior contribution is routed via dL_dt inside nj_compute_model_grad
+  /* Prior contribution is routed via dL_dt inside compute_model_grad
      (mean block of dL_dx).  Its nuisance grads (relclock_sig_grad,
-     nodetimes_grad) are picked up below by nj_update_nuis_grad. */
-  ll_mu = nj_compute_model_grad(mod, mmvn,
+     nodetimes_grad) are picked up below by update_nuis_grad. */
+  ll_mu = compute_model_grad(mod, mmvn,
                                 mu,
                                 NULL,        /* points_std == NULL → no variance grads */
                                 grad,
@@ -979,7 +979,7 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
 
   if (nuis_grad != NULL) {
     vec_zero(nuis_grad);
-    nj_update_nuis_grad(mod, data, nuis_grad);
+    update_nuis_grad(mod, data, nuis_grad);
   }
 
   /* M2 latent relaxed clock: the per-branch rate nuisances are badly served
@@ -1018,7 +1018,7 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
     do_refresh = TRUE;
   }
 
-  if (do_refresh && nj_var_at_floor(mmvn, data, component)) {
+  if (do_refresh && var_at_floor(mmvn, data, component)) {
     do_refresh = FALSE;
   }
 
@@ -1037,7 +1037,7 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
        - computes unbiased gradients wrt ALL params
     */
     double mc_ll =
-      nj_elbo_montecarlo(mod, mixmvn, component, data,
+      elbo_montecarlo(mod, mixmvn, component, data,
                          nminibatch,
                          mc_grad,
                          mc_nuis,

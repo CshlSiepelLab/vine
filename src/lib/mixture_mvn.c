@@ -81,7 +81,7 @@ void mixmvn_update_covariance(mixture_MVN *mix, CovarData *data) {
   int k;
 
   for (k = 0; k < mix->ncomponents; k++)
-    nj_update_covariance(mix->components[k], data, k);
+    update_covariance(mix->components[k], data, k);
 }
 
 /* Normalize unconstrained component logits into mixture probabilities. */

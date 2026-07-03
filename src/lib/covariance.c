@@ -25,7 +25,7 @@
 
 /* update covariance matrix based on the parameters and auxiliary
    data */
-void nj_update_covariance(multi_MVN *mmvn, CovarData *data, int component) {
+void update_covariance(multi_MVN *mmvn, CovarData *data, int component) {
   int i, j;
   assert(component >= 0 && component < data->n_covar_components);
   
@@ -86,7 +86,7 @@ void nj_update_covariance(multi_MVN *mmvn, CovarData *data, int component) {
 
 /* create a new CovarData object appropriate for the choice of
    parameterization */
-CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
+CovarData *new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
                              MSA *msa, CrisprMutModel *crispr_mod, char **names,
                              unsigned int natural_grad, double kld_upweight,
                              int rank, double var_reg, unsigned int hyperbolic,
@@ -97,7 +97,7 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
   CovarData *retval = smalloc(sizeof(CovarData));
   int i;
   if (ncomponents <= 0)
-    die("ERROR in nj_new_covar_data: number of components must be positive.\n");
+    die("ERROR in new_covar_data: number of components must be positive.\n");
   retval->type = covar_param;
   retval->msa = msa;
   retval->crispr_mod = crispr_mod;
@@ -157,7 +157,7 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
       retval->pfs[i] = NULL;
   }
     
-  nj_set_pointscale(retval);
+  set_pointscale(retval);
 
   if (covar_param == CONST) {
     double init_lambda = LAMBDA_INIT;
@@ -187,7 +187,7 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
     retval->Lapl_pinv = mat_new(dist->nrows, dist->ncols);
     retval->Lapl_pinv_evals = vec_new(dist->nrows);
     retval->Lapl_pinv_evecs = mat_new(dist->nrows, dist->nrows);
-    nj_laplacian_pinv(retval);  /* set up the Laplacian pseudoinverse */    
+    laplacian_pinv(retval);  /* set up the Laplacian pseudoinverse */    
   }
   else if (covar_param == LOWR) {
     double sdev;
@@ -219,12 +219,12 @@ CovarData *nj_new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
     vec_free(init_params);
   }
   else
-    die("ERROR in nj_new_covar_data: unrecognized type.\n");
+    die("ERROR in new_covar_data: unrecognized type.\n");
 
   return (retval);
 }
 
-void nj_free_covar_data(CovarData *data) {
+void free_covar_data(CovarData *data) {
   int i;
   if (data->dist != NULL)
     mat_free(data->dist);
@@ -261,7 +261,7 @@ void nj_free_covar_data(CovarData *data) {
   free(data);
 }
 
-void nj_dump_covar_data(CovarData *data, FILE *F) {
+void dump_covar_data(CovarData *data, FILE *F) {
   fprintf(F, "CovarData\nnseqs: %d\ndim: %d\n", data->nseqs, data->dim);
   fprintf(F, "distance matrix:\n");
   mat_print(data->dist, F);
@@ -287,7 +287,7 @@ void nj_dump_covar_data(CovarData *data, FILE *F) {
    DIST parameterization of covariance.  Also compute
    eigendecomposition for use in gradient calculations. Store
    everything in CovarData object */
-void nj_laplacian_pinv(CovarData *data) {
+void laplacian_pinv(CovarData *data) {
   int i, dim = data->dist->nrows;
   double epsilon, trace;
   
@@ -296,7 +296,7 @@ void nj_laplacian_pinv(CovarData *data) {
   mat_double_center(data->Lapl_pinv, data->dist, TRUE);
   
   if (mat_diagonalize_sym(data->Lapl_pinv, data->Lapl_pinv_evals, data->Lapl_pinv_evecs) != 0)
-    die("ERROR in nj_laplacian_pinv: diagonalization failed.\n");    
+    die("ERROR in laplacian_pinv: diagonalization failed.\n");    
 
   /* the matrix is only defined up to a translation because it is
      based on pairwise distances.  For it to define a valid covariance
@@ -325,7 +325,7 @@ void nj_laplacian_pinv(CovarData *data) {
 }
 
 /* chck whether all variance parameters are at floor */
-unsigned int nj_var_at_floor(multi_MVN *mmvn, CovarData *data, int component) {
+unsigned int var_at_floor(multi_MVN *mmvn, CovarData *data, int component) {
   int i;
   assert(component >= 0 && component < data->n_covar_components);
   

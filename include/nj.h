@@ -52,22 +52,22 @@ TreeNode *nj_infer_tree(Matrix *initD, char **names, Matrix *dt_dD,
 TreeNode *nj_fast_infer(Matrix *initD, char **names, Matrix *dt_dD,
                         Neighbors *nb);
 
-double nj_compute_JC_dist(MSA *msa, int i, int j);
+double compute_JC_dist(MSA *msa, int i, int j);
 
-Matrix *nj_compute_JC_matr(MSA *msa);
+Matrix *compute_JC_matr(MSA *msa);
 
-Matrix *nj_tree_to_distances(TreeNode *tree, char **names, int n);
+Matrix *tree_to_distances(TreeNode *tree, char **names, int n);
 
-double nj_distance_on_tree(TreeNode *root, TreeNode *n1, TreeNode *n2);
+double distance_on_tree(TreeNode *root, TreeNode *n1, TreeNode *n2);
 
 TreeNode *nj_inf(Matrix *D, char **names, Matrix *dt_dD, Neighbors *nb,
                  struct cvdat *covar_data);
 
-void nj_update_seq_to_node_map(TreeNode *tree, char **names, struct cvdat *data);
+void update_seq_to_node_map(TreeNode *tree, char **names, struct cvdat *data);
 
-void nj_update_diam_leaves(Matrix *D, struct cvdat *data);
+void update_diam_leaves(Matrix *D, struct cvdat *data);
 
-void nj_repair_zero_br(TreeNode *t);
+void repair_zero_br(TreeNode *t);
 
 Neighbors *nj_new_neighbors(int n);
 

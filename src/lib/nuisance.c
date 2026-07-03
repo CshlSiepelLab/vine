@@ -20,19 +20,19 @@
 #include <nuisance.h>
 #include <nj.h>
 
-static int nj_rf_nuis_count(RadialFlow *rf) {
+static int rf_nuis_count(RadialFlow *rf) {
   return rf == NULL ? 0 : rf->ctr->size + 2;
 }
 
-static int nj_pf_nuis_count(PlanarFlow *pf) {
+static int pf_nuis_count(PlanarFlow *pf) {
   return pf == NULL ? 0 : pf->ndim * 2 + 1;
 }
 
-static int nj_flow_nuis_count(CovarData *data) {
+static int flow_nuis_count(CovarData *data) {
   int c, retval = 0;
   for (c = 0; c < data->nflow_components; c++) {
-    retval += nj_rf_nuis_count(data->rfs[c]);
-    retval += nj_pf_nuis_count(data->pfs[c]);
+    retval += rf_nuis_count(data->rfs[c]);
+    retval += pf_nuis_count(data->pfs[c]);
   }
   return retval;
 }
@@ -41,7 +41,7 @@ static int nj_flow_nuis_count(CovarData *data) {
    inference. For now these include only the HKY ti/tv parameter for
    DNA models and the silencing rate and leading branch length for
    CRISPR models */
-int nj_get_num_nuisance_params(TreeModel *mod, CovarData *data) {
+int get_num_nuisance_params(TreeModel *mod, CovarData *data) {
   int retval = 0;
 
   if (data->crispr_mod != NULL)
@@ -54,7 +54,7 @@ int nj_get_num_nuisance_params(TreeModel *mod, CovarData *data) {
   if (data->dgamma_cats > 1)
     retval += 1;
   
-  retval += nj_flow_nuis_count(data);
+  retval += flow_nuis_count(data);
 
   if (data->treeprior != NULL && data->treeprior->relclock == TRUE && data->ultrametric == FALSE)
     retval += (1 + (mod->tree->nnodes + 1)/2 - 1);
@@ -69,7 +69,7 @@ int nj_get_num_nuisance_params(TreeModel *mod, CovarData *data) {
   return retval;
 }
 
-char *nj_get_nuisance_param_name(TreeModel *mod, CovarData *data, int idx) {
+char *get_nuisance_param_name(TreeModel *mod, CovarData *data, int idx) {
   char *tmp;
   assert(idx >= 0);
   if (data->crispr_mod != NULL) {
@@ -151,7 +151,7 @@ char *nj_get_nuisance_param_name(TreeModel *mod, CovarData *data, int idx) {
        The fallback to mod->tree handles the startup header print,
        which happens before any tp_compute_log_prior call.  After
        the variational loop mod->tree has been set to NULL by the
-       final nj_elbo_* call, so dereferencing it here would crash. */
+       final elbo_* call, so dereferencing it here would crash. */
     int ninternal = data->treeprior->nodetimes != NULL
                       ? data->treeprior->nodetimes->size
                       : (mod->tree->nnodes + 1)/2 - 1;
@@ -189,12 +189,12 @@ char *nj_get_nuisance_param_name(TreeModel *mod, CovarData *data, int idx) {
     idx -= data->migtable->gtr_params->size;
   }
   
-  die("ERROR in nj_get_nuisance_param_name: index out of bounds.\n");
+  die("ERROR in get_nuisance_param_name: index out of bounds.\n");
   return NULL;
 }
 
 /* update nuis_grad based on current gradients */
-void nj_update_nuis_grad(TreeModel *mod, CovarData *data, Vector *nuis_grad) {
+void update_nuis_grad(TreeModel *mod, CovarData *data, Vector *nuis_grad) {
   int c, idx = 0, i;
   if (data->crispr_mod != NULL) {
     vec_set(nuis_grad, idx++, data->crispr_mod->deriv_sil);
@@ -251,7 +251,7 @@ void nj_update_nuis_grad(TreeModel *mod, CovarData *data, Vector *nuis_grad) {
 }
 
 /* save current values of nuisance params */
-void nj_save_nuis_params(Vector *stored_vals, TreeModel *mod, CovarData *data) {
+void save_nuis_params(Vector *stored_vals, TreeModel *mod, CovarData *data) {
   int c, idx = 0, i;
   if (data->crispr_mod != NULL) {
     vec_set(stored_vals, idx++, data->crispr_mod->sil_rate);
@@ -305,7 +305,7 @@ void nj_save_nuis_params(Vector *stored_vals, TreeModel *mod, CovarData *data) {
 }
 
 /* update all nuisance parameters based on vector of stored values */
-void nj_update_nuis_params(Vector *stored_vals, TreeModel *mod, CovarData *data) {
+void update_nuis_params(Vector *stored_vals, TreeModel *mod, CovarData *data) {
   int c, idx = 0, i;
   if (data->crispr_mod != NULL) {
     data->crispr_mod->sil_rate = vec_get(stored_vals, idx++);
@@ -377,7 +377,7 @@ void nj_update_nuis_params(Vector *stored_vals, TreeModel *mod, CovarData *data)
 }
 
 /* add to single nuisance parameter */
-void nj_nuis_param_pluseq(TreeModel *mod, CovarData *data, int idx, double inc) {
+void nuis_param_pluseq(TreeModel *mod, CovarData *data, int idx, double inc) {
   if (data->crispr_mod != NULL) {
     if (idx == 0) {
       data->crispr_mod->sil_rate += inc;
@@ -510,11 +510,11 @@ void nj_nuis_param_pluseq(TreeModel *mod, CovarData *data, int idx, double inc) 
     idx -= data->migtable->gtr_params->size;
   }
 
-  die("ERROR in nj_nuis_param_pluseq: index out of bounds.\n");
+  die("ERROR in nuis_param_pluseq: index out of bounds.\n");
 }
 
 /* return value of single nuisance parameter */
-double nj_nuis_param_get(TreeModel *mod, CovarData *data, int idx) {
+double nuis_param_get(TreeModel *mod, CovarData *data, int idx) {
   if (data->crispr_mod != NULL) {
     if (idx == 0)
       return data->crispr_mod->sil_rate;

@@ -155,7 +155,7 @@ int main(int argc, char *argv[]) {
       
     /* this is mostly a dummy; only the msa or crispr mod is used */
     D = mat_new(5, 5);
-    data = nj_new_covar_data(CONST, D, 1, evalaln, crispr_mod, NULL, FALSE,
+    data = new_covar_data(CONST, D, 1, evalaln, crispr_mod, NULL, FALSE,
                              1.0, 3, 1.0, FALSE, -1, FALSE, FALSE, FALSE, 1,
                              NULL, NULL, FALSE);
     lldists = lst_new_dbl(1000);
@@ -209,13 +209,13 @@ int main(int argc, char *argv[]) {
         }
       }
       else
-        nj_reset_tree_model(mod, tree);
+        reset_tree_model(mod, tree);
 
       if (evalaln != NULL) {
         /* have to force index rebuild because node ids can change */
         sfree(mod->msa_seq_idx);
         tm_build_seq_idx(mod, evalaln);
-        ll = nj_compute_log_likelihood(mod, data, NULL);
+        ll = compute_log_likelihood(mod, data, NULL);
       }
       else { /* crispr case */
         sfree(crispr_mod->mod->msa_seq_idx);
@@ -259,7 +259,7 @@ int main(int argc, char *argv[]) {
       }
       
       /* get distance matrix for all pairs of leaves for this tree */
-      D = nj_tree_to_distances(tree, names, nleaves);
+      D = tree_to_distances(tree, names, nleaves);
       /* add distances to corresponding lists */
       for (i = 0; i < nleaves; i++) {
         for (j = i+1; j < nleaves; j++) {

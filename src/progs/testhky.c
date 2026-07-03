@@ -43,14 +43,14 @@ int main(int argc, char *argv[]) {
 
   /* set up CovarData */
   dmat = mat_new(5, 5); /* dummy */
-  data = nj_new_covar_data(CONST, dmat, 3, msa, NULL, msa->names,
+  data = new_covar_data(CONST, dmat, 3, msa, NULL, msa->names,
                            FALSE, 1, 3, -1,
                            FALSE, 1, FALSE, FALSE, FALSE, 1, NULL, NULL, FALSE);
   data->hky_kappa = KAPPA;
     
   /* compute likelihood and output */
   grad = vec_new(mod->tree->nnodes - 1);
-  ll = nj_compute_log_likelihood(mod, data, grad);
+  ll = compute_log_likelihood(mod, data, grad);
   printf("Analytical log likelihood: %f\n", ll);
 
   printf("Analytical gradient:\n"); 
@@ -59,7 +59,7 @@ int main(int argc, char *argv[]) {
   printf("Analytical kappa gradient: %f\n", data->deriv_hky_kappa);
   
   /* compute numerical gradient for comparison */
-  ll = nj_dL_dt_num(grad, mod, data); 
+  ll = dL_dt_num(grad, mod, data); 
   printf("Numerical log likelihood: %f\n", ll); 
   printf("Numerical gradient:\n"); 
   vec_print(grad, stdout);
@@ -69,6 +69,6 @@ int main(int argc, char *argv[]) {
   tm_set_HKY_matrix(mod, data->hky_kappa, -1);
   tm_scale_rate_matrix(mod);
   mm_diagonalize(mod->rate_matrix);
-  lleps = nj_compute_log_likelihood(mod, data, NULL);
+  lleps = compute_log_likelihood(mod, data, NULL);
   printf("Numerical kappa gradient: %f\n", (lleps - ll)/DERIV_EPS);
 }

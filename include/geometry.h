@@ -38,28 +38,28 @@
 #define POINTSPAN_EUC 25 
 #define POINTSPAN_HYP 4
 
-void nj_points_to_distances(Vector *points, CovarData *data);
+void points_to_distances(Vector *points, CovarData *data);
 
-void nj_points_to_distances_euclidean(Vector *points, CovarData *data);
+void points_to_distances_euclidean(Vector *points, CovarData *data);
 
-void nj_points_to_distances_hyperbolic(Vector *points, CovarData *data);
+void points_to_distances_hyperbolic(Vector *points, CovarData *data);
 
-void nj_estimate_mmvn_from_distances(CovarData *data, multi_MVN *mmvn,
+void estimate_mmvn_from_distances(CovarData *data, multi_MVN *mmvn,
                                      int component);
 
-void nj_estimate_mmvn_from_distances_euclidean(CovarData *data,
+void estimate_mmvn_from_distances_euclidean(CovarData *data,
                                                multi_MVN *mmvn,
                                                int component);
 
-void nj_estimate_mmvn_from_distances_hyperbolic(CovarData *data,
+void estimate_mmvn_from_distances_hyperbolic(CovarData *data,
                                                 multi_MVN *mmvn,
                                                 int component);
 
-void nj_mmvn_to_distances(multi_MVN *mmvn, CovarData *data);
+void mmvn_to_distances(multi_MVN *mmvn, CovarData *data);
 
-void nj_test_D(Matrix *D);
+void test_D(Matrix *D);
 
-void nj_set_pointscale(CovarData *data);
+void set_pointscale(CovarData *data);
 
 
 /* these are used for the hyperbolic geometry to stabilize the acosh
