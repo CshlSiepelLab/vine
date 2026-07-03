@@ -26,8 +26,6 @@ mixture_MVN *mixmvn_new(int ncomponents, int n, int d, enum mvn_type type);
 
 void mixmvn_free(mixture_MVN *mix);
 
-multi_MVN *mixmvn_get_component(mixture_MVN *mix, int component);
-
 void mixmvn_init_jitter_from_component(mixture_MVN *mix, int component,
                                   double jitter_sd);
 

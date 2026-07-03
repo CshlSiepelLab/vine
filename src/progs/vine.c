@@ -75,7 +75,7 @@ static void print_embedding(mixture_MVN *mixmvn, char **names, int n,
   Vector *mu_full = vec_new(n * d);
 
   for (k = 0; k < mixmvn->ncomponents; k++) {
-    multi_MVN *mmvn = mixmvn_get_component(mixmvn, k);
+    multi_MVN *mmvn = mixmvn->components[k];
     mmvn_save_mu(mmvn, mu_full);
     for (i = 0; i < n; i++) {
       if (mixmvn->ncomponents > 1)
@@ -595,7 +595,7 @@ int main(int argc, char *argv[]) {
       die("ERROR: must use --out-dists with --dist-embedding\n");
 
     mixmvn = mixmvn_new(1, ntips, dim, covar_data->mvn_type);
-    mmvn = mixmvn_get_component(mixmvn, 0);
+    mmvn = mixmvn->components[0];
     nj_estimate_mmvn_from_distances(covar_data, mmvn, 0);
   }
 
@@ -615,7 +615,7 @@ int main(int argc, char *argv[]) {
 
       if (embeddingfile != NULL) {  /* set up initial embedding for output below */
         mixmvn = mixmvn_new(1, ntips, dim, covar_data->mvn_type);
-        mmvn = mixmvn_get_component(mixmvn, 0);
+        mmvn = mixmvn->components[0];
         nj_estimate_mmvn_from_distances(covar_data, mmvn, 0);
       }
     }
@@ -671,7 +671,7 @@ int main(int argc, char *argv[]) {
 
       /* initialize parameters of multivariate normal */
       mixmvn = mixmvn_new(n_mixture_components, ntips, dim, covar_data->mvn_type);
-      mmvn = mixmvn_get_component(mixmvn, 0);
+      mmvn = mixmvn->components[0];
       if (random_start == TRUE) {
         mvn_sample_std(mmvn->mvn->mu);
         vec_scale(mmvn->mvn->mu, 0.1);
@@ -679,7 +679,8 @@ int main(int argc, char *argv[]) {
       else 
         nj_estimate_mmvn_from_distances(covar_data, mmvn, 0); 
       
-      /* initialize all other components with jitter */
+      /* initialize all other components as a jittered version of the first component's mean
+          and with identical covariance */
       mixmvn_init_jitter_from_component(mixmvn, 0, DEFAULT_MIXTURE_JITTER_SD);
       mixmvn_update_covariance(mixmvn, covar_data);
 

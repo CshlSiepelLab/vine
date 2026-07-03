@@ -925,7 +925,7 @@ double nj_elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
                       Vector *nuis_grad, double *lprior, double *migll,
                       double *ll_at_mean) {
   TaylorData *td = data->taylor;
-  multi_MVN *mmvn = mixmvn_get_component(mixmvn, component);
+  multi_MVN *mmvn = mixmvn->components[component];
   double ll_mu;
 
   int fulld  = td->fulld;

@@ -21,9 +21,6 @@ mixture_MVN *mixmvn_new(int ncomponents, int n, int d, enum mvn_type type) {
   int k;
   mixture_MVN *mix;
 
-  if (ncomponents <= 0)
-    die("ERROR in mixmvn_new: number of mixture components must be positive.\n");
-
   mix = smalloc(sizeof(mixture_MVN));
   mix->ncomponents = ncomponents;
   mix->components = smalloc(ncomponents * sizeof(multi_MVN*));
@@ -52,21 +49,13 @@ void mixmvn_free(mixture_MVN *mix) {
   free(mix);
 }
 
-/* Return a pointer to the specified component. */
-multi_MVN *mixmvn_get_component(mixture_MVN *mix, int component) {
-  return mix->components[component];
-}
-
 /* Initialize all other component means from one component plus Gaussian jitter. */
 void mixmvn_init_jitter_from_component(mixture_MVN *mix, int component,
                                   double jitter_sd) {
   int i, k;
   Vector *mu;
 
-  assert(component >= 0 && component < mix->ncomponents);
-  assert(jitter_sd >= 0);
-
-  /* Initialize the mean vector with the mean of the specified component. */
+  /* Initialize the mean vector with the mean of the component to be copied. */
   mu = vec_new(mix->components[component]->n * mix->components[component]->d);
   mmvn_save_mu(mix->components[component], mu);
 
@@ -75,14 +64,12 @@ void mixmvn_init_jitter_from_component(mixture_MVN *mix, int component,
     if (k == component)
       continue;
 
-    /* Add Gaussian jitter to each element of the mean vector. */
+    /* Add Gaussian jitter element-wise to the mean vector, store the jittered
+      vector, and restore the original. */
     for (i = 0; i < mu->size; i++)
       vec_set(mu, i, vec_get(mu, i) + norm_draw(0, jitter_sd));
 
-    /* Store the jittered mean vector. */
     mmvn_set_mu(mix->components[k], mu);
-
-    /* Restore the mean vector of the specified component for the next component. */
     mmvn_save_mu(mix->components[component], mu);
   }
 
@@ -94,7 +81,7 @@ void mixmvn_update_covariance(mixture_MVN *mix, CovarData *data) {
   int k;
 
   for (k = 0; k < mix->ncomponents; k++)
-    nj_update_covariance(mixmvn_get_component(mix, k), data, k);
+    nj_update_covariance(mix->components[k], data, k);
 }
 
 /* Normalize unconstrained component logits into mixture probabilities. */
@@ -102,19 +89,23 @@ void mixmvn_update_weights(mixture_MVN *mix) {
   int k;
   double max_logit = -INFINITY, sum_exp = 0.0;
 
-  for (k = 0; k < mix->ncomponents; k++)
-    if (vec_get(mix->logits, k) > max_logit)
-      max_logit = vec_get(mix->logits, k);
+  /* Find the maximum logit. */
+  for (k = 0; k < mix->ncomponents; k++) {
+      if (vec_get(mix->logits, k) > max_logit)
+        max_logit = vec_get(mix->logits, k);
+  }
 
+  /* Compute the sum of exponentials of the centered logits. */
   for (k = 0; k < mix->ncomponents; k++)
     sum_exp += exp(vec_get(mix->logits, k) - max_logit);
 
+  /* Normalize the logits and compute the mixture weights. */
   for (k = 0; k < mix->ncomponents; k++)
-    vec_set(mix->weights, k,
-            exp(vec_get(mix->logits, k) - max_logit) / sum_exp);
+    vec_set(mix->weights, k, exp(vec_get(mix->logits, k) - max_logit) / sum_exp);
 }
 
-/* Sample a component from the mixture. */
+/* Sample a component from the mixture by drawing uniformly in [0, 1) and
+    then finding the point in the cumulative distribution where the draw falls. */
 int mixmvn_sample_component(mixture_MVN *mix) {
   int component;
   double draw = unif_rand(), cdf = 0.0;
@@ -128,7 +119,7 @@ int mixmvn_sample_component(mixture_MVN *mix) {
   return mix->ncomponents - 1;
 }
 
-/* Wrapper to compute the log density of the mixture via log-sum-exp. */
+/* Compute the log density of the mixture via log-sum-exp. */
 double mixmvn_log_dens(mixture_MVN *mix, Vector *x) {
   int k;
   double max_ldens = -INFINITY, sum_exp = 0;

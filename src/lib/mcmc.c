@@ -94,7 +94,7 @@ List *nj_var_sample_mcmc(int nsamples, int thin, mixture_MVN *mixmvn,
     /* This component draw plus the pCN z proposal is reversible with respect
      * to the variational mixture base, so the MH ratio only needs likelihoods. */
     component = mixmvn_sample_component(mixmvn);
-    multi_MVN *mmvn = mixmvn_get_component(mixmvn, component);
+    multi_MVN *mmvn = mixmvn->components[component];
 
     /* propose new x centered on variational mean using variational covariance;
      * param s scales overall step size and is tuned dynamically (below).
@@ -185,7 +185,7 @@ List *nj_var_sample_mcmc(int nsamples, int thin, mixture_MVN *mixmvn,
          * output */
         vec_copy(x, lastz);
         vec_scale(x, s);
-        mmvn = mixmvn_get_component(mixmvn, last_component);
+        mmvn = mixmvn->components[last_component];
         if (mmvn->type != MVN_LOWR)
           mmvn_map_std(mmvn, x);
         else {
