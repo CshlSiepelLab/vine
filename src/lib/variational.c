@@ -35,12 +35,6 @@
    premature component collapse without forcing nearly uniform weights. */
 #define MIXTURE_WEIGHT_PRIOR_ALPHA 2.0
 
-/* Smooth close-means penalty for mixture components.  The penalty is bounded
-   by STRENGTH per component pair and fades once component RMS mean distance is
-   larger than SCALE times the RMS mean magnitude. */
-#define MIXTURE_MEAN_REPULSION_STRENGTH 2.0
-#define MIXTURE_MEAN_REPULSION_SCALE 0.05
-
 static double nj_rescale_mean_grad_el(Vector *grad, multi_MVN *mmvn,
                                       CovarData *data, int i) {
   if (data->natural_grad != TRUE)
@@ -89,58 +83,6 @@ static double nj_elbo_mix_kld_montecarlo(mixture_MVN *mixmvn, int component,
                                          Vector **sigma_kldgrad,
                                          Vector **mu_kldgrad,
                                          Vector *weight_kldgrad);
-
-static double nj_add_mixture_mean_repulsion(mixture_MVN *mixmvn,
-                                            Vector **model_grad_components,
-                                            int fulld) {
-  double penalty = 0.0;
-  int npairs = mixmvn->ncomponents * (mixmvn->ncomponents - 1) / 2;
-  double mu2 = 0.0, scale2;
-
-  for (int a = 0; a < mixmvn->ncomponents; a++) {
-    double wa = vec_get(mixmvn->weights, a);
-    multi_MVN *ma = mixmvn_get_component(mixmvn, a);
-    for (int j = 0; j < fulld; j++) {
-      double mu = mmvn_get_mu_el(ma, j);
-      mu2 += wa * mu * mu;
-    }
-  }
-
-  scale2 = MIXTURE_MEAN_REPULSION_SCALE * MIXTURE_MEAN_REPULSION_SCALE *
-    mu2 / fulld;
-  if (scale2 <= 0.0 || !isfinite(scale2))
-    scale2 = MIXTURE_MEAN_REPULSION_SCALE * MIXTURE_MEAN_REPULSION_SCALE;
-
-  for (int a = 0; a < mixmvn->ncomponents; a++) {
-    multi_MVN *ma = mixmvn_get_component(mixmvn, a);
-    for (int b = a + 1; b < mixmvn->ncomponents; b++) {
-      multi_MVN *mb = mixmvn_get_component(mixmvn, b);
-      double dist2 = 0.0, pair_penalty, grad_scale;
-
-      for (int j = 0; j < fulld; j++) {
-        double diff = mmvn_get_mu_el(ma, j) - mmvn_get_mu_el(mb, j);
-        dist2 += diff * diff;
-      }
-      dist2 /= fulld;
-
-      pair_penalty = MIXTURE_MEAN_REPULSION_STRENGTH *
-        exp(-0.5 * dist2 / scale2) / npairs;
-      penalty += pair_penalty;
-
-      grad_scale = pair_penalty / (scale2 * fulld);
-      for (int j = 0; j < fulld; j++) {
-        double diff = mmvn_get_mu_el(ma, j) - mmvn_get_mu_el(mb, j);
-        double g = grad_scale * diff;
-        vec_set(model_grad_components[a], j,
-                vec_get(model_grad_components[a], j) + g);
-        vec_set(model_grad_components[b], j,
-                vec_get(model_grad_components[b], j) - g);
-      }
-    }
-  }
-
-  return penalty;
-}
 
 /* Return the flow component owning nuisance parameter idx, or -1 for
    non-flow nuisance parameters.  This mirrors nuisance.c's parameter order. */
@@ -594,13 +536,6 @@ void nj_variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 
       sampled_penalty = penalty;
       double mix_elb = elb;
-      {
-        double mean_repulsion_penalty =
-          nj_add_mixture_mean_repulsion(mixmvn, model_grad_components, fulld);
-        elb -= mean_repulsion_penalty;
-        sampled_penalty += mean_repulsion_penalty;
-      }
-
       double weight_log_prior = 0.0;
       for (j = 0; j < ncomponents; j++) {
         double wj = vec_get(mixmvn->weights, j);
