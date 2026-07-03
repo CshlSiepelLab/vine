@@ -69,21 +69,8 @@ static inline void write_log_header(FILE *LOGF, int argc, char *argv[]) {
   fprintf(LOGF, "\n#\n");
 }
 
-static void print_embedding(multi_MVN *mmvn, char **names, int n, int d, FILE *F) {
-  int i, j;
-  Vector *mu_full = vec_new(n * d);
-  mmvn_save_mu(mmvn, mu_full);
-  for (i = 0; i < n; i++) {
-    fprintf(F, "%s", names[i]);
-    for (j = 0; j < d; j++)
-      fprintf(F, "\t%f", vec_get(mu_full, i*d + j));
-    fprintf(F, "\n");
-  }
-  vec_free(mu_full);
-}
-
-static void print_mixture_embedding(mixture_MVN *mixmvn, char **names, int n,
-                                    int d, FILE *F) {
+static void print_embedding(mixture_MVN *mixmvn, char **names, int n,
+                            int d, FILE *F) {
   int k, i, j;
   Vector *mu_full = vec_new(n * d);
 
@@ -91,7 +78,10 @@ static void print_mixture_embedding(mixture_MVN *mixmvn, char **names, int n,
     multi_MVN *mmvn = mixmvn_get_component(mixmvn, k);
     mmvn_save_mu(mmvn, mu_full);
     for (i = 0; i < n; i++) {
-      fprintf(F, "%d\t%s", k, names[i]);
+      if (mixmvn->ncomponents > 1)
+        fprintf(F, "%d\t%s", k, names[i]);
+      else
+        fprintf(F, "%s", names[i]);
       for (j = 0; j < d; j++)
         fprintf(F, "\t%f", vec_get(mu_full, i*d + j));
       fprintf(F, "\n");
@@ -610,7 +600,8 @@ int main(int argc, char *argv[]) {
     if (outdistfile == NULL)
       die("ERROR: must use --out-dists with --dist-embedding\n");
 
-    mmvn = mmvn_new(ntips, dim, covar_data->mvn_type);
+    mixmvn = mixmvn_new(1, ntips, dim, covar_data->mvn_type);
+    mmvn = mixmvn_get_component(mixmvn, 0);
     nj_estimate_mmvn_from_distances(covar_data, mmvn, 0);
   }
 
@@ -629,7 +620,8 @@ int main(int argc, char *argv[]) {
       tr_print(stdout, tree, TRUE);
 
       if (embeddingfile != NULL) {  /* set up initial embedding for output below */
-        mmvn = mmvn_new(ntips, dim, covar_data->mvn_type);
+        mixmvn = mixmvn_new(1, ntips, dim, covar_data->mvn_type);
+        mmvn = mixmvn_get_component(mixmvn, 0);
         nj_estimate_mmvn_from_distances(covar_data, mmvn, 0);
       }
     }
@@ -821,12 +813,8 @@ int main(int argc, char *argv[]) {
 
   if (embeddingfile != NULL) {
     if (!silent) fprintf(stderr, "Dumping embedding...\n");
-    if (mixmvn != NULL && mixmvn->ncomponents > 1)
-      print_mixture_embedding(mixmvn, names, covar_data->nseqs,
-                              covar_data->dim, embeddingfile);
-    else
-      print_embedding(mmvn, names, covar_data->nseqs, covar_data->dim,
-                      embeddingfile);
+    print_embedding(mixmvn, names, covar_data->nseqs, covar_data->dim,
+                    embeddingfile);
   }
   
   /* free everything */
