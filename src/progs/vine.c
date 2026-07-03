@@ -681,10 +681,8 @@ int main(int argc, char *argv[]) {
       mixmvn_init_jitter_from_component(mixmvn, 0, DEFAULT_MIXTURE_JITTER_SD);
       mixmvn_update_covariance(mixmvn, covar_data);
 
-      if (use_taylor && !silent)
-        fprintf(stderr, "Using Taylor approximation for ELBO...\n");
-      else if (!silent)
-        fprintf(stderr, "Using Monte Carlo estimation of ELBO...\n");
+      if (use_taylor && !silent) fprintf(stderr, "Using Taylor approximation for ELBO...\n");
+      else if (!silent) fprintf(stderr, "Using Monte Carlo estimation of ELBO...\n");
 
       if (nthreads > 1) {
         if (is_crispr)
@@ -702,16 +700,8 @@ int main(int argc, char *argv[]) {
                          niter_conv, min_iter, 
                          covar_data, logfile, silent, log_all);
 
-      if (had_dups == TRUE && !silent)
-        fprintf(stderr, "Sampling trees and re-adding duplicate cells...\n");
-      else if (!silent)
-        fprintf(stderr, "Sampling trees...\n");
 
-      /* expand mutation and migration tables once for duplicate names */
-      if (had_dups == TRUE) {
-        cpr_expand_tables_for_dups(crispr_mod->mut, migtable);
-        cpr_check_dedup_tables(crispr_mod->mut, migtable, "after cpr_expand_tables_for_dups (VI path)");
-      }
+      if (!silent) fprintf(stderr, "Sampling trees...\n");
 
       if (mcmc == TRUE) {
         if (!silent)
@@ -720,30 +710,24 @@ int main(int argc, char *argv[]) {
         trees = var_sample_mcmc(nsamples, mcmc_thin, mixmvn, covar_data, mod,
                                    logfile, silent);
       }
-
       else /* otherwise just sample directly from approx posterior */
         trees = var_sample(nsamples, mixmvn, covar_data, names, NULL);
 
-      /* expand all sampled trees; msa_seq_idx must be rebuilt per tree
-         because caterpillar node IDs vary across trees (the global
-         idcounter advances with each expansion and tr_set_nnodes
-         renumbers, so the same dup leaf may get a different ID in
-         different sampled trees) */
-      if (had_dups == TRUE) {
-        for (i = 0; i < nsamples; i++)
-          cpr_add_dup_leaves(lst_get_ptr(trees, i), crispr_mod->mut);
-        /* invalidate msa_seq_idx so it is rebuilt per-tree below */
-        if (crispr_mod->mod->msa_seq_idx != NULL) {
-          sfree(crispr_mod->mod->msa_seq_idx);
-          crispr_mod->mod->msa_seq_idx = NULL;
-        }
-      }
 
       for (i = 0; i < nsamples; i++) {
         TreeNode *t = (TreeNode *)lst_get_ptr(trees, i);
 
-        /* rebuild msa_seq_idx for this tree's expanded leaf IDs */
         if (had_dups == TRUE) {
+          if (i == 0) {
+            if (!silent) fprintf(stderr, "Re-adding duplicate cells...\n");
+            cpr_expand_tables_for_dups(crispr_mod->mut, migtable);
+            cpr_check_dedup_tables(crispr_mod->mut, migtable, "after cpr_expand_tables_for_dups (VI path)");
+          }
+
+          cpr_add_dup_leaves(lst_get_ptr(trees, i), crispr_mod->mut);
+
+          /* duplicates produce variable node IDs per-tree, so we need to invalidate 
+            msa_seq_idx and rebuild it for this tree's expanded leaf IDs */
           if (crispr_mod->mod->msa_seq_idx != NULL) {
             sfree(crispr_mod->mod->msa_seq_idx);
             crispr_mod->mod->msa_seq_idx = NULL;
@@ -758,8 +742,7 @@ int main(int argc, char *argv[]) {
 
         /* in these cases we need to sample cell states for each tree */
         if (graphsfile != NULL || nexusfile != NULL || consensusfile != NULL) {
-          if (i == 0 && !silent)
-            fprintf(stderr, "Sampling cell states...\n");
+          if (i == 0 && !silent) fprintf(stderr, "Sampling cell states...\n");
 
           if (migstates_lst == NULL) migstates_lst = lst_new_ptr(nsamples);
           List *states = lst_new_ptr(t->nnodes + 1); /* +1 for the origin node state */
