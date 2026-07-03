@@ -15,7 +15,7 @@
 
 #include <stdio.h>
 #include <phast/tree_model.h>
-#include <multi_mvn.h>
+#include <mixture_mvn.h>
 #include <nj.h>
 
 #define BURNIN_ITERS 400
@@ -23,7 +23,7 @@
 #define TARGET_ACCEPT_RATE 0.3
 #define MIN_S 0.001
 
-List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
+List *nj_var_sample_mcmc(int nsamples, int thin, mixture_MVN *mixmvn,
                          CovarData *data, TreeModel *mod, FILE *logf,
                          unsigned int silent);
 

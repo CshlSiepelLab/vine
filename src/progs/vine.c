@@ -472,12 +472,6 @@ int main(int argc, char *argv[]) {
   if (is_crispr == TRUE && dgamma_cats != 1)
     die("--dgamma-cats cannot be used with CRISPR.\n");
 
-  /* TODO: Make MCMC mixture aware */
-  if (mcmc == TRUE && n_mixture_components > 1) {
-    mcmc = FALSE;
-    fprintf(stderr, "WARNING: MCMC is not currently supported for mixture models; ignoring --mcmc\n");
-  }
-  
   if ((nj_only || dist_embedding) &&
       (indistfile != NULL || init_tree != NULL)) {
     if (optind != argc) 
@@ -725,7 +719,7 @@ int main(int argc, char *argv[]) {
         if (!silent)
           fprintf(stderr, "Refining samples by MCMC with thinning interval of %d...\n", mcmc_thin);
         covar_data->subsample = FALSE;  /* MCMC always needs exact likelihood */
-        trees = nj_var_sample_mcmc(nsamples, mcmc_thin, mmvn, covar_data, mod,
+        trees = nj_var_sample_mcmc(nsamples, mcmc_thin, mixmvn, covar_data, mod,
                                    logfile, silent);
       }
 

@@ -19,13 +19,13 @@
 #include <likelihoods.h>
 #include <gradients.h>
 #include <mcmc.h>
-#include <multi_mvn.h>
+#include <mixture_mvn.h>
 #include <variational.h>
 #include <geometry.h>
 
 /* MCMC refinement of variational samples */
 
-List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
+List *nj_var_sample_mcmc(int nsamples, int thin, mixture_MVN *mixmvn,
                          CovarData *data, TreeModel *mod, FILE *logf,
                          unsigned int silent) {
 
@@ -35,6 +35,7 @@ List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
 
   int n = data->nseqs, dim = data->dim, fulld = n * dim;
   int niters = 0, naccept = 0, last_naccept = 0, nsamp = 0;
+  int component = 0, last_component = 0;
   unsigned int keep_sampling = TRUE, burnin = TRUE, accept = FALSE;
   unsigned int first_iter = TRUE;  /* MH always accepts the first proposal */
   /* rho chosen so thinned samples have ~50% autocorrelation, giving
@@ -50,7 +51,6 @@ List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
   double s = s_init, accrt = 0.0, new_accrt = 0.0;
   Vector *mu = vec_new(fulld);
   double nf_logdet;
-  mmvn_save_mu(mmvn, mu);
   TreeNode *tree = NULL, *oldtree = NULL;
   List *retval = lst_new_ptr(nsamples);
 
@@ -91,6 +91,11 @@ List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
     vec_scale(zeta, sqrt(1 - rho * rho));
     vec_plus_eq(zprop, zeta);
 
+    /* This component draw plus the pCN z proposal is reversible with respect
+     * to the variational mixture base, so the MH ratio only needs likelihoods. */
+    component = mixmvn_sample_component(mixmvn);
+    multi_MVN *mmvn = mixmvn_get_component(mixmvn, component);
+
     /* propose new x centered on variational mean using variational covariance;
      * param s scales overall step size and is tuned dynamically (below).
      * For non-LOWR types: x = mu + s*L*z (mmvn_map_std applies L and adds mu).
@@ -99,11 +104,13 @@ List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
     vec_scale(x, s);
     if (mmvn->type != MVN_LOWR)
       mmvn_map_std(mmvn, x);
-    else
+    else {
+      mmvn_save_mu(mmvn, mu);
       vec_plus_eq(x, mu);
+    }
     
     /* convert x to y using normalizing flows if available */
-    nj_apply_normalizing_flows(y, x, data, 0, &nf_logdet);
+    nj_apply_normalizing_flows(y, x, data, component, &nf_logdet);
 
     /* convert to tree */
     nj_points_to_distances(y, data);
@@ -123,22 +130,24 @@ List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
         NULL);
     }
     
+    /* decide whether to accept the proposal */
     double alpha = first_iter ? 1.0 : fmin(1.0, exp(lnl - lastlnl));
     if (unif_rand() < alpha) {
       accept = TRUE;
       first_iter = FALSE;
       lastlnl = lnl;
       vec_copy(lastz, zprop);
+      last_component = component;
       naccept++;
       if (oldtree != NULL) {
-        tr_free(oldtree); /* free old tree */
+        tr_free(oldtree);
         oldtree = NULL;
       }
     }
     else {
       accept = FALSE;
-      tr_free(tree); /* free rejected tree */
-      tree = oldtree; /* point to old tree */
+      tr_free(tree);
+      tree = oldtree;
       oldtree = NULL; 
     }
 
@@ -149,11 +158,9 @@ List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
 
     /* keep track of block-wise acceptance rate */
     if (niters % TUNING_INTERVAL == 0) {
-      int new_naccept =
-          naccept - last_naccept; /* number accepted since last check */
+      int new_naccept = naccept - last_naccept; /* number accepted since last check */
       int t = niters / TUNING_INTERVAL; /* number of checks so far */
-      new_accrt =
-        new_naccept / (double)TUNING_INTERVAL; /* acceptance rate since last check */
+      new_accrt = new_naccept / (double)TUNING_INTERVAL; /* acceptance rate since last check */
 
       /* during burnin only, adapt s to target acceptance rate;
        * rho is fixed (see s_init comment above); after burnin, keep fixed */
@@ -165,8 +172,7 @@ List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
         double eta_s = 0.5 / sqrt((double)t);
         s = exp(log(s) + eta_s * (new_accrt - TARGET_ACCEPT_RATE));
         if (s < MIN_S) s = MIN_S;
-        if (s > 10)
-          s = 10;
+        if (s > 10) s = 10;
       }
 
       last_naccept = naccept;
@@ -179,27 +185,28 @@ List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
          * output */
         vec_copy(x, lastz);
         vec_scale(x, s);
+        mmvn = mixmvn_get_component(mixmvn, last_component);
         if (mmvn->type != MVN_LOWR)
           mmvn_map_std(mmvn, x);
-        else
+        else {
+          mmvn_save_mu(mmvn, mu);
           vec_plus_eq(x, mu);
-        nj_apply_normalizing_flows(y, x, data, 0, &nf_logdet);
+        }
+        nj_apply_normalizing_flows(y, x, data, last_component, &nf_logdet);
         nj_points_to_distances(y, data);
         tree = nj_inf(data->dist, data->names, NULL, NULL, data);
-        mod->tree = NULL; /* clear dangling ptr left by rejected proposed tree */
+        mod->tree = NULL;
       }
       
       lnl_samps[nsamp] = lastlnl;
       lst_push_ptr(retval, tree);
-      tree = NULL; /* prevent freeing below */
+      tree = NULL;
       nsamp++;
       avelnl += lastlnl;
       
       if (nsamp >= nsamples)
         keep_sampling = FALSE;
 
-      /* progress line every fifth of the run; clamp the divisor to >=1
-         so --nsamples<5 does not modulo-by-zero (SIGFPE) */
       int prog_every = nsamples / 5;
       if (prog_every < 1) prog_every = 1;
       if (nsamp % prog_every == 0 && !silent)
@@ -211,7 +218,7 @@ List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
               lastlnl, burnin, accept, (!burnin && niters % thin == 0),
               new_accrt, accrt, s);    
 
-    oldtree = tree; /* set up for next iteration */
+    oldtree = tree;
   }
 
   /* note that the last tree sampled must have been retained in
@@ -256,7 +263,7 @@ List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
   
   sfree(lnl_samps);
 
-  mod->tree = NULL; /* avoid dangling pointer */
+  mod->tree = NULL;
   vec_free(mu);
   vec_free(lastz);
   vec_free(zprop);
