@@ -724,24 +724,18 @@ int main(int argc, char *argv[]) {
             cpr_check_dedup_tables(crispr_mod->mut, migtable, "after cpr_expand_tables_for_dups (VI path)");
           }
 
-          cpr_add_dup_leaves(lst_get_ptr(trees, i), crispr_mod->mut);
-
-          /* duplicates produce variable node IDs per-tree, so we need to invalidate 
-            msa_seq_idx and rebuild it for this tree's expanded leaf IDs */
-          if (crispr_mod->mod->msa_seq_idx != NULL) {
-            sfree(crispr_mod->mod->msa_seq_idx);
-            crispr_mod->mod->msa_seq_idx = NULL;
+          if (graphsfile != NULL || nexusfile != NULL || consensusfile != NULL) {
+            cpr_add_dup_leaves_and_reset_mapping(t, crispr_mod);
           }
-          TreeNode *saved_tree = crispr_mod->mod->tree;
-          crispr_mod->mod->tree = t;
-          cpr_build_seq_idx(crispr_mod->mod, crispr_mod->mut);
-          crispr_mod->mod->tree = saved_tree;
+          else
+            cpr_add_dup_leaves(t, crispr_mod->mut);
         }
 
         tr_print(stdout, t, TRUE);
 
         /* in these cases we need to sample cell states for each tree */
         if (graphsfile != NULL || nexusfile != NULL || consensusfile != NULL) {
+          
           if (i == 0 && !silent) fprintf(stderr, "Sampling cell states...\n");
 
           if (migstates_lst == NULL) migstates_lst = lst_new_ptr(nsamples);
@@ -767,17 +761,36 @@ int main(int argc, char *argv[]) {
 
       if (postmeanfile != NULL) {
         if (!silent) fprintf(stderr, "Writing posterior mean tree...\n");
-
-        /* Note that this is not setup for the mixture model yet. */
-        if (mixmvn->ncomponents > 1) 
-          fprintf(stderr, "Posterior mean tree not implemented for mixture models, so using the first component mean only.\n");
+        if (mixmvn->ncomponents > 1 && !silent) fprintf(stderr, "Posterior mean tree not implemented for mixture models, so using the first component mean only.\n");
 
         Vector *mu_full = vec_new(mixmvn->components[0]->mvn->mu->size);
         mmvn_save_mu(mixmvn->components[0], mu_full);
         TreeNode *t = mean_tree(mu_full, names, covar_data);
-        if (had_dups == TRUE)
-          cpr_add_dup_leaves(t, crispr_mod->mut); /* add back in duplicate leaves if needed */
-        tr_print(postmeanfile, t, TRUE);
+
+        if (had_dups == TRUE) {
+          if (migtable != NULL) {
+            cpr_add_dup_leaves_and_reset_mapping(t, crispr_mod);
+          }
+          else
+            cpr_add_dup_leaves(t, crispr_mod->mut);
+        }
+
+        if (migtable != NULL) {
+          if (!silent) fprintf(stderr, "Sampling cell states for posterior mean tree...\n");
+
+          TreeNode *saved_tree = crispr_mod->mod->tree;
+          crispr_mod->mod->tree = t;
+
+          List *states = lst_new_ptr(t->nnodes + 1);
+          mig_sample_states(t, migtable, crispr_mod, states);
+          mig_print_labeled_nexus(t, postmeanfile, migtable, states);
+
+          lst_free(states);
+          crispr_mod->mod->tree = saved_tree;
+        }
+        else {
+          tr_print(postmeanfile, t, TRUE);
+        }
         vec_free(mu_full);
       }
     }
@@ -788,10 +801,7 @@ int main(int argc, char *argv[]) {
       /* in this case need to reset D */
       mmvn_to_distances(mixmvn->components[0], covar_data);
 
-    /* Note that this is not setup for the mixture model yet. */
-    if (mixmvn->ncomponents > 1) 
-      fprintf(stderr, "Distance matrix not implemented for mixture models, so using the first component only.\n");
-
+    if (mixmvn->ncomponents > 1 && !silent) fprintf(stderr, "Distance matrix not implemented for mixture models, so using the first component only.\n");
     mat_print(D, outdistfile);
   }
 
