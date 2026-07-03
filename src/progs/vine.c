@@ -75,8 +75,7 @@ static void print_embedding(mixture_MVN *mixmvn, char **names, int n,
   Vector *mu_full = vec_new(n * d);
 
   for (k = 0; k < mixmvn->ncomponents; k++) {
-    multi_MVN *mmvn = mixmvn->components[k];
-    mmvn_save_mu(mmvn, mu_full);
+    mmvn_save_mu(mixmvn->components[k], mu_full);
     for (i = 0; i < n; i++) {
       if (mixmvn->ncomponents > 1)
         fprintf(F, "%d\t%s", k, names[i]);
@@ -121,7 +120,6 @@ int main(int argc, char *argv[]) {
   double learnrate = DEFAULT_LEARNRATE,
     negcurvature = 1.0, var_reg = 1.0, kld_upweight = 1.0;
   MarkovMatrix *rmat = NULL;
-  multi_MVN *mmvn = NULL;
   mixture_MVN *mixmvn = NULL;
   TreeNode *init_tree = NULL;
   CovarData *covar_data = NULL;
@@ -595,10 +593,8 @@ int main(int argc, char *argv[]) {
       die("ERROR: must use --out-dists with --dist-embedding\n");
 
     mixmvn = mixmvn_new(1, ntips, dim, covar_data->mvn_type);
-    mmvn = mixmvn->components[0];
-    estimate_mmvn_from_distances(covar_data, mmvn, 0);
+    estimate_mmvn_from_distances(covar_data, mixmvn->components[0], 0);
   }
-
   else {
     /* we'll need a starting tree for either variational inference
        or NJ-only */
@@ -615,11 +611,9 @@ int main(int argc, char *argv[]) {
 
       if (embeddingfile != NULL) {  /* set up initial embedding for output below */
         mixmvn = mixmvn_new(1, ntips, dim, covar_data->mvn_type);
-        mmvn = mixmvn->components[0];
-        estimate_mmvn_from_distances(covar_data, mmvn, 0);
+        estimate_mmvn_from_distances(covar_data, mixmvn->components[0], 0);
       }
     }
-
     else {  /* full variational inference */
       if (msa == NULL && crispr_muts == NULL)
         die("ERROR: Alignment/mutations required for variational inference\n");
@@ -671,13 +665,12 @@ int main(int argc, char *argv[]) {
 
       /* initialize parameters of multivariate normal */
       mixmvn = mixmvn_new(n_mixture_components, ntips, dim, covar_data->mvn_type);
-      mmvn = mixmvn->components[0];
       if (random_start == TRUE) {
-        mvn_sample_std(mmvn->mvn->mu);
-        vec_scale(mmvn->mvn->mu, 0.1);
+        mvn_sample_std(mixmvn->components[0]->mvn->mu);
+        vec_scale(mixmvn->components[0]->mvn->mu, 0.1);
       }
       else 
-        estimate_mmvn_from_distances(covar_data, mmvn, 0); 
+        estimate_mmvn_from_distances(covar_data, mixmvn->components[0], 0); 
       
       /* initialize all other components as a jittered version of the first component's mean
           and with identical covariance */
@@ -787,8 +780,8 @@ int main(int argc, char *argv[]) {
 
       if (postmeanfile != NULL) {
         if (!silent) fprintf(stderr, "Writing posterior mean tree...\n");
-        Vector *mu_full = vec_new(mmvn->d * mmvn->n);
-        mmvn_save_mu(mmvn, mu_full);
+        Vector *mu_full = vec_new(mixmvn->components[0]->mvn->mu->size);
+        mmvn_save_mu(mixmvn->components[0], mu_full);
         TreeNode *t = mean_tree(mu_full, names, covar_data);
         if (had_dups == TRUE)
           cpr_add_dup_leaves(t, crispr_mod->mut); /* add back in duplicate leaves if needed */
@@ -801,7 +794,7 @@ int main(int argc, char *argv[]) {
   if (outdistfile != NULL) {
     if (dist_embedding == TRUE || nj_only == FALSE)
       /* in this case need to reset D */
-      mmvn_to_distances(mmvn, covar_data);
+      mmvn_to_distances(mixmvn->components[0], covar_data);
 
     mat_print(D, outdistfile);
   }
@@ -829,8 +822,6 @@ int main(int argc, char *argv[]) {
     free_covar_data(covar_data);
   if (mixmvn != NULL)
     mixmvn_free(mixmvn);
-  else if (mmvn != NULL)
-    mmvn_free(mmvn);
   if (logfile != NULL)
     fclose(logfile);
   if (outdistfile != NULL)
