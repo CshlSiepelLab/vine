@@ -592,6 +592,10 @@ int main(int argc, char *argv[]) {
     if (outdistfile == NULL)
       die("ERROR: must use --out-dists with --dist-embedding\n");
 
+    /* Note that this is not setup for the mixture model yet. */
+    if (n_mixture_components > 1)
+      fprintf(stderr, "Distance embedding not implemented for mixture models, so using a single component only.\n");
+
     mixmvn = mixmvn_new(1, ntips, dim, covar_data->mvn_type);
     estimate_mmvn_from_distances(covar_data, mixmvn->components[0], 0);
   }
@@ -780,6 +784,11 @@ int main(int argc, char *argv[]) {
 
       if (postmeanfile != NULL) {
         if (!silent) fprintf(stderr, "Writing posterior mean tree...\n");
+
+        /* Note that this is not setup for the mixture model yet. */
+        if (mixmvn->ncomponents > 1) 
+          fprintf(stderr, "Posterior mean tree not implemented for mixture models, so using the first component mean only.\n");
+
         Vector *mu_full = vec_new(mixmvn->components[0]->mvn->mu->size);
         mmvn_save_mu(mixmvn->components[0], mu_full);
         TreeNode *t = mean_tree(mu_full, names, covar_data);
@@ -795,6 +804,10 @@ int main(int argc, char *argv[]) {
     if (dist_embedding == TRUE || nj_only == FALSE)
       /* in this case need to reset D */
       mmvn_to_distances(mixmvn->components[0], covar_data);
+
+    /* Note that this is not setup for the mixture model yet. */
+    if (mixmvn->ncomponents > 1) 
+      fprintf(stderr, "Distance matrix not implemented for mixture models, so using the first component only.\n");
 
     mat_print(D, outdistfile);
   }
