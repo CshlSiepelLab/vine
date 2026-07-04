@@ -125,6 +125,149 @@ static int nuis_flow_component(TreeModel *mod, CovarData *data, int idx) {
   return -1;
 }
 
+static void log_header(TreeModel *mod, mixture_MVN *mixmvn,
+                                      CovarData *data, FILE *logf,
+                                      int fulld, int n_nuisance_params,
+                                      unsigned int log_all) {
+  int j, k, ncomponents = mixmvn->ncomponents;
+
+  if (logf == NULL)
+    return;
+
+  fprintf(logf, "state\tll\telbo\t");
+  if (data->treeprior != NULL)
+    fprintf(logf, "prior\t");
+  else
+    fprintf(logf, "kld\t");
+  if (data->taylor)
+    fprintf(logf, "half_trHS\telbo_bias\t");
+  if (data->var_reg != 0)
+    fprintf(logf, "penalty\t");
+  if (data->crispr_mod == NULL)
+    fprintf(logf, "subsamp\treuse\tgradnorm\tclip\t");
+  if (data->migtable != NULL)
+    fprintf(logf, "mig_ll\t");
+  if (ncomponents > 1)
+    for (k = 0; k < ncomponents; k++)
+      fprintf(logf, "mixweight.%d\t", k);
+  if (log_all) {
+    for (j = 0; j < fulld; j++)
+      fprintf(logf, "mu.%d\t", j);
+    if (data->type == LOWR || data->type == DIAG) {
+      for (k = 0; k < ncomponents; k++)
+        for (j = 0; j < data->covar_params[k]->size; j++)
+          fprintf(logf, "sigma.%d.%d\t", k, j);
+    }
+  }
+  if (data->type == CONST || data->type == DIST) {
+    for (k = 0; k < ncomponents; k++)
+      for (j = 0; j < data->covar_params[k]->size; j++)
+        fprintf(logf, "sigma.%d.%d\t", k, j);
+  }
+  for (j = 0; j < n_nuisance_params; j++)
+    fprintf(logf, "%s\t", get_nuisance_param_name(mod, data, j));
+  fprintf(logf, "\n");
+}
+
+static void log_iteration(TreeModel *mod, mixture_MVN *mixmvn,
+                                         CovarData *data, FILE *logf,
+                                         TaylorData *taylor_stash,
+                                         SchedMetrics *sm, int t,
+                                         double avell, double elb,
+                                         double ave_lprior, double kld,
+                                         double sampled_penalty,
+                                         double avemigll,
+                                         unsigned int clipped,
+                                         int n_nuisance_params,
+                                         unsigned int log_all) {
+  int j, k, ncomponents = mixmvn->ncomponents;
+
+  if (logf == NULL)
+    return;
+
+  fprintf(logf, "%d\t%f\t%f\t", t, avell, elb);
+  if (data->treeprior != NULL)
+    fprintf(logf, "%f\t", ave_lprior);
+  else
+    fprintf(logf, "%f\t", kld);
+  if (data->taylor)
+    fprintf(logf, "%f\t%f\t", 0.5 * data->taylor->T_cache,
+            data->taylor->elbo_bias);
+  else if (taylor_stash != NULL)
+    fprintf(logf, "0\t0\t"); /* place holder */
+  if (data->var_reg != 0)
+    fprintf(logf, "%f\t", sampled_penalty);
+  if (data->crispr_mod == NULL)
+    fprintf(logf, "%d\t%d\t%f\t%d\t", data->subsampsize,
+            data->reuse_subsamp, sm->grad_norm, clipped);
+  if (data->migtable != NULL)
+    fprintf(logf, "%f\t", avemigll);
+  if (ncomponents > 1)
+    for (k = 0; k < ncomponents; k++)
+      fprintf(logf, "%f\t", vec_get(mixmvn->weights, k));
+  if (log_all) {
+    mixmvn_print(mixmvn, logf, TRUE, FALSE);
+    if (data->type == LOWR || data->type == DIAG) {
+      for (k = 0; k < ncomponents; k++)
+        for (j = 0; j < data->covar_params[k]->size; j++)
+          fprintf(logf, "%f\t", vec_get(data->covar_params[k], j));
+    }
+  }
+  if (data->type == CONST || data->type == DIST) {
+    for (k = 0; k < ncomponents; k++)
+      for (j = 0; j < data->covar_params[k]->size; j++)
+        fprintf(logf, "%f\t", vec_get(data->covar_params[k], j));
+  }
+  for (j = 0; j < n_nuisance_params; j++)
+    fprintf(logf, "%f\t", nuis_param_get(mod, data, j));
+
+  fprintf(logf, "\n");
+}
+
+static void log_running_elbo(FILE *logf, int nbatches_conv,
+                                            double running_tot) {
+  if (logf != NULL)
+    fprintf(logf, "# Average ELBO for last %d: %f\n",
+            nbatches_conv, running_tot/nbatches_conv);
+}
+
+static void log_final(TreeModel *mod, mixture_MVN *mixmvn,
+                                     CovarData *data, FILE *logf,
+                                     int bestt, double bestelb,
+                                     double bestll, double best_lprior,
+                                     double bestkld, double bestpenalty,
+                                     double bestll_at_mean,
+                                     double final_mc_ll,
+                                     double bestmigll,
+                                     int n_nuisance_params) {
+  int j, ncomponents = mixmvn->ncomponents;
+
+  if (logf == NULL)
+    return;
+
+  fprintf(logf,
+          "# Reverting to parameters from iteration %d; ELB: %.2f, LNL: "
+          "%.2f, LPRIOR: %.2f, KLD: %.2f, penalty: %.2f",
+          bestt + 1, bestelb, bestll, best_lprior, bestkld, bestpenalty);
+  if (data->taylor != NULL)
+    /* final unbiased MC estimate of E_q[lnL] at best parameters */
+    fprintf(logf, ", LNL_mc: %.2f", final_mc_ll);
+  else if (bestll_at_mean != 0)
+    /* for MC mode: lnL at the mean embedding (no separate MC pass needed) */
+    fprintf(logf, ", LNL_mu: %.2f", bestll_at_mean);
+  if (data->migtable != NULL)
+    fprintf(logf, ", MIGLL: %.2f", bestmigll);
+  if (ncomponents > 1) {
+    fprintf(logf, ", mixweights:");
+    for (j = 0; j < ncomponents; j++)
+      fprintf(logf, " %.4f", vec_get(mixmvn->weights, j));
+  }
+  for (j = 0; j < n_nuisance_params; j++) /* print these also if available */
+    fprintf(logf, ", %s: %.4f", get_nuisance_param_name(mod, data, j),
+      nuis_param_get(mod, data, j));
+  fprintf(logf, "\n");
+}
+
 /* optimize variational model by stochastic gradient ascent using the
    Adam algorithm.  Takes initial tree model and alignment and
    distance matrix, dimensionality of Euclidean space to work in.
@@ -230,42 +373,8 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     sigma_t[k] = 0;
   }
 
-  /* set up log file */
-  if (logf != NULL) {
-    fprintf(logf, "state\tll\telbo\t");
-    if (data->treeprior != NULL)
-      fprintf(logf, "prior\t");
-    else
-      fprintf(logf, "kld\t");
-    if (data->taylor)
-      fprintf(logf, "half_trHS\telbo_bias\t");
-    if (data->var_reg != 0)
-      fprintf(logf, "penalty\t");
-    if (data->crispr_mod == NULL)
-      fprintf(logf, "subsamp\treuse\tgradnorm\tclip\t");
-    if (data->migtable != NULL)
-      fprintf(logf, "mig_ll\t");
-    if (ncomponents > 1)
-      for (k = 0; k < ncomponents; k++)
-        fprintf(logf, "mixweight.%d\t", k);
-    if (log_all) {
-      for (j = 0; j < fulld; j++)
-        fprintf(logf, "mu.%d\t", j);
-      if (data->type == LOWR || data->type == DIAG) {
-        for (k = 0; k < ncomponents; k++)
-          for (j = 0; j < data->covar_params[k]->size; j++)
-            fprintf(logf, "sigma.%d.%d\t", k, j);
-      }
-    }
-    if (data->type == CONST || data->type == DIST) {
-      for (k = 0; k < ncomponents; k++)
-        for (j = 0; j < data->covar_params[k]->size; j++)
-          fprintf(logf, "sigma.%d.%d\t", k, j);
-    }
-    for (j = 0; j < n_nuisance_params; j++)
-      fprintf(logf, "%s\t", get_nuisance_param_name(mod, data, j));
-    fprintf(logf, "\n");
-  }
+  log_header(mod, mixmvn, data, logf, fulld,
+                         n_nuisance_params, log_all);
 
   /* set up scheduler; for CRISPR mode, start in full mode (no
      subsampling) but still use adaptive gradient clipping */
@@ -707,52 +816,15 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       vec_copy(v_nuis_prev, v_nuis);
     }
     
-    /* report to log file */
-    if (logf != NULL) {
-      fprintf(logf, "%d\t%f\t%f\t", t, avell, elb);
-      if (data->treeprior != NULL)
-        fprintf(logf, "%f\t", ave_lprior);
-      else
-        fprintf(logf, "%f\t", kld);
-      if (data->taylor)
-        fprintf(logf, "%f\t%f\t", 0.5 * data->taylor->T_cache,
-                data->taylor->elbo_bias);
-      else if (taylor_stash != NULL)
-        fprintf(logf, "0\t0\t"); /* place holder */
-      if (data->var_reg != 0)
-        fprintf(logf, "%f\t", sampled_penalty);
-      if (data->crispr_mod == NULL)
-        fprintf(logf, "%d\t%d\t%f\t%d\t", data->subsampsize,
-                data->reuse_subsamp, sm->grad_norm, clipped);
-      if (data->migtable != NULL) 
-        fprintf(logf, "%f\t", avemigll); 
-      if (ncomponents > 1)
-        for (k = 0; k < ncomponents; k++)
-          fprintf(logf, "%f\t", vec_get(mixmvn->weights, k));
-      if (log_all) {
-        mixmvn_print(mixmvn, logf, TRUE, FALSE);
-        if (data->type == LOWR || data->type == DIAG) {
-          for (k = 0; k < ncomponents; k++)
-            for (j = 0; j < data->covar_params[k]->size; j++)
-              fprintf(logf, "%f\t", vec_get(data->covar_params[k], j));
-        }
-      }
-      if (data->type == CONST || data->type == DIST) {
-        for (k = 0; k < ncomponents; k++)
-          for (j = 0; j < data->covar_params[k]->size; j++)
-            fprintf(logf, "%f\t", vec_get(data->covar_params[k], j));
-      }
-      for (j = 0; j < n_nuisance_params; j++)
-        fprintf(logf, "%f\t", nuis_param_get(mod, data, j));
-
-      fprintf(logf, "\n");
-    }
+    log_iteration(mod, mixmvn, data, logf, taylor_stash, sm,
+                              t, avell, elb, ave_lprior, kld,
+                              sampled_penalty, avemigll, clipped,
+                              n_nuisance_params, log_all);
     
     /* check total elb every nbatches_conv to decide whether to stop */
     running_tot += elb;
     if (t % nbatches_conv == 0) {
-      if (logf != NULL)
-        fprintf(logf, "# Average ELBO for last %d: %f\n", nbatches_conv, running_tot/nbatches_conv);
+      log_running_elbo(logf, nbatches_conv, running_tot);
       if ((sd->full_grad_now || data->crispr_mod != NULL) && t >= min_nbatches &&
           1.001*running_tot <= last_running_tot*0.999)
         /* sometimes get stuck increasingly asymptotically; stop if increase not more than about 0.1% */
@@ -791,29 +863,9 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     }
   }
 
-  if (logf != NULL) {
-    fprintf(logf,
-            "# Reverting to parameters from iteration %d; ELB: %.2f, LNL: "
-            "%.2f, LPRIOR: %.2f, KLD: %.2f, penalty: %.2f",
-            bestt + 1, bestelb, bestll, best_lprior, bestkld, bestpenalty);
-    if (data->taylor != NULL)
-      /* final unbiased MC estimate of E_q[lnL] at best parameters */
-      fprintf(logf, ", LNL_mc: %.2f", final_mc_ll);
-    else if (bestll_at_mean != 0)
-      /* for MC mode: lnL at the mean embedding (no separate MC pass needed) */
-      fprintf(logf, ", LNL_mu: %.2f", bestll_at_mean);
-    if (data->migtable != NULL)
-      fprintf(logf, ", MIGLL: %.2f", bestmigll);
-    if (ncomponents > 1) {
-      fprintf(logf, ", mixweights:");
-      for (j = 0; j < ncomponents; j++)
-        fprintf(logf, " %.4f", vec_get(mixmvn->weights, j));
-    }
-    for (j = 0; j < n_nuisance_params; j++) /* print these also if available */
-      fprintf(logf, ", %s: %.4f", get_nuisance_param_name(mod, data, j),
-        nuis_param_get(mod, data, j));
-    fprintf(logf, "\n");
-  }
+  log_final(mod, mixmvn, data, logf, bestt, bestelb, bestll,
+                        best_lprior, bestkld, bestpenalty, bestll_at_mean,
+                        final_mc_ll, bestmigll, n_nuisance_params);
 
   if (!silent) fprintf(stderr, "Converged in %d iterations; ELBO=%.2f...\n", t, bestelb);
 
