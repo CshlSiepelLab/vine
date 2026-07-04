@@ -724,11 +724,9 @@ int main(int argc, char *argv[]) {
             cpr_check_dedup_tables(crispr_mod->mut, migtable, "after cpr_expand_tables_for_dups (VI path)");
           }
 
-          if (graphsfile != NULL || nexusfile != NULL || consensusfile != NULL) {
-            cpr_add_dup_leaves_and_reset_mapping(t, crispr_mod);
-          }
-          else
-            cpr_add_dup_leaves(t, crispr_mod->mut);
+          cpr_add_dup_leaves(t, crispr_mod->mut);
+          if (graphsfile != NULL || nexusfile != NULL || consensusfile != NULL)
+            cpr_reset_node_mapping(t, crispr_mod);
         }
 
         tr_print(stdout, t, TRUE);
@@ -768,11 +766,9 @@ int main(int argc, char *argv[]) {
         TreeNode *t = mean_tree(mu_full, names, covar_data);
 
         if (had_dups == TRUE) {
-          if (migtable != NULL) {
-            cpr_add_dup_leaves_and_reset_mapping(t, crispr_mod);
-          }
-          else
-            cpr_add_dup_leaves(t, crispr_mod->mut);
+          cpr_add_dup_leaves(t, crispr_mod->mut);
+          if (migtable != NULL)
+            cpr_reset_node_mapping(t, crispr_mod);
         }
 
         if (migtable != NULL) {

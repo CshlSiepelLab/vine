@@ -1699,12 +1699,8 @@ void cpr_add_dup_leaves(TreeNode *tree, CrisprMutTable *M) {
   tr_reset_nnodes(tree);
 }
 
-/* Add duplicate leaves and refresh the model's leaf-id mapping for
-   this expanded tree. */
-void cpr_add_dup_leaves_and_reset_mapping(TreeNode *tree,
-                                          CrisprMutModel *cprmod) {
-  cpr_add_dup_leaves(tree, cprmod->mut);
-
+/* Refresh the model's leaf-id mapping for tree. */
+void cpr_reset_node_mapping(TreeNode *tree, CrisprMutModel *cprmod) {
   if (cprmod->mod->msa_seq_idx != NULL) {
     sfree(cprmod->mod->msa_seq_idx);
     cprmod->mod->msa_seq_idx = NULL;
