@@ -11,6 +11,7 @@
 #include <assert.h>
 #include <math.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <phast/misc.h>
 #include <covariance.h>
 #include <mixture_mvn.h>
@@ -143,4 +144,19 @@ double mixmvn_log_dens(mixture_MVN *mix, Vector *x) {
 
   /* log-sum-exp */
   return max_ldens + log(sum_exp);
+}
+
+void mixmvn_print_embedding(mixture_MVN *mix, char **names, int n, int d,
+                            FILE *F) {
+  int k;
+  char prefix[32];
+
+  for (k = 0; k < mix->ncomponents; k++) {
+    if (mix->ncomponents > 1) {
+      snprintf(prefix, sizeof(prefix), "%d", k);
+      mmvn_print_embedding(mix->components[k], names, n, d, prefix, F);
+    }
+    else
+      mmvn_print_embedding(mix->components[k], names, n, d, NULL, F);
+  }
 }

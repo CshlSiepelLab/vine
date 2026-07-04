@@ -37,4 +37,7 @@ int mixmvn_sample_component(mixture_MVN *mix);
 
 double mixmvn_log_dens(mixture_MVN *mix, Vector *x);
 
+void mixmvn_print_embedding(mixture_MVN *mix, char **names, int n, int d,
+                            FILE *F);
+
 #endif

@@ -68,7 +68,8 @@ void mmvn_save_mu(multi_MVN *mmvn, Vector *mu_saved);
 void mmvn_print(multi_MVN *mmvn, FILE *F, unsigned int in_line,
                         unsigned int do_covariance);
 
-void mmvn_print_table(multi_MVN *mmvn, int n, int d, FILE *F);
+void mmvn_print_embedding(multi_MVN *mmvn, char **names, int n, int d,
+                          const char *prefix, FILE *F);
 
 double mmvn_get_mu_el(multi_MVN *mmvn, int i);
 

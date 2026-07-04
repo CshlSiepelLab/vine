@@ -69,27 +69,6 @@ static inline void write_log_header(FILE *LOGF, int argc, char *argv[]) {
   fprintf(LOGF, "\n#\n");
 }
 
-static void print_embedding(mixture_MVN *mixmvn, char **names, int n,
-                            int d, FILE *F) {
-  int k, i, j;
-  Vector *mu_full = vec_new(n * d);
-
-  for (k = 0; k < mixmvn->ncomponents; k++) {
-    mmvn_save_mu(mixmvn->components[k], mu_full);
-    for (i = 0; i < n; i++) {
-      if (mixmvn->ncomponents > 1)
-        fprintf(F, "%d\t%s", k, names[i]);
-      else
-        fprintf(F, "%s", names[i]);
-      for (j = 0; j < d; j++)
-        fprintf(F, "\t%f", vec_get(mu_full, i*d + j));
-      fprintf(F, "\n");
-    }
-  }
-
-  vec_free(mu_full);
-}
-
 int main(int argc, char *argv[]) {
   signed char c;
   int opt_idx, i, ntips = 0, nsamples = DEFAULT_NSAMPLES, dim = -1,
@@ -803,8 +782,8 @@ int main(int argc, char *argv[]) {
 
   if (embeddingfile != NULL) {
     if (!silent) fprintf(stderr, "Dumping embedding...\n");
-    print_embedding(mixmvn, names, covar_data->nseqs, covar_data->dim,
-                    embeddingfile);
+    mixmvn_print_embedding(mixmvn, names, covar_data->nseqs, covar_data->dim,
+                           embeddingfile);
   }
   
   /* free everything */

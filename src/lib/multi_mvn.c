@@ -316,21 +316,26 @@ void mmvn_print(multi_MVN *mmvn, FILE *F, unsigned int in_line,
   vec_free(mu_full);
 }
 
-/* print the mean parameters in a table format, with one row per point and
-   one column per dimension.  n and d give the true number of taxa and
-   embedding dimensionality (mmvn->n and mmvn->d cannot be used directly
-   because they differ by MVN type). */
-void mmvn_print_table(multi_MVN *mmvn, int n, int d, FILE *F) {
+/* Print named embedding coordinates, optionally prefixed by a component id.
+   n and d give the true number of taxa and embedding dimensionality
+   (mmvn->n and mmvn->d cannot be used directly because they differ by MVN
+   type). */
+void mmvn_print_embedding(multi_MVN *mmvn, char **names, int n, int d,
+                          const char *prefix, FILE *F) {
   int i, j;
   Vector *mu_full = vec_new(n * d);
+
   mmvn_save_mu(mmvn, mu_full);
   for (i = 0; i < n; i++) {
-    for (j = 0; j < d; j++) {
-      if (j > 0) fprintf(F, "\t");
-      fprintf(F, "%f", vec_get(mu_full, i*d + j));
-    }
+    if (prefix != NULL && prefix[0] != '\0')
+      fprintf(F, "%s\t%s", prefix, names[i]);
+    else
+      fprintf(F, "%s", names[i]);
+    for (j = 0; j < d; j++)
+      fprintf(F, "\t%f", vec_get(mu_full, i*d + j));
     fprintf(F, "\n");
   }
+
   vec_free(mu_full);
 }
 
