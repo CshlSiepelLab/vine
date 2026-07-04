@@ -299,10 +299,12 @@ void mmvn_save_mu(multi_MVN *mmvn, Vector *mu_saved) {
 }
 
 void mmvn_print(multi_MVN *mmvn, FILE *F, unsigned int in_line,
-                unsigned int verbose) {
+                unsigned int verbose, const char *prefix) {
   int j;
   Vector *mu_full = vec_new(mmvn->d * mmvn->n);
   mmvn_save_mu(mmvn, mu_full);
+  if (prefix != NULL && prefix[0] != '\0')
+    fprintf(F, "%s\t", prefix);
   if (!in_line)
     fprintf(F, "mu: ");
   for (j = 0; j < mu_full->size; j++)

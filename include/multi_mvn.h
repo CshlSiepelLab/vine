@@ -66,7 +66,7 @@ double mmvn_mu2(multi_MVN *mmvn);
 void mmvn_save_mu(multi_MVN *mmvn, Vector *mu_saved);
 
 void mmvn_print(multi_MVN *mmvn, FILE *F, unsigned int in_line,
-                        unsigned int do_covariance);
+                unsigned int do_covariance, const char *prefix);
 
 void mmvn_print_embedding(multi_MVN *mmvn, char **names, int n, int d,
                           const char *prefix, FILE *F);

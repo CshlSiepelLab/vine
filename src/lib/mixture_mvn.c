@@ -146,6 +146,21 @@ double mixmvn_log_dens(mixture_MVN *mix, Vector *x) {
   return max_ldens + log(sum_exp);
 }
 
+void mixmvn_print(mixture_MVN *mix, FILE *F, unsigned int in_line,
+                  unsigned int verbose) {
+  int k;
+  char prefix[32];
+
+  for (k = 0; k < mix->ncomponents; k++) {
+    if (mix->ncomponents > 1) {
+      snprintf(prefix, sizeof(prefix), "%d", k);
+      mmvn_print(mix->components[k], F, in_line, verbose, prefix);
+    }
+    else
+      mmvn_print(mix->components[k], F, in_line, verbose, NULL);
+  }
+}
+
 void mixmvn_print_embedding(mixture_MVN *mix, char **names, int n, int d,
                             FILE *F) {
   int k;

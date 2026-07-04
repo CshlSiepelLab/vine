@@ -116,7 +116,7 @@ int main(int argc, char *argv[]) {
   mvn_print(mvn, stdout);
 
   printf("MMVN:\n");
-  mmvn_print(mmvn, stdout, FALSE, TRUE);
+  mmvn_print(mmvn, stdout, FALSE, TRUE, NULL);
 
 
   for (i = 0; i < mmvn->n * mmvn->d; i++) 
