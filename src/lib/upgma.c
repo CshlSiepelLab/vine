@@ -72,8 +72,7 @@ void upgma_updateD(Matrix *D, int u, int v, int w, Vector *active, Vector *sizes
     mat_set(D, v, w, 0);
 }
 
-/* version of nj_infer_tree simplified to use the UPGMA algorithm and
-   return an ultrametric tree. If dt_dD is non-NULL,
+/* Infer an ultrametric tree with the UPGMA algorithm. If dt_dD is non-NULL,
    will be populated with Jacobian for 2n-3 branch lengths
    vs. n-choose-2 pairwise distances  */
 TreeNode* upgma_infer_tree(Matrix *initD, char **names, Matrix *dt_dD) {

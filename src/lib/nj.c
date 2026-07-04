@@ -22,58 +22,6 @@
 #include <backprop.h>
 #include <upgma.h>
 
-/* Reset Q matrix based on distance matrix.  Assume upper triangular
-   square Q and D.  Only touches active rows and columns of Q and D up
-   to maxidx. As a side-effect set u and v to the indices of the
-   closest neighbors.  Also update sums to sum of distances from each
-   node */
-void nj_resetQ(Matrix *Q, Matrix *D, Vector *active, Vector *sums, int *u,
-               int *v, int maxidx) {
-  int i, j, n = 0;
-  double min = INFINITY;
-  
-  if ((D->nrows != D->ncols) || (D->nrows != Q->nrows) ||
-      (D->nrows != Q->ncols))
-    die("ERROR nj_setQ: dimension mismatch\n");
-
-  *u = *v = 0;
-  
-  /* update row sums */
-  vec_zero(sums);
-  for (i = 0; i < maxidx; i++) {
-    if (vec_get(active, i) == TRUE) {
-      n++;
-      for (j = i+1; j < maxidx; j++) {
-        if (vec_get(active, j) == TRUE) {
-          sums->data[i] += mat_get(D, i, j);
-          sums->data[j] += mat_get(D, i, j);
-        }
-      }
-    }
-  }
-  
-  /* now reset Q */
-  for (i = 0; i < maxidx; i++) {
-    if (vec_get(active, i) == TRUE) {
-      for (j = i+1; j < maxidx; j++) {
-        if (vec_get(active, j) == TRUE) {
-          double qij = (n-2) * mat_get(D, i, j) - vec_get(sums, i) -
-            vec_get(sums, j);
-          mat_set(Q, i, j, qij);
-          if (qij < min) {
-            min = qij;
-            *u = i;
-            *v = j;
-          }
-        }
-      }
-    }
-  }
-
-  if (min == INFINITY)
-    die("ERROR in nj_resetQ: fewer than two active taxa\n");
-}
-
 /* Update distance matrix after operation that joins neighbors u and v
    and adds new node w.  Update active list accordingly. Assumes u < v
    < w.  Also assumes all nodes > w are inactive. Assumes sums are
@@ -155,165 +103,11 @@ static void nj_find_min_q(Matrix *D, Vector *active, Vector *sums,
     die("ERROR nj_find_min_q: fewer than two active taxa\n");
 }
 
-
-/* Main function to infer the tree from a starting distance matrix.
-   Does not alter the provided distance matrix.  If dt_dD is non-NULL,
-   will be populated with Jacobian for 2n-3 branch lengths
-   vs. n-choose-2 pairwise distances */
+/* Infer an NJ tree from a starting distance matrix.  Does not alter
+   the provided distance matrix. If dt_dD is non-NULL, will be
+   populated with Jacobian for 2n-3 branch lengths vs. n-choose-2
+   pairwise distances. */
 TreeNode* nj_infer_tree(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *nb) {
-    int n = initD->nrows;
-    int N = 2*n - 2;   /* number of nodes in unrooted tree */
-    int i, j, u = -1, v = -1, w;
-    Matrix *D, *Q;
-    int step_idx = 0; 
-    Vector *sums, *active;
-    List *nodes;  /* could just be an array */
-    TreeNode *node_u, *node_v, *node_w, *root;
-    int npairs = n * (n-1) / 2, Npairs = N * (N-1) / 2;
-    double *Jk = NULL, *Jnext = NULL;
-    
-    if (initD->nrows != initD->ncols || n < 3)
-      die("ERROR nj_infer_tree: bad distance matrix\n");
-
-    if (dt_dD != NULL && (dt_dD->nrows != N || dt_dD->ncols != npairs))
-      die("ERROR nj_infer_tree: bad dimension in dt_dD\n");
-    
-    /* create a larger distance matrix of dimension N x N to
-       accommodate internal nodes; also set up list of active nodes
-       and starting tree nodes */
-    D = mat_new(N, N); mat_zero(D);
-    active = vec_new(N); vec_set_all(active, FALSE);
-    sums = vec_new(N); vec_zero(sums);
-    nodes = lst_new_ptr(N);
-    tr_reset_id();
-    
-    for (i = 0; i < n; i++) {
-      node_u = tr_new_node();
-      /* bound by sizeof(node_u->name) to avoid stack overflow on
-         long taxon names */
-      snprintf(node_u->name, sizeof(node_u->name), "%s", names[i]);
-      lst_push_ptr(nodes, node_u);
-      vec_set(active, i, TRUE);
-      for (j = i+1; j < n; j++)
-        mat_set(D, i, j, mat_get(initD, i, j));
-    }
-   
-    /* set up Q */
-    Q = mat_new(N, N); mat_zero(Q);
-
-    /* set up backprop data */
-    if (dt_dD != NULL) {
-      /* Npairs * npairs can overflow int for large n
-         (Npairs ~ 2n^2; npairs ~ n^2/2 -> ~ n^4 entries).  Compute
-         the byte count in size_t to avoid silent wraparound to a
-         negative malloc size. */
-      size_t jbytes = (size_t)Npairs * (size_t)npairs * sizeof(double);
-      Jk = malloc(jbytes);
-      Jnext = malloc(jbytes);
-      nj_backprop_init(Jk, n);
-      mat_zero(dt_dD);
-    }
-    
-    /* main loop, over internal nodes w */
-    for (w = n; w < N; w++) {   
-      nj_resetQ(Q, D, active, sums, &u, &v, w);
-      
-      nj_updateD(D, u, v, w, active, sums);                    
-      node_w = tr_new_node();
-      lst_push_ptr(nodes, node_w);
-
-      /* attach child nodes to parent and set branch lengths */
-      node_u = lst_get_ptr(nodes, u);
-      node_v = lst_get_ptr(nodes, v);
-      tr_add_child(node_w, node_u);
-      tr_add_child(node_w, node_v);
-      node_u->dparent = mat_get(D, u, w);
-      node_v->dparent = mat_get(D, v, w);
-
-      if (nb != NULL) { /* record neighbor-joining event */
-        nj_record_join(nb, step_idx, u, v, w, active, sums,
-                       D, node_u->id, node_v->id);
-        step_idx++;
-      }
-      
-      if (dt_dD != NULL) {
-        nj_backprop_set_dt_dD(Jk, dt_dD, n, u, v, node_u->id, node_v->id, active);
-        nj_backprop(Jk, Jnext, n, u, v, w, active);
-      }
-
-      /* this has to be done after the backprop calls */
-      vec_set(active, u, FALSE);
-      vec_set(active, v, FALSE);
-      vec_set(active, w, TRUE);
-
-      if (dt_dD != NULL) {
-        free(Jk);
-        Jk = Jnext;
-        Jnext = malloc((size_t)Npairs * (size_t)npairs * sizeof(double));
-      }
-    }
-
-    /* there should be exactly two active nodes left. Join them under
-       a root. */
-    node_u = NULL; node_v = NULL;
-    root = tr_new_node();
-    for (i = 0; i < N; i++) {
-      if (vec_get(active, i) == TRUE) {
-        if (node_u == NULL) {
-          u = i;
-          node_u = lst_get_ptr(nodes, i);
-        }
-        else if (node_v == NULL) {
-          v = i;
-          node_v = lst_get_ptr(nodes, i);
-        }
-        else
-          die("ERROR nj_infer_tree: more than two nodes left at root\n");
-      }
-    }
-    tr_add_child(root, node_u);
-    tr_add_child(root, node_v);
-    node_u->dparent = mat_get(D, u, v) / 2;
-    node_v->dparent = mat_get(D, u, v) / 2;
-
-    if (nb != NULL) { /* record the final join under the root */
-      nb->nsteps = step_idx; /* number of recorded merges */
-      nb->root_u = u;
-      nb->root_v = v;
-      nb->branch_idx_root_u = node_u->id;
-      nb->branch_idx_root_v = node_v->id;
-    }
-    
-    if (dt_dD != NULL) 
-      nj_backprop_set_dt_dD(Jk, dt_dD, n, u, v, node_u->id, node_v->id, active);
-    
-    /* finish set up of tree */
-    root->nnodes = N+1;
-    tr_reset_nnodes(root);
-
-    assert(root->id == root->nnodes - 1); /* important for indexing */
-    
-    lst_free(nodes);
-    vec_free(active);
-    vec_free(sums);
-    mat_free(D);
-    mat_free(Q);
-
-    if (dt_dD != NULL) {
-      free(Jk);
-      free(Jnext);
-    }
-    
-    return root;
-}
-
-/* Faster version of function to infer the tree from a starting
-   distance matrix. Scans active Q values directly instead of using the
-   lazy heap, avoiding heap churn in larger DNA runs.
-   Does not alter the provided distance matrix. If dt_dD is non-NULL,
-   will be populated with Jacobian for 2n-3 branch lengths
-   vs. n-choose-2 pairwise distances */
-TreeNode* nj_fast_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *nb) {
   int n = initD->nrows, orign = n;
   int N = 2*n - 2;   /* number of nodes in unrooted tree */
   int i, j, u = -1, v = -1, w;
@@ -326,10 +120,10 @@ TreeNode* nj_fast_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *n
   static SparseMatrix *Jk = NULL, *Jnext = NULL;
     
   if (initD->nrows != initD->ncols || n < 3)
-    die("ERROR nj_fast_infer: bad distance matrix\n");
+    die("ERROR nj_infer_tree: bad distance matrix\n");
 
   if (dt_dD != NULL && (dt_dD->nrows != N || dt_dD->ncols != npairs))
-    die("ERROR nj_fast_infer: bad dimension in dt_dD\n");
+    die("ERROR nj_infer_tree: bad dimension in dt_dD\n");
     
   /* create a larger distance matrix of dimension N x N to
      accommodate internal nodes; also set up list of active nodes
@@ -441,7 +235,7 @@ TreeNode* nj_fast_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *n
         node_v = lst_get_ptr(nodes, i);
       }
       else
-        die("ERROR nj_fast_infer: more than two nodes left at root\n");
+        die("ERROR nj_infer_tree: more than two nodes left at root\n");
     }
   }
   tr_add_child(root, node_u);
@@ -607,9 +401,9 @@ double distance_on_tree(TreeNode *root, TreeNode *n1, TreeNode *n2) {
   
 }
 
-/* wrapper for various distance-based tree inference algorithms */
-TreeNode *nj_inf(Matrix *D, char **names, Matrix *dt_dD, Neighbors *nb,
-                 CovarData *data) {
+/* Wrapper for various distance-based tree inference algorithms. */
+TreeNode *infer_distance_tree(Matrix *D, char **names, Matrix *dt_dD, Neighbors *nb,
+                              CovarData *data) {
   if (data->ultrametric) {
     TreeNode *t = upgma_fast_infer(D, names, dt_dD);
 
@@ -618,7 +412,7 @@ TreeNode *nj_inf(Matrix *D, char **names, Matrix *dt_dD, Neighbors *nb,
     return t;
   }
   else {
-    TreeNode *tree = nj_fast_infer(D, names, dt_dD, nb);
+    TreeNode *tree = nj_infer_tree(D, names, dt_dD, nb);
     if (data->treeprior != NULL && data->treeprior->relclock == TRUE) { /* need to reroot in this case */
       if (data->seq_to_node_map == NULL) /* only need to do this once */
         update_seq_to_node_map(tree, names, data);
@@ -726,7 +520,7 @@ void nj_copy_neighbors(Neighbors *dest, Neighbors *src) {
    step_idx:       which step (0 .. nb->nsteps-1) this is
    u, v, w:        indices of merged clusters (u,v -> w)
    active:         current active vector BEFORE deactivating u,v and activating w
-   sums:           row sums as computed by nj_resetQ for this step
+   sums:           row sums for this step
    D:              current distance matrix (upper triangular, N x N)
    branch_idx_u/v: which row in dL_dt corresponds to branches u->w, v->w
  */

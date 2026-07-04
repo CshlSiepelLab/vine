@@ -114,7 +114,7 @@ List *var_sample_mcmc(int nsamples, int thin, mixture_MVN *mixmvn,
 
     /* convert to tree */
     points_to_distances(y, data);
-    tree = nj_inf(data->dist, data->names, NULL, NULL, data);
+    tree = infer_distance_tree(data->dist, data->names, NULL, NULL, data);
     mod->tree = NULL; /* prevent reset_tree_model from freeing the tree */
     reset_tree_model(mod, tree);
 
@@ -194,7 +194,7 @@ List *var_sample_mcmc(int nsamples, int thin, mixture_MVN *mixmvn,
         }
         apply_normalizing_flows(y, x, data, last_component, &nf_logdet);
         points_to_distances(y, data);
-        tree = nj_inf(data->dist, data->names, NULL, NULL, data);
+        tree = infer_distance_tree(data->dist, data->names, NULL, NULL, data);
         mod->tree = NULL;
       }
       

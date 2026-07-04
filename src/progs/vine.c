@@ -581,7 +581,7 @@ int main(int argc, char *argv[]) {
   else {
     /* we'll need a starting tree for either variational inference
        or NJ-only */
-    tree = nj_inf(D, names, NULL, NULL, covar_data);
+    tree = infer_distance_tree(D, names, NULL, NULL, covar_data);
 
     if (nj_only == TRUE) { /* just print in this case */
       if (had_dups == TRUE) {

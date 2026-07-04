@@ -1383,7 +1383,7 @@ List *var_sample(int nsamples, mixture_MVN *mixmvn, CovarData *data, char** name
      
     apply_normalizing_flows(points_y, points_x, data, component, NULL);
     points_to_distances(points_y, data);
-    tree = nj_inf(data->dist, names, NULL, NULL, data);
+    tree = infer_distance_tree(data->dist, names, NULL, NULL, data);
     lst_push_ptr(retval, tree);
   }
   
@@ -1400,7 +1400,7 @@ TreeNode *mean_tree(Vector *mu, char **names, CovarData *data) {
     die("ERROR in mean_tree: bad dimensions\n");
 
   points_to_distances(mu, data);  
-  tree = nj_inf(data->dist, names, NULL, NULL, data);
+  tree = infer_distance_tree(data->dist, names, NULL, NULL, data);
   
   return(tree);
 }

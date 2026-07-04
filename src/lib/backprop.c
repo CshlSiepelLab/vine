@@ -10,11 +10,7 @@
 
 /* recursive backprop through NJ algorithm */
 
-#include <stdio.h>
 #include <stdlib.h>
-#include <ctype.h>
-#include <assert.h>
-#include <float.h>
 #include <nj.h>
 
 /* map the indices of two taxa, i, j to a unique index
@@ -36,47 +32,6 @@ void nj_dist_to_i_j(int pwidx, int *i, int *j, int n) {
     (*i)++;
   rowstart = (2*n - (*i) - 1) * (*i) / 2;
   *j = *i + 1 + (pwidx - rowstart);
-}
-
-/* function used inside NJ algorithm to enable backpropagation of
-   derivatives through the algorithm.  Jk is a matrix such that
-   element [ij][ab] represents the partial derivative of the distance
-   between i and j on iteration k to the distance between a and b at
-   the start of the algorithm. The next value, Jnext, is defined
-   recursively from Jk.  The last set of identified neighbors are
-   denoted f and g, and u denotes the new node created to replace f
-   and g. */
-void nj_backprop(double *Jk, double *Jnext, int n, int f, int g, int u,
-                 Vector *active) {
-  int i, a, b;
-  int total_nodes = 2*n - 2; /* total possible in final tree */
-  int npairs_large = (total_nodes * (total_nodes - 1)) / 2;
-  int npairs_small = (n * (n - 1)) / 2;
-  
-  /* most of Jk will be unchanged so start by copying the whole thing
-     efficiently */
-  memcpy(Jnext, Jk, npairs_large * npairs_small * sizeof(double));
-  
-  /* now update distances involving new node u */
-  for (i = 0; i < total_nodes; i++) {
-    if (vec_get(active, i) == FALSE || i == f || i == g || i == u) continue;  
-
-    int idx_ui = nj_i_j_to_dist(u, i, total_nodes);
-    int idx_fi = nj_i_j_to_dist(f, i, total_nodes);
-    int idx_gi = nj_i_j_to_dist(g, i, total_nodes);
-    int idx_fg = nj_i_j_to_dist(f, g, total_nodes);
-
-    for (a = 0; a < n; a++) {
-      for (b = a + 1; b < n; b++) {
-        int idx_ab = nj_i_j_to_dist(a, b, n);
-
-        /* recursive update rule for new distance from u to i */
-        Jnext[idx_ui*npairs_small+idx_ab] = 0.5 * (Jk[idx_fi*npairs_small+idx_ab] +
-                                                   Jk[idx_gi*npairs_small+idx_ab]
-                                                   - Jk[idx_fg*npairs_small+idx_ab]);
-      }
-    }
-  }
 }
 
 /* helper for nj_backprop_sparse; see below */
@@ -162,23 +117,6 @@ void nj_backprop_sparse(SparseMatrix *Jk, SparseMatrix *Jnext, int n, int f, int
   free(touched);
 }
 
-/* initialize Jk at the beginning of the NJ alg */
-void nj_backprop_init(double *Jk, int n) {
-  int i, j, total_nodes = 2*n - 2;
-  int npairs_large = (total_nodes * (total_nodes - 1)) / 2;
-  int npairs_small = (n * (n - 1)) / 2;
-
-  memset(Jk, 0, npairs_large * npairs_small * sizeof(double));
-  
-  for (i = 0; i < n; i++) {
-    for (j = i + 1; j < n; j++) {
-      int idx_ij_row = nj_i_j_to_dist(i, j, total_nodes);
-      int idx_ij_col = nj_i_j_to_dist(i, j, n);
-      Jk[idx_ij_row*npairs_small+idx_ij_col] = 1;  /* deriv of d_{ij} wrt itself */
-    }
-  }
-}
-
 /* version that uses sparse matrix */
 void nj_backprop_init_sparse(SparseMatrix *Jk, int n) {
   int i, j, total_nodes = 2*n - 2;
@@ -190,63 +128,6 @@ void nj_backprop_init_sparse(SparseMatrix *Jk, int n) {
       int idx_ij_row = nj_i_j_to_dist(i, j, total_nodes);
       int idx_ij_col = nj_i_j_to_dist(i, j, n);
       spmat_set_sorted(Jk, idx_ij_row, idx_ij_col, 1.0);  /* deriv of d_{ij} wrt itself */
-    }
-  }
-}
-
-/* for use in backpropation with NJ.  Sets appropriate elements of
-   Jacobian dt_dD after two neighbors f and g are joined */
-void nj_backprop_set_dt_dD(double *Jk, Matrix *dt_dD, int n, int f, int g,
-                           int branch_idx_f, int branch_idx_g, Vector *active) {
-  int a, b, m;
-  int total_nodes = 2*n - 2;
-  int idx_fg = nj_i_j_to_dist(f, g, total_nodes);
-  int npairs_small = (n * (n - 1)) / 2;
-  int nk = vec_sum(active);
-
-  /* the final call, with nk = 2, is a special case */
-  if (nk == 2) {
-    /* directly set the final branch derivative */
-    for (a = 0; a < n; a++) {
-      for (b = a + 1; b < n; b++) {
-        int idx_ab = nj_i_j_to_dist(a, b, n);
-        
-        /* branch derivative is equal to the value in Jk times 1/2
-           because of the way we split the last branch in the unrooted
-           tree */
-        mat_set(dt_dD, branch_idx_f, idx_ab, 0.5 * Jk[idx_fg*npairs_small+idx_ab]);
-      }
-    }
-    return;
-  }
-    
-  /* branch derivative for f -> u */
-  for (a = 0; a < n; a++) {
-    for (b = a + 1; b < n; b++) {
-      int idx_ab = nj_i_j_to_dist(a, b, n);
-      double sum_diff = 0;
-
-      for (m = 0; m < total_nodes; m++) {
-        if (vec_get(active, m) == FALSE || m == f || m == g)
-          continue;
-
-        int idx_fm = nj_i_j_to_dist(f, m, total_nodes);
-        int idx_gm = nj_i_j_to_dist(g, m, total_nodes);
-        sum_diff += Jk[idx_fm*npairs_small+idx_ab] - Jk[idx_gm*npairs_small+idx_ab];
-      }
-
-      mat_set(dt_dD, branch_idx_f, idx_ab, 0.5 * Jk[idx_fg*npairs_small+idx_ab] +
-              (0.5 / (nk - 2)) * sum_diff);
-      assert(isfinite(mat_get(dt_dD, branch_idx_f, idx_ab)));
-    }
-  }
-
-  /* branch derivative for g -> u */
-  for (a = 0; a < n; a++) {
-    for (b = a + 1; b < n; b++) {
-      int idx_ab = nj_i_j_to_dist(a, b, n);
-      mat_set(dt_dD, branch_idx_g, idx_ab, Jk[idx_fg*npairs_small+idx_ab] -
-        mat_get(dt_dD, branch_idx_f, idx_ab));
     }
   }
 }
@@ -344,4 +225,3 @@ void nj_backprop_set_dt_dD_sparse(SparseMatrix *Jk, Matrix *dt_dD, int n, int f,
   
   free(sum_diff);
 }
-

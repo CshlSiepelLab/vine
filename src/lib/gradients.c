@@ -38,7 +38,7 @@ static double check_flow_pipeline_L(Vector *x_local, TreeModel *mod,
   double logdet = 0;
   apply_normalizing_flows(y, x_local, data, component, &logdet);
   points_to_distances(y, data);
-  TreeNode *tree = nj_inf(data->dist, data->names, NULL, NULL, data);
+  TreeNode *tree = infer_distance_tree(data->dist, data->names, NULL, NULL, data);
   reset_tree_model(mod, tree);
   double ll;
   if (data->crispr_mod != NULL)
@@ -187,7 +187,7 @@ double compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn,
   
   /* set up tree model and get baseline log likelihood */
   points_to_distances(points, data);    
-  tree = nj_inf(D, data->names, NULL, NULL, data);
+  tree = infer_distance_tree(D, data->names, NULL, NULL, data);
   orig_tree = tr_create_copy(tree);   /* restore at the end */
   reset_tree_model(mod, tree);
   ll_base = compute_log_likelihood(mod, data, NULL);
@@ -206,7 +206,7 @@ double compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn,
     vec_set(points, i, porig + DERIV_EPS);
 
     points_to_distances(points, data); 
-    tree = nj_inf(D, data->names, NULL, NULL, data);
+    tree = infer_distance_tree(D, data->names, NULL, NULL, data);
     reset_tree_model(mod, tree);      
     ll = compute_log_likelihood(mod, data, NULL);
 
@@ -410,7 +410,7 @@ double dL_dx_dumb(Vector *x, Vector *dL_dx, TreeModel *mod,
          
   /* set up tree model and get baseline log likelihood */
   points_to_distances(x, data);    
-  tree = nj_inf(data->dist, data->msa->names, NULL, NULL, data);
+  tree = infer_distance_tree(data->dist, data->msa->names, NULL, NULL, data);
   orig_tree = tr_create_copy(tree);   /* restore at the end */
   reset_tree_model(mod, tree);
   ll_base = compute_log_likelihood(mod, data, NULL);
@@ -426,7 +426,7 @@ double dL_dx_dumb(Vector *x, Vector *dL_dx, TreeModel *mod,
       vec_set(x, idx, xorig + DERIV_EPS);
 
       points_to_distances(x, data); 
-      tree = nj_inf(data->dist, data->msa->names, NULL, NULL, data);
+      tree = infer_distance_tree(data->dist, data->msa->names, NULL, NULL, data);
       reset_tree_model(mod, tree);      
       ll = compute_log_likelihood(mod, data, NULL);
       
@@ -497,7 +497,7 @@ void dt_dD_num(Matrix *dt_dD, Matrix *D, TreeModel *mod, CovarData *data) {
     for (j = i+1; j < n; j++) {
       double orig_d = mat_get(D, i, j);
       mat_set(D, i, j, orig_d + DERIV_EPS);
-      tree = nj_inf(D, data->names, NULL, NULL, data);
+      tree = infer_distance_tree(D, data->names, NULL, NULL, data);
 
       /* compare the trees, branch by branch */
       /* we will assume the same topology although that will
@@ -556,7 +556,7 @@ double dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   
    /* set up baseline objects */
   points_to_distances(y, data);
-  tree = nj_inf(data->dist, data->names, NULL, nb, data);
+  tree = infer_distance_tree(data->dist, data->names, NULL, nb, data);
   reset_tree_model(mod, tree);
 
   /* M2 latent relaxed clock: rescale dparent to bl_eff = rate*tau before the
