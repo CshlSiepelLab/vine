@@ -165,8 +165,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
      variational distribution */
   int n_nuisance_params = get_num_nuisance_params(mod, data);
   Vector *ave_nuis_grad = NULL, *m_nuis = NULL, *v_nuis = NULL,
-    *m_nuis_prev = NULL, *v_nuis_prev = NULL, *best_nuis_params = NULL,
-    *center = NULL;
+    *m_nuis_prev = NULL, *v_nuis_prev = NULL, *best_nuis_params = NULL;
   int *nuis_t = NULL;
   if (mixmvn->components[0]->d * mixmvn->components[0]->n != dim * n)
     die("ERROR in variational_inf: bad dimensions\n");
@@ -210,8 +209,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     for (j = 0; j < n_nuisance_params; j++)
       nuis_t[j] = 0;
   }
-  
-  center = vec_new(dim);
 
   /* initialize component-specific moments and iteration counts*/
   for (k = 0; k < ncomponents; k++) {
@@ -360,6 +357,11 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
         if (data->type == LOWR) 
           set_entropy_sigma_grad_LOWR(sigma_kldgrad[0], mixmvn->components[0]);
       }
+
+      vec_scale(sigma_kldgrad[0],
+                data->kld_upweight/(data->pointscale*data->pointscale));
+      vec_scale(mu_kldgrad[0],
+                data->kld_upweight/(data->pointscale*data->pointscale));
     }
 
     /* The variance penalty follows the same sampled-component objective as
@@ -373,13 +375,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       penalty += vec_get(mixmvn->weights, k) * data->var_pen;
     }
     data->var_pen = penalty;
-
-    if (ncomponents == 1) {
-      vec_scale(sigma_kldgrad[0],
-                data->kld_upweight/(data->pointscale*data->pointscale));
-      vec_scale(mu_kldgrad[0],
-                data->kld_upweight/(data->pointscale*data->pointscale));
-    }
 
 
     /* now estimate ELBO and gradient, either by Monte Carlo integration or by
@@ -862,7 +857,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   sfree(tmp_sigma_kldgrad);
   sfree(sigma_t);
   sfree(s); sfree(st); sfree(sd); sfree(sm);
-  vec_free(center);
   
   if (n_nuisance_params > 0) {
     vec_free(ave_nuis_grad); vec_free(m_nuis); vec_free(v_nuis);
