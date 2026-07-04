@@ -652,14 +652,15 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
        gradients because log q_mix depends on every component density. */
     for (k = 0; k < ncomponents; k++) {
       for (j = 0; j < fulld; j++) {
-        double mhatj, vhatj, g = vec_get(model_natgrad_components[k], j);
+        double m = vec_get(m_mu[k], j), v = vec_get(v_mu[k], j);
+        double g = vec_get(model_natgrad_components[k], j);
         g += clip_scale * rescale_mean_grad_el(mu_kldgrad[k],
                                                   mixmvn->components[k], data, j);
-        vec_set(m_mu[k], j, ADAM_BETA1 * vec_get(m_mu[k], j) + (1.0 - ADAM_BETA1) * g);
-        vec_set(v_mu[k], j, ADAM_BETA2 * vec_get(v_mu[k], j) + (1.0 - ADAM_BETA2) * pow(g, 2));
-        mhatj = vec_get(m_mu[k], j) / (1.0 - pow(ADAM_BETA1, t));
-        vhatj = vec_get(v_mu[k], j) / (1.0 - pow(ADAM_BETA2, t));
-        mmvn_set_mu_el(mixmvn->components[k], j, mmvn_get_mu_el(mixmvn->components[k], j) + sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS));
+        mmvn_set_mu_el(mixmvn->components[k], j,
+                        adam_scalar_update(mmvn_get_mu_el(mixmvn->components[k], j),
+                                           &m, &v, t, g, sd->lr));
+        vec_set(m_mu[k], j, m);
+        vec_set(v_mu[k], j, v);
       }
     }
 
@@ -670,23 +671,15 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     for (k = 0; k < ncomponents; k++) {
       sigma_t[k]++;
       for (j = 0; j < data->covar_params[k]->size; j++) {
-        double mhatj, vhatj, g = vec_get(model_natgrad_components[k],
-                                         fulld + j) +
+        double m = vec_get(m_sigma[k], j), v = vec_get(v_sigma[k], j);
+        double g = vec_get(model_natgrad_components[k], fulld + j) +
           clip_scale * rescale_sigma_grad_el(sigma_kldgrad[k], mixmvn->components[k],
                                                 data, j, 0);
-        vec_set(m_sigma[k], j,
-                ADAM_BETA1 * vec_get(m_sigma[k], j) +
-                (1.0 - ADAM_BETA1) * g);
-        vec_set(v_sigma[k], j,
-                ADAM_BETA2 * vec_get(v_sigma[k], j) +
-                (1.0 - ADAM_BETA2) * pow(g, 2));
-        mhatj = vec_get(m_sigma[k], j) /
-          (1.0 - pow(ADAM_BETA1, sigma_t[k]));
-        vhatj = vec_get(v_sigma[k], j) /
-          (1.0 - pow(ADAM_BETA2, sigma_t[k]));
         vec_set(data->covar_params[k], j,
-                vec_get(data->covar_params[k], j) +
-                sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS));
+                adam_scalar_update(vec_get(data->covar_params[k], j),
+                                   &m, &v, sigma_t[k], g, sd->lr));
+        vec_set(m_sigma[k], j, m);
+        vec_set(v_sigma[k], j, v);
       }
     }
     mixmvn_update_covariance(mixmvn, data);
@@ -694,19 +687,13 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     if (ncomponents > 1) {
       weight_t++;
       for (j = 0; j < ncomponents; j++) {
-        double mhatj, vhatj, g = clip_scale * vec_get(weight_grad, j);
-        vec_set(m_weight, j,
-                ADAM_BETA1 * vec_get(m_weight, j) +
-                (1.0 - ADAM_BETA1) * g);
-        vec_set(v_weight, j,
-                ADAM_BETA2 * vec_get(v_weight, j) +
-                (1.0 - ADAM_BETA2) * pow(g, 2));
-        mhatj = vec_get(m_weight, j) /
-          (1.0 - pow(ADAM_BETA1, weight_t));
-        vhatj = vec_get(v_weight, j) /
-          (1.0 - pow(ADAM_BETA2, weight_t));
-        vec_set(mixmvn->logits, j, vec_get(mixmvn->logits, j) +
-                sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS));
+        double m = vec_get(m_weight, j), v = vec_get(v_weight, j);
+        double g = clip_scale * vec_get(weight_grad, j);
+        vec_set(mixmvn->logits, j,
+                adam_scalar_update(vec_get(mixmvn->logits, j),
+                                   &m, &v, weight_t, g, sd->lr));
+        vec_set(m_weight, j, m);
+        vec_set(v_weight, j, v);
       }
       mixmvn_update_weights(mixmvn);
     }
@@ -714,18 +701,21 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     /* same thing for nuisance params, if necessary */
     for (j = 0; j < n_nuisance_params; j++) {   
       int flow_component = nuis_flow_component(mod, data, j);
-      double mhatj_nuis, vhatj_nuis, g;
+      double g, m, v, old_val, new_val;
 
       if (ncomponents == 1 && flow_component >= 0 && flow_component != 0)
         continue;
 
       g = vec_get(ave_nuis_grad, j);
       nuis_t[j]++;
-      vec_set(m_nuis, j, ADAM_BETA1 * vec_get(m_nuis_prev, j) + (1.0 - ADAM_BETA1) * g);
-      vec_set(v_nuis, j, ADAM_BETA2 * vec_get(v_nuis_prev, j) + (1.0 - ADAM_BETA2) * pow(g,2));
-      mhatj_nuis = vec_get(m_nuis, j) / (1.0 - pow(ADAM_BETA1, nuis_t[j]));
-      vhatj_nuis = vec_get(v_nuis, j) / (1.0 - pow(ADAM_BETA2, nuis_t[j]));
-      nuis_param_pluseq(mod, data, j, sd->lr * 0.3 * mhatj_nuis / (sqrt(vhatj_nuis) + ADAM_EPS));
+      m = vec_get(m_nuis_prev, j);
+      v = vec_get(v_nuis_prev, j);
+      old_val = nuis_param_get(mod, data, j);
+      new_val = adam_scalar_update(old_val, &m, &v, nuis_t[j], g,
+                                   sd->lr * 0.3);
+      nuis_param_pluseq(mod, data, j, new_val - old_val);
+      vec_set(m_nuis, j, m);
+      vec_set(v_nuis, j, v);
       /* factor of 0.3 above to slow learning of nuisance params */
     }
     if (n_nuisance_params > 0) {

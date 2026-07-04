@@ -13,6 +13,17 @@
 #include <phast/misc.h>
 #include <adam_scheduler.h>
 
+double adam_scalar_update(double x, double *m, double *v, int t, double g,
+                          double lr) {
+  double mhat, vhat;
+
+  *m = ADAM_BETA1 * *m + (1.0 - ADAM_BETA1) * g;
+  *v = ADAM_BETA2 * *v + (1.0 - ADAM_BETA2) * pow(g, 2);
+  mhat = *m / (1.0 - pow(ADAM_BETA1, t));
+  vhat = *v / (1.0 - pow(ADAM_BETA2, t));
+  return x + lr * mhat / (sqrt(vhat) + ADAM_EPS);
+}
+
 /* set up a scheduler with appropriate defaults */
 Scheduler *sched_new(int N_sites, int init_subsample, int inc_every,
                      double target_lr, int persist_k, int fullgrad_every,
