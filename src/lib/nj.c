@@ -405,7 +405,7 @@ double distance_on_tree(TreeNode *root, TreeNode *n1, TreeNode *n2) {
 TreeNode *infer_distance_tree(Matrix *D, char **names, Matrix *dt_dD, Neighbors *nb,
                               CovarData *data) {
   if (data->ultrametric) {
-    TreeNode *t = upgma_fast_infer(D, names, dt_dD);
+    TreeNode *t = upgma_infer_tree(D, names, dt_dD);
 
     if (data->no_zero_br == TRUE)
       repair_zero_br(t);

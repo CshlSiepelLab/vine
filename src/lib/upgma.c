@@ -10,34 +10,12 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <ctype.h>
 #include <assert.h>
 #include <float.h>
 #include <phast/trees.h>
 #include <phast/misc.h>
 #include <upgma.h>
 #include <backprop.h>
-
-void upgma_find_min(Matrix *D, Vector *active, int *u, int *v) {
-  int i, j, n = D->nrows;
-  double min = INFINITY;
-
-  for (i = 0; i < n; i++) {
-    if (vec_get(active, i) == FALSE) continue;
-    for (j = i+1; j < n; j++) {
-      if (vec_get(active, j) == FALSE) continue;
-      double d = mat_get(D, i, j);
-      if (d < min) {
-        min = d;
-        *u = i;
-        *v = j;
-      }
-    }
-  }
-
-  if (min == INFINITY)
-    die("ERROR in upgma_find_min: fewer than two active taxa\n");
-}
 
 void upgma_updateD(Matrix *D, int u, int v, int w, Vector *active, Vector *sizes,
                    Vector *heights) {
@@ -70,105 +48,6 @@ void upgma_updateD(Matrix *D, int u, int v, int w, Vector *active, Vector *sizes
     mat_set(D, u, w, 0);
   if (signbit(mat_get(D, v, w)))
     mat_set(D, v, w, 0);
-}
-
-/* Infer an ultrametric tree with the UPGMA algorithm. If dt_dD is non-NULL,
-   will be populated with Jacobian for 2n-3 branch lengths
-   vs. n-choose-2 pairwise distances  */
-TreeNode* upgma_infer_tree(Matrix *initD, char **names, Matrix *dt_dD) {
-  int n = initD->nrows;
-  int N = 2*n - 2;
-  int i, j, u = -1, v = -1, w;
-  Matrix *D;
-  Vector *active, *sizes, *heights;
-  List *nodes;
-  TreeNode *node_u, *node_v, *node_w, *root;
-  double hw;
-
-  if (initD->nrows != initD->ncols || n < 2)
-    die("ERROR upgma_infer_tree: bad distance matrix\n");
-
-  D = mat_new(N, N); mat_zero(D);
-  active = vec_new(N); vec_set_all(active, FALSE);
-  sizes = vec_new(N); vec_zero(sizes);
-  heights = vec_new(N);
-  nodes = lst_new_ptr(N);
-  tr_reset_id();
-
-  for (i = 0; i < n; i++) {
-    node_u = tr_new_node();
-    snprintf(node_u->name, sizeof(node_u->name), "%s", names[i]);
-    lst_push_ptr(nodes, node_u);
-    vec_set(active, i, TRUE);
-    vec_set(sizes, i, 1.0);
-    for (j = i+1; j < n; j++)
-      mat_set(D, i, j, mat_get(initD, i, j));
-  }
-  
-  /* main loop, over internal nodes w */
-  for (w = n; w < N; w++) {
-    upgma_find_min(D, active, &u, &v);  // find closest pair
-    upgma_updateD(D, u, v, w, active, sizes, heights);
-
-    node_w = tr_new_node();
-    lst_push_ptr(nodes, node_w);
-    node_u = lst_get_ptr(nodes, u);
-    node_v = lst_get_ptr(nodes, v);
-    tr_add_child(node_w, node_u);
-    tr_add_child(node_w, node_v);
-    node_u->dparent = mat_get(D, u, w);
-    node_v->dparent = mat_get(D, v, w);
-
-    vec_set(active, u, FALSE);
-    vec_set(active, v, FALSE);
-    vec_set(active, w, TRUE);
-  }
-
-  /* there should be exactly two active nodes left. Join them under
-     a root. */
-  node_u = NULL; node_v = NULL;
-  root = tr_new_node();
-  for (i = 0; i < N; i++) {
-    if (vec_get(active, i) == TRUE) {
-      if (node_u == NULL) {
-        u = i;
-        node_u = lst_get_ptr(nodes, i);
-      }
-      else if (node_v == NULL) {
-        v = i;
-        node_v = lst_get_ptr(nodes, i);
-      }
-      else 
-        die("ERROR upgma_infer_tree: more than two nodes left at root\n");
-    }
-  }
-  tr_add_child(root, node_u);
-  tr_add_child(root, node_v);
-
-  hw = mat_get(D, u, v) / 2.0;
-  node_u->dparent = hw - vec_get(heights, u);
-  node_v->dparent = hw - vec_get(heights, v);
-  /* heights is sized N = 2n-2 (counts of joined nodes during the main
-     loop) and is only read for u, v < N; root->id == N here would
-     write one past the end.  No reader needs the root's height, so
-     simply skip the store. */
-
-  root->nnodes = N+1;
-  tr_reset_nnodes(root);
-
-  assert(root->id == root->nnodes - 1); /* important for indexing */
-
-  /* set jacobian; can be done in postprocessing */
-  if (dt_dD != NULL)
-    upgma_set_dt_dD(root, dt_dD);
-  
-  lst_free(nodes);
-  vec_free(active);
-  vec_free(sizes);
-  vec_free(heights);
-  mat_free(D);
-
-  return root;
 }
 
 void upgma_set_dt_dD(TreeNode *tree, Matrix* dt_dD) {
@@ -314,7 +193,7 @@ static void upgma_find_cached_min(Vector *active, int max_node,
   }
 }
 
-TreeNode* upgma_fast_infer(Matrix *initD, char **names, Matrix *dt_dD) {
+TreeNode* upgma_infer_tree(Matrix *initD, char **names, Matrix *dt_dD) {
   int n = initD->nrows;
   int N = 2*n - 2;
   int i, j, u = -1, v = -1, w;
@@ -327,7 +206,7 @@ TreeNode* upgma_fast_infer(Matrix *initD, char **names, Matrix *dt_dD) {
   double hw;
 
   if (initD->nrows != initD->ncols || n < 2)
-    die("ERROR upgma_fast_infer: bad distance matrix\n");
+    die("ERROR upgma_infer_tree: bad distance matrix\n");
 
   D = mat_new(N, N); mat_zero(D);
   active = vec_new(N); vec_set_all(active, FALSE);
@@ -339,7 +218,7 @@ TreeNode* upgma_fast_infer(Matrix *initD, char **names, Matrix *dt_dD) {
   vec_zero(heights);
   tr_reset_id();
 
-  /* Initialize leaf nodes and heap */
+  /* Initialize leaf nodes and nearest-neighbor cache. */
   for (i = 0; i < n; i++) {
     node_u = tr_new_node();
     snprintf(node_u->name, sizeof(node_u->name), "%s", names[i]);
@@ -407,7 +286,7 @@ TreeNode* upgma_fast_infer(Matrix *initD, char **names, Matrix *dt_dD) {
         node_v = lst_get_ptr(nodes, i);
       }
       else 
-        die("ERROR upgma_fast_infer: more than two nodes left at root\n");
+        die("ERROR upgma_infer_tree: more than two nodes left at root\n");
     }
   }
   tr_add_child(root, node_u);
