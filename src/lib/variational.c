@@ -35,6 +35,12 @@
    premature component collapse without forcing nearly uniform weights. */
 #define MIXTURE_WEIGHT_PRIOR_ALPHA 2.0
 
+static Vector *vec_new_zero(int size) {
+  Vector *v = vec_new(size);
+  vec_zero(v);
+  return v;
+}
+
 static double rescale_mean_grad_el(Vector *grad, multi_MVN *mmvn,
                                       CovarData *data, int i) {
   if (data->natural_grad != TRUE)
@@ -169,10 +175,10 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   model_grad = vec_new(graddim);
   model_grad_components = smalloc(ncomponents * sizeof(Vector*));
   model_natgrad_components = smalloc(ncomponents * sizeof(Vector*));
-  weight_grad = vec_new(ncomponents);
-  weight_kldgrad = vec_new(ncomponents);
-  m_weight = vec_new(ncomponents);
-  v_weight = vec_new(ncomponents);
+  weight_grad = vec_new_zero(ncomponents);
+  weight_kldgrad = vec_new_zero(ncomponents);
+  m_weight = vec_new_zero(ncomponents);
+  v_weight = vec_new_zero(ncomponents);
   best_logits = vec_new(ncomponents);
   component_penalty = vec_new(ncomponents);
   component_elbo = vec_new(ncomponents);
@@ -180,10 +186,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   tmp_weight_kldgrad = vec_new(ncomponents);
   tmp_mu_kldgrad = smalloc(ncomponents * sizeof(Vector*));
   tmp_sigma_kldgrad = smalloc(ncomponents * sizeof(Vector*));
-  vec_zero(weight_grad);
-  vec_zero(weight_kldgrad);
-  vec_zero(m_weight);
-  vec_zero(v_weight);
   vec_copy(best_logits, mixmvn->logits);
   sigma_t = smalloc(ncomponents * sizeof(int));
   m_mu = smalloc(ncomponents * sizeof(Vector*));
@@ -198,12 +200,10 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 
   if (n_nuisance_params > 0) {
     ave_nuis_grad = vec_new(n_nuisance_params);
-    m_nuis = vec_new(n_nuisance_params);
-    v_nuis = vec_new(n_nuisance_params);
-    m_nuis_prev = vec_new(n_nuisance_params);
-    v_nuis_prev = vec_new(n_nuisance_params);
-    vec_zero(m_nuis);  vec_zero(m_nuis_prev);
-    vec_zero(v_nuis);  vec_zero(v_nuis_prev);
+    m_nuis = vec_new_zero(n_nuisance_params);
+    v_nuis = vec_new_zero(n_nuisance_params);
+    m_nuis_prev = vec_new_zero(n_nuisance_params);
+    v_nuis_prev = vec_new_zero(n_nuisance_params);
     best_nuis_params = vec_new(n_nuisance_params);
     tmp_ave_nuis_grad = vec_new(n_nuisance_params);
     nuis_t = smalloc(n_nuisance_params * sizeof(int));
@@ -215,30 +215,19 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 
   /* initialize component-specific moments and iteration counts*/
   for (k = 0; k < ncomponents; k++) {
-    model_grad_components[k] = vec_new(graddim);
-    model_natgrad_components[k] = vec_new(graddim);
-    m_mu[k] = vec_new(fulld);
-    v_mu[k] = vec_new(fulld);
-    m_sigma[k] = vec_new(data->covar_params[k]->size);
-    v_sigma[k] = vec_new(data->covar_params[k]->size);
+    model_grad_components[k] = vec_new_zero(graddim);
+    model_natgrad_components[k] = vec_new_zero(graddim);
+    m_mu[k] = vec_new_zero(fulld);
+    v_mu[k] = vec_new_zero(fulld);
+    m_sigma[k] = vec_new_zero(data->covar_params[k]->size);
+    v_sigma[k] = vec_new_zero(data->covar_params[k]->size);
     best_mu[k] = vec_new(fulld);
     best_sigmapar[k] = vec_new(data->covar_params[k]->size);
-    mu_kldgrad[k] = vec_new(fulld);
-    sigma_kldgrad[k] = vec_new(data->covar_params[k]->size);
-    sigma_penalty_grad[k] = vec_new(graddim);
-    tmp_mu_kldgrad[k] = vec_new(fulld);
-    tmp_sigma_kldgrad[k] = vec_new(data->covar_params[k]->size);
-    vec_zero(model_grad_components[k]);
-    vec_zero(model_natgrad_components[k]);
-    vec_zero(m_mu[k]);
-    vec_zero(v_mu[k]);
-    vec_zero(m_sigma[k]);
-    vec_zero(v_sigma[k]);
-    vec_zero(mu_kldgrad[k]);
-    vec_zero(sigma_kldgrad[k]);
-    vec_zero(sigma_penalty_grad[k]);
-    vec_zero(tmp_mu_kldgrad[k]);
-    vec_zero(tmp_sigma_kldgrad[k]);
+    mu_kldgrad[k] = vec_new_zero(fulld);
+    sigma_kldgrad[k] = vec_new_zero(data->covar_params[k]->size);
+    sigma_penalty_grad[k] = vec_new_zero(graddim);
+    tmp_mu_kldgrad[k] = vec_new_zero(fulld);
+    tmp_sigma_kldgrad[k] = vec_new_zero(data->covar_params[k]->size);
     mmvn_save_mu(mixmvn->components[k], best_mu[k]);
     vec_copy(best_sigmapar[k], data->covar_params[k]);
     sigma_t[k] = 0;
@@ -948,16 +937,14 @@ static double mix_kld_sample_grad(mixture_MVN *mixmvn, int component,
   if (sigma_kldgrad != NULL) {
 
     if (data->type != LOWR) {
-      Vector *kld_dL_dx = vec_new(fulld);
+      Vector *kld_dL_dx = vec_new_zero(fulld);
       Vector **prec_resid = smalloc(mixmvn->ncomponents * sizeof(Vector*));
 
       /* Pathwise part: derivative wrt the sampled point x, then through
          x = mu_component + Sigma_component^(1/2) z. */
-      vec_zero(kld_dL_dx);
       for (int c = 0; c < mixmvn->ncomponents; c++) {
         multi_MVN *comp = mixmvn->components[c];
-        prec_resid[c] = vec_new(fulld);
-        vec_zero(prec_resid[c]);
+        prec_resid[c] = vec_new_zero(fulld);
 
         if (data->type == CONST || data->type == DIAG) {
           for (int pidx = 0; pidx < fulld; pidx++) {
