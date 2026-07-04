@@ -853,12 +853,10 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   double final_mc_ll = 0;
   if (data->taylor != NULL && logf != NULL) {
     for (k = 0; k < ncomponents; k++) {
-      double dummy_lprior = 0, dummy_migll = 0;
       double component_mc_ll =
         elbo_montecarlo(mod, mixmvn, k, data, nminibatch,
                            model_grad, ave_nuis_grad,
-                           &dummy_lprior, &dummy_migll,
-                           NULL, NULL, NULL, NULL);
+                           NULL, NULL, NULL, NULL, NULL, NULL);
       final_mc_ll += vec_get(mixmvn->weights, k) * component_mc_ll;
     }
   }
@@ -919,10 +917,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 }
 
 /* estimate key components of the ELBO by Monte Carlo integration,
-   over a minibatch of size nminibatch.  Returns the expected log
-   likelihood.  The model_grad, ave_nuis_grad, ave_lprior, and avemigll
-   parameters are updated.  For mixture models, kld is also updated 
-   if not NULL. */ 
+   over a minibatch of size nminibatch. */ 
 static void lowr_map_std(multi_MVN *mmvn, Vector *points_std,
                             Vector *points) {
   int k = mmvn->mvn->lowR->ncols;
@@ -1261,7 +1256,8 @@ double elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
                           Vector **sigma_kldgrad, Vector **mu_kldgrad,
                           Vector *weight_kldgrad) {
   Vector *grad = vec_new(model_grad->size), *nuis_grad = NULL, *points, *points_std;
-  double ll, migll = 0, lprior = 0, avell = 0;
+  double ll, migll = 0, lprior = 0, avell = 0,
+    ave_lprior_sum = 0, avemigll_sum = 0;
   int n = data->nseqs, dim = data->dim, fulld = n*dim;
   int estimate_kld = (mixmvn->ncomponents > 1 && kld != NULL);
   int estimate_kld_grad = (estimate_kld && sigma_kldgrad != NULL);
@@ -1283,7 +1279,6 @@ double elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
     vec_zero(ave_nuis_grad);
   }
 
-  *ave_lprior = *avemigll = 0;
   if (estimate_kld)
     *kld = 0;
 
@@ -1309,8 +1304,8 @@ double elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
     assert(isfinite(ll));
 
     avell += ll;
-    (*avemigll) += migll;
-    (*ave_lprior) += lprior;
+    avemigll_sum += migll;
+    ave_lprior_sum += lprior;
     if (estimate_kld)
       *kld += mix_kld_sample_grad(mixmvn, component, data, points,
                                      points_std,
@@ -1329,8 +1324,12 @@ double elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
   /* divide by nminibatch to get expected gradient */
   vec_scale(model_grad, 1.0/nminibatch);
   avell /= nminibatch;
-  (*ave_lprior) /= nminibatch;
-  (*avemigll) /= nminibatch;
+  ave_lprior_sum /= nminibatch;
+  avemigll_sum /= nminibatch;
+  if (ave_lprior != NULL)
+    *ave_lprior = ave_lprior_sum;
+  if (avemigll != NULL)
+    *avemigll = avemigll_sum;
   if (estimate_kld)
     *kld *= scale;
   if (estimate_kld_grad) {
