@@ -1104,27 +1104,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     }
     if (ave_nuis_grad != NULL)
       vec_zero(ave_nuis_grad);
-
-    /* compute closed form terms for the single mixture component case */
-    kld = 0.0;
-    if (mixmvn->ncomponents == 1) {
-      double logdet = mmvn_log_det(mixmvn->components[0]);
-      if (data->treeprior == NULL)
-        kld = compute_standard_normal_kl_term_and_grads(mixmvn->components[0],
-                                                           data, fulld, logdet,
-                                                           sigma_kldgrad[0],
-                                                           mu_kldgrad[0]);
-      else
-        kld = compute_entropy_term_and_grads(mixmvn->components[0], data,
-                                               fulld, logdet,
-                                               sigma_kldgrad[0]);
-      
-      /* scale kld and grad */
-      double scale = data->kld_upweight / (data->pointscale * data->pointscale);
-      kld *= scale;
-      vec_scale(sigma_kldgrad[0], scale);
-      vec_scale(mu_kldgrad[0], scale);
-    }
     
     /* configure subsampling */
     if (!sd->full_grad_now && data->crispr_mod == NULL && data->nthreads == 1) {
@@ -1162,15 +1141,34 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       }
     }
 
+    /* compute closed form terms for the single mixture component case */
+    kld = 0.0;
+    if (mixmvn->ncomponents == 1) {
+      double logdet = mmvn_log_det(mixmvn->components[0]);
+      if (data->treeprior == NULL)
+        kld = compute_standard_normal_kl_term_and_grads(mixmvn->components[0],
+                                                           data, fulld, logdet,
+                                                           sigma_kldgrad[0],
+                                                           mu_kldgrad[0]);
+      else
+        kld = compute_entropy_term_and_grads(mixmvn->components[0], data,
+                                               fulld, logdet,
+                                               sigma_kldgrad[0]);
+      
+      /* scale kld and grad */
+      double scale = data->kld_upweight / (data->pointscale * data->pointscale);
+      kld *= scale;
+      vec_scale(sigma_kldgrad[0], scale);
+      vec_scale(mu_kldgrad[0], scale);
+    }
+
     /* per-component elbo computation */
-    avell = ave_lprior = avemigll = ll_at_mean = elb = 0.0;
-    penalty = 0.0;
-    double cpenalty;
+    avell = ave_lprior = avemigll = ll_at_mean = elb = penalty = 0.0;
+    double cavell, cave_lprior, cavemigll, cll_at_mean, celb, cpenalty, wk;
+    int c;
     for (k = 0; k < ncomponents; k++) {
-      int c;
-      double wk = mixmvn->ncomponents == 1 ? 1.0 : vec_get(mixmvn->weights, k);
+      wk = vec_get(mixmvn->weights, k);
       double ckld = ncomponents == 1 ? kld : 0.0;
-      double cavell, cave_lprior, cavemigll, cll_at_mean, celb;
 
       cavell = 0.0;
       cave_lprior = 0.0;
