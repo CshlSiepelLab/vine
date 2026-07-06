@@ -1004,7 +1004,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     **best_sigmapar = NULL;
   int n = data->nseqs, j, k, t = 0, stop = FALSE, bestt = -1, graddim,
     dim = data->dim, fulld = n*dim, reenable_taylor_t = -1,
-    ncomponents = mixmvn->ncomponents, weight_t = 0;
+    ncomponents = mixmvn->ncomponents, weight_t = 0, mig_warmup_active = 0;
   int *sigma_t = NULL;
   double elb = 0, avell, avemigll, kld, bestelb = -INFTY, bestll = -INFTY,
     bestkld = -INFTY, bestmigll = -INFTY,
@@ -1102,6 +1102,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     fprintf(stderr, "Running %d warmup iterations without migration "
             "model...\n", CPR_MIG_WARMUP_ITERS);
     data->crispr_mod->mig_warmup = TRUE;
+    mig_warmup_active = TRUE;
   }
 
   do {
@@ -1161,6 +1162,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
         t == CPR_MIG_WARMUP_ITERS && !silent) {
       fprintf(stderr, "Warmup complete; enabling migration model...\n");
       data->crispr_mod->mig_warmup = FALSE;
+      mig_warmup_active = FALSE;
     }
 
     /* per-component elbo computation */
@@ -1275,8 +1277,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     /* don't select best during migration warmup: migration is excluded from
      * the ELBO then, making warmup ELBOs artificially high and incomparable
      * to post-warmup ELBOs that include the migration log likelihood */
-    int mig_warmup_active = (data->crispr_mod != NULL && data->migtable != NULL
-                             && data->crispr_mod->mig_warmup);
     if (elb > bestelb && (sd->full_grad_now || data->crispr_mod != NULL)
         && !mig_warmup_active) {
       bestelb = elb;
