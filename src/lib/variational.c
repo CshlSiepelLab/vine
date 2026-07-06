@@ -83,13 +83,6 @@ static double rescale_sigma_grad_el(Vector *grad, multi_MVN *mmvn,
   }
 }
 
-static double elbo_mix_kld_montecarlo(mixture_MVN *mixmvn, int component,
-                                         CovarData *data, int nminibatch,
-                                         double *kld,
-                                         Vector **sigma_kldgrad,
-                                         Vector **mu_kldgrad,
-                                         Vector *weight_kldgrad);
-
 /* Return the flow component owning nuisance parameter idx, or -1 for
    non-flow nuisance parameters.  This mirrors nuisance.c's parameter order. */
 static int nuis_flow_component(TreeModel *mod, CovarData *data, int idx) {
@@ -268,10 +261,6 @@ static void log_final(TreeModel *mod, mixture_MVN *mixmvn,
   fprintf(logf, "\n");
 }
 
-static double kld_gradient_scale(CovarData *data) {
-  return data->kld_upweight / (data->pointscale * data->pointscale);
-}
-
 /* Closed-form KL(q || N(0, I)) for a single MVN component, plus gradients of
    -KL because the optimizer ascends the ELBO.  The returned scalar is the
    unscaled positive KL term that will be subtracted from the ELBO. */
@@ -334,60 +323,6 @@ static double compute_entropy_term_and_grads(multi_MVN *component,
     set_entropy_sigma_grad_LOWR(sigma_grad, component);
 
   return -0.5 * (fulld * (1.0 + log(2 * M_PI)) + logdet);
-}
-
-static double estimate_component_model_terms(
-    TreeModel *mod, mixture_MVN *mixmvn, int component, CovarData *data,
-    int nminibatch, Vector *model_grad, Vector *nuis_grad,
-    double *lprior, double *kld, double *migll, double *ll_at_mean,
-    double subsamp_rescale,
-    Vector **sigma_kldgrad, Vector **mu_kldgrad, Vector *weight_kldgrad,
-    TaylorData **taylor_stash, int *reenable_taylor_t, int t,
-    unsigned int silent) {
-  double ll = 0.0;
-
-  *lprior = 0.0;
-  *migll = 0.0;
-  *ll_at_mean = 0.0;
-
-  vec_zero(model_grad);
-  if (nuis_grad != NULL)
-    vec_zero(nuis_grad);
-
-  if (data->taylor != NULL) {
-    ll = elbo_hybrid(mod, mixmvn, component, data, nminibatch,
-                       model_grad, nuis_grad, lprior, migll, ll_at_mean);
-    if ((data->crispr_mod != NULL &&
-         data->crispr_mod->zero_likl == TRUE) || !isfinite(ll)) {
-      if (!silent)
-        fprintf(stderr, "WARNING: Taylor approximation produced invalid "
-                "likelihood; switching to Monte Carlo.\n");
-      *reenable_taylor_t = t + 10;
-      *taylor_stash = data->taylor;
-      data->taylor = NULL;
-    }
-    else if (mixmvn->ncomponents > 1) {
-      elbo_mix_kld_montecarlo(mixmvn, component, data, nminibatch,
-                                 kld, sigma_kldgrad, mu_kldgrad,
-                                 weight_kldgrad);
-    }
-  }
-
-  if (data->taylor == NULL) {
-    *ll_at_mean = 0.0;
-    ll = elbo_montecarlo(mod, mixmvn, component, data, nminibatch,
-                           model_grad, nuis_grad, lprior, migll, kld,
-                           sigma_kldgrad, mu_kldgrad, weight_kldgrad);
-  }
-
-  if (data->subsample == TRUE) {
-    vec_scale(model_grad, subsamp_rescale);
-    if (nuis_grad != NULL)
-      vec_scale(nuis_grad, subsamp_rescale);
-    ll *= subsamp_rescale;
-  }
-
-  return ll;
 }
 
 static double add_mixture_weight_dirichlet_prior(mixture_MVN *mixmvn,
@@ -583,7 +518,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
                                                sigma_kldgrad[0]);
       
       /* scale kld and grad */
-      double scale = kld_gradient_scale(data);
+      double scale = data->kld_upweight / (data->pointscale * data->pointscale);
       kld *= scale;
       vec_scale(sigma_kldgrad[0], scale);
       vec_scale(mu_kldgrad[0], scale);
@@ -642,22 +577,59 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       double ckld = ncomponents == 1 ? kld : 0.0;
       double cavell, cave_lprior, cavemigll, cll_at_mean, celb;
 
-      cavell = estimate_component_model_terms(mod, mixmvn, k, data,
-                                                nminibatch, tmp_model_grad,
-                                                tmp_ave_nuis_grad,
-                                                &cave_lprior, &ckld,
-                                                &cavemigll, &cll_at_mean,
-                                                subsamp_rescale,
-                                                tmp_sigma_kldgrad,
-                                                tmp_mu_kldgrad,
-                                                tmp_weight_kldgrad,
-                                                &taylor_stash,
-                                                &reenable_taylor_t, t,
-                                                silent);
+      cavell = 0.0;
+      cave_lprior = 0.0;
+      cavemigll = 0.0;
+      cll_at_mean = 0.0;
+
+      vec_zero(tmp_model_grad);
+      if (tmp_ave_nuis_grad != NULL)
+        vec_zero(tmp_ave_nuis_grad);
+
+      if (data->taylor != NULL) {
+        cavell = elbo_hybrid(mod, mixmvn, k, data, nminibatch,
+                              tmp_model_grad, tmp_ave_nuis_grad,
+                              &cave_lprior, &cavemigll, &cll_at_mean);
+        if ((data->crispr_mod != NULL &&
+            data->crispr_mod->zero_likl == TRUE) || !isfinite(cavell)) {
+          if (!silent)
+            fprintf(stderr, "WARNING: Taylor approximation produced invalid "
+                    "likelihood; switching to Monte Carlo.\n");
+          reenable_taylor_t = t + 10;
+          taylor_stash = data->taylor;
+          data->taylor = NULL;
+        }
+        else if (mixmvn->ncomponents > 1) {
+          elbo_mix_kld_montecarlo(mixmvn, k, data, nminibatch,
+                                    &ckld, tmp_sigma_kldgrad,
+                                    tmp_mu_kldgrad, tmp_weight_kldgrad);
+        }
+      }
+
+      if (data->taylor == NULL) {
+        cll_at_mean = 0.0;
+        cavell = elbo_montecarlo(mod, mixmvn, k, data, nminibatch,
+                                  tmp_model_grad, tmp_ave_nuis_grad,
+                                  &cave_lprior, &cavemigll, &ckld,
+                                  tmp_sigma_kldgrad, tmp_mu_kldgrad,
+                                  tmp_weight_kldgrad);
+      }
+
+      /* re-scale if subsampling */
+      if (data->subsample == TRUE) {
+        vec_scale(tmp_model_grad, subsamp_rescale);
+        if (tmp_ave_nuis_grad != NULL)
+          vec_scale(tmp_ave_nuis_grad, subsamp_rescale);
+        cavell *= subsamp_rescale;
+      }
+
+
+      /* compute the total elbo for this component */
       celb = cavell + cave_lprior - ckld -
         vec_get(component_penalty, k) + cavemigll;
       vec_set(component_elbo, k, celb);
 
+      /* accumulate mixture weighted elbo components */
       avell += wk * cavell;
       ave_lprior += wk * cave_lprior;
       kld += ncomponents == 1 ? 0.0 : wk * ckld;
