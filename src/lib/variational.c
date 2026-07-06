@@ -175,7 +175,7 @@ static void log_iteration(TreeModel *mod, mixture_MVN *mixmvn,
                                          SchedMetrics *sm, int t,
                                          double avell, double elb,
                                          double ave_lprior, double kld,
-                                         double sampled_penalty,
+                                         double penalty,
                                          double avemigll,
                                          unsigned int clipped,
                                          int n_nuisance_params,
@@ -196,7 +196,7 @@ static void log_iteration(TreeModel *mod, mixture_MVN *mixmvn,
   else if (taylor_stash != NULL)
     fprintf(logf, "0\t0\t"); /* place holder */
   if (data->var_reg != 0)
-    fprintf(logf, "%f\t", sampled_penalty);
+    fprintf(logf, "%f\t", penalty);
   if (data->crispr_mod == NULL)
     fprintf(logf, "%d\t%d\t%f\t%d\t", data->subsampsize,
             data->reuse_subsamp, sm->grad_norm, clipped);
@@ -519,7 +519,8 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
                                                      mixmvn->components[k],
                                                      data, k);
       vec_set(component_penalty, k, ck_penalty);
-      penalty += vec_get(mixmvn->weights, k) * ck_penalty;
+      penalty += (ncomponents == 1 ? 1.0 : vec_get(mixmvn->weights, k)) *
+        ck_penalty;
     }
 
 
@@ -560,8 +561,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
         data->crispr_mod->mig_warmup = FALSE;
       }
     }
-
-    double sampled_penalty = 0.0;
 
     if (ncomponents > 1) {
       avell = ave_lprior = avemigll = kld = ll_at_mean = elb = 0.0;
@@ -650,7 +649,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
                     wk * vec_get(tmp_ave_nuis_grad, j));
       }
 
-      sampled_penalty = penalty;
       double mix_elb = elb;
       double weight_log_prior = 0.0;
       for (j = 0; j < ncomponents; j++) {
@@ -705,8 +703,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       vec_plus_eq(model_grad, sigma_penalty_grad[0]);
       vec_copy(model_grad_components[0], model_grad);
 
-      sampled_penalty = vec_get(component_penalty, 0);
-      elb = avell + ave_lprior - kld - sampled_penalty + avemigll;
+      elb = avell + ave_lprior - kld - penalty + avemigll;
     }
 
     /* don't select best during migration warmup: migration is excluded from
@@ -721,7 +718,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       bestll_at_mean = ll_at_mean;  /* ll at posterior mean; 0 if MC path */
       best_lprior = ave_lprior;
       bestkld = kld;  
-      bestpenalty = sampled_penalty;
+      bestpenalty = penalty;
       bestmigll = avemigll;
       bestt = t;
       for (k = 0; k < ncomponents; k++) {
@@ -855,7 +852,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     
     log_iteration(mod, mixmvn, data, logf, taylor_stash, sm,
                               t, avell, elb, ave_lprior, kld,
-                              sampled_penalty, avemigll, clipped,
+                              penalty, avemigll, clipped,
                               n_nuisance_params, log_all);
     
     /* check total elb every nbatches_conv to decide whether to stop */
