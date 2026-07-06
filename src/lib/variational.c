@@ -268,6 +268,81 @@ static void log_final(TreeModel *mod, mixture_MVN *mixmvn,
   fprintf(logf, "\n");
 }
 
+static double kld_gradient_scale(CovarData *data) {
+  return data->kld_upweight / (data->pointscale * data->pointscale);
+}
+
+/* Closed-form KL(q || N(0, I)) for a single MVN component, plus gradients of
+   -KL because the optimizer ascends the ELBO.  The returned scalar is the
+   unscaled positive KL term that will be subtracted from the ELBO. */
+static double compute_standard_normal_kl_term_and_grads(multi_MVN *component,
+                                                           CovarData *data,
+                                                           int fulld,
+                                                           double logdet,
+                                                           Vector *sigma_grad,
+                                                           Vector *mu_grad) {
+  int j;
+  double trace = mmvn_trace(component);
+
+  for (j = 0; j < fulld; j++)
+    vec_set(mu_grad, j, -1.0 * mmvn_get_mu_el(component, j));
+
+  for (j = 0; j < sigma_grad->size; j++) {
+    double gj = 0.0;
+
+    /* The covariance derivative includes the trace and log determinant terms.
+       LOWR uses a matrix expression below because its parameters interact. */
+    if (data->type == CONST || data->type == DIST)
+      gj = 0.5 * (fulld - trace);
+    else if (data->type == DIAG)
+      gj = 0.5 * (1.0 - mat_get(component->mvn->sigma, j, j));
+    else
+      continue;
+    vec_set(sigma_grad, j, gj);
+  }
+
+  if (data->type == LOWR)
+    set_kld_sigma_grad_LOWR(sigma_grad, component);
+
+  return 0.5 * (trace + mmvn_mu2(component) - fulld - logdet);
+}
+
+/* With an explicit tree prior, the closed-form variational contribution is
+   the negative entropy term in the ELBO accounting variable.  Its optimizer
+   gradient is +dH/dtheta, again matching the ELBO ascent convention. */
+static double compute_entropy_term_and_grads(multi_MVN *component,
+                                                CovarData *data,
+                                                int fulld,
+                                                double logdet,
+                                                Vector *sigma_grad) {
+  int j;
+
+  for (j = 0; j < sigma_grad->size; j++) {
+    double gj = 0.0;
+
+    /* Mean parameters do not affect entropy. */
+    if (data->type == CONST || data->type == DIST)
+      gj = 0.5 * fulld;
+    else if (data->type == DIAG)
+      gj = 0.5;
+    else
+      continue;
+    vec_set(sigma_grad, j, gj);
+  }
+
+  if (data->type == LOWR)
+    set_entropy_sigma_grad_LOWR(sigma_grad, component);
+
+  return -0.5 * (fulld * (1.0 + log(2 * M_PI)) + logdet);
+}
+
+static void scale_kld_term_and_grads(double *kld, Vector *sigma_grad,
+                                        Vector *mu_grad, double scale) {
+  *kld *= scale;
+  vec_scale(sigma_grad, scale);
+  vec_scale(mu_grad, scale);
+}
+
 /* optimize variational model by stochastic gradient ascent using the
    Adam algorithm.  Takes initial tree model and alignment and
    distance matrix, dimensionality of Euclidean space to work in.
@@ -298,7 +373,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   int *sigma_t = NULL;
   double elb = 0, avell, avemigll, kld, bestelb = -INFTY, bestll = -INFTY,
     bestkld = -INFTY, bestmigll = -INFTY,
-    running_tot = 0, last_running_tot = -INFTY, trace, logdet, penalty = 0,
+    running_tot = 0, last_running_tot = -INFTY, penalty = 0,
     bestpenalty = 0, ave_lprior, best_lprior = -INFTY, subsamp_rescale = 1.0,
     ll_at_mean = 0, bestll_at_mean = -INFTY, grad_norm_sq;
   TaylorData *taylor_stash = NULL;
@@ -418,59 +493,20 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       vec_zero(model_natgrad_components[k]);
     }
     if (ncomponents == 1) {
-      logdet = mmvn_log_det(mixmvn->components[0]);
-      if (data->treeprior == NULL) { /* only do if no explicit tree prior */
-        trace = mmvn_trace(mixmvn->components[0]);  /* we'll reuse this */
-      
-        kld = 0.5 * (trace + mmvn_mu2(mixmvn->components[0]) - fulld - logdet);
+      multi_MVN *component = mixmvn->components[0];
+      double logdet = mmvn_log_det(component);
 
-        kld *= data->kld_upweight/(data->pointscale*data->pointscale);      
-      
-        /* we can also precompute the contribution of the KLD to the gradient */
-        /* Note KLD is subtracted rather than added, so compute the gradient of -KLD */
-        for (j = 0; j < fulld; j++)
-          vec_set(mu_kldgrad[0], j, -1.0 * mmvn_get_mu_el(mixmvn->components[0], j));
-        for (j = 0; j < data->covar_params[0]->size; j++) {
-          double gj = 0.0;
+      if (data->treeprior == NULL)
+        kld = compute_standard_normal_kl_term_and_grads(component, data,
+                                                          fulld, logdet,
+                                                          sigma_kldgrad[0],
+                                                          mu_kldgrad[0]);
+      else
+        kld = compute_entropy_term_and_grads(component, data, fulld, logdet,
+                                                sigma_kldgrad[0]);
 
-          /* partial deriv wrt sigma_j is more complicated because of
-             the trace and log determinant */
-          if (data->type == CONST || data->type == DIST)
-            gj = 0.5 * (fulld - trace);
-          else if (data->type == DIAG) 
-            gj = 0.5 * (1.0 - mat_get(mixmvn->components[0]->mvn->sigma, j, j)); 
-          else 
-            continue; /* LOWR case is messy; handle below */
-          vec_set(sigma_kldgrad[0], j, gj);
-        }
-      
-        if (data->type == LOWR) 
-          set_kld_sigma_grad_LOWR(sigma_kldgrad[0], mixmvn->components[0]);
-      }
-      else { /* with explicit tree prior, we need the entropy of the MVN instead */
-        kld = -0.5 * (fulld * (1.0 + log(2 * M_PI)) + logdet);
-        kld *= data->kld_upweight/(data->pointscale*data->pointscale);      
-        /* note overloading name and negating */
-        for (j = 0; j < data->covar_params[0]->size; j++) {
-          double gj = 0.0;
-
-          /* partial deriv wrt mu_j is zero; only sigma contributes. */
-          if (data->type == CONST || data->type == DIST)
-            gj = 0.5 * fulld;
-          else if (data->type == DIAG) 
-            gj = 0.5;
-          else 
-            continue; /* LOWR case is messy; handle below */
-          vec_set(sigma_kldgrad[0], j, gj);
-        }
-        if (data->type == LOWR) 
-          set_entropy_sigma_grad_LOWR(sigma_kldgrad[0], mixmvn->components[0]);
-      }
-
-      vec_scale(sigma_kldgrad[0],
-                data->kld_upweight/(data->pointscale*data->pointscale));
-      vec_scale(mu_kldgrad[0],
-                data->kld_upweight/(data->pointscale*data->pointscale));
+      scale_kld_term_and_grads(&kld, sigma_kldgrad[0], mu_kldgrad[0],
+                                  kld_gradient_scale(data));
     }
 
     /* The variance penalty follows the same sampled-component objective as
