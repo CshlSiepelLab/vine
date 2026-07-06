@@ -966,9 +966,8 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
                         CovarData *data, FILE *logf,
                         unsigned int silent, unsigned int log_all) {
 
-  Vector *model_grad, **model_grad_components = NULL, 
-    **model_natgrad_components = NULL, **mu_kldgrad = NULL, 
-    **sigma_kldgrad = NULL, **sigma_penalty_grad = NULL, 
+  Vector *model_grad, **model_grad_components = NULL,
+    **model_natgrad_components = NULL, **sigma_penalty_grad = NULL,
     *weight_grad = NULL, *weight_kldgrad = NULL,
     *m_weight = NULL, *v_weight = NULL, *best_logits = NULL,
     *component_elbo = NULL, *tmp_model_grad = NULL, *tmp_ave_nuis_grad = NULL,
@@ -1019,8 +1018,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   v_sigma = smalloc(ncomponents * sizeof(Vector*));
   best_mu = smalloc(ncomponents * sizeof(Vector*));
   best_sigmapar = smalloc(ncomponents * sizeof(Vector*));
-  mu_kldgrad = smalloc(ncomponents * sizeof(Vector*));
-  sigma_kldgrad = smalloc(ncomponents * sizeof(Vector*));
   sigma_penalty_grad = smalloc(ncomponents * sizeof(Vector*));
 
   if (n_nuisance_params > 0) {
@@ -1046,8 +1043,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     v_sigma[k] = vec_new_zero(data->covar_params[k]->size);
     best_mu[k] = vec_new(fulld);
     best_sigmapar[k] = vec_new(data->covar_params[k]->size);
-    mu_kldgrad[k] = vec_new_zero(fulld);
-    sigma_kldgrad[k] = vec_new_zero(data->covar_params[k]->size);
     sigma_penalty_grad[k] = vec_new_zero(graddim);
     tmp_mu_kldgrad[k] = vec_new_zero(fulld);
     tmp_sigma_kldgrad[k] = vec_new_zero(data->covar_params[k]->size);
@@ -1100,8 +1095,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     vec_zero(weight_kldgrad);
     vec_zero(component_elbo);
     for (k = 0; k < mixmvn->ncomponents; k++) {
-      vec_zero(mu_kldgrad[k]);
-      vec_zero(sigma_kldgrad[k]);
       vec_zero(model_grad_components[k]);
       vec_zero(model_natgrad_components[k]);
       vec_zero(sigma_penalty_grad[k]);
@@ -1217,14 +1210,18 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
                 wk * vec_get(tmp_model_grad, j) +
                 wk * vec_get(sigma_penalty_grad[k], j));
 
+      /* fold this component's weighted contribution to the mixture-KLD
+         gradient directly into every component's parameter gradient; log
+         q_mix depends on every component density, so a sample drawn from
+         component k contributes to all c's gradients. */
       for (c = 0; c < ncomponents; c++) {
         for (j = 0; j < fulld; j++)
-          vec_set(mu_kldgrad[c], j,
-                  vec_get(mu_kldgrad[c], j) +
+          vec_set(model_grad_components[c], j,
+                  vec_get(model_grad_components[c], j) +
                   wk * vec_get(tmp_mu_kldgrad[c], j));
         for (j = 0; j < data->covar_params[c]->size; j++)
-          vec_set(sigma_kldgrad[c], j,
-                  vec_get(sigma_kldgrad[c], j) +
+          vec_set(model_grad_components[c], fulld + j,
+                  vec_get(model_grad_components[c], fulld + j) +
                   wk * vec_get(tmp_sigma_kldgrad[c], j));
       }
 
@@ -1266,19 +1263,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       vec_copy(best_logits, mixmvn->logits);
       if (n_nuisance_params > 0)
         save_nuis_params(best_nuis_params, mod, data);
-    }
-
-    /* Fold KLD gradients into the component parameter gradients before
-       applying the approximate natural-gradient scaling. */
-    for (k = 0; k < ncomponents; k++) {
-      for (j = 0; j < fulld; j++)
-        vec_set(model_grad_components[k], j,
-                vec_get(model_grad_components[k], j) +
-                vec_get(mu_kldgrad[k], j));
-      for (j = 0; j < data->covar_params[k]->size; j++)
-        vec_set(model_grad_components[k], fulld + j,
-                vec_get(model_grad_components[k], fulld + j) +
-                vec_get(sigma_kldgrad[k], j));
     }
 
     /* Rescale the complete component gradient by approximate inverse Fisher
@@ -1463,8 +1447,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     vec_free(v_sigma[k]);
     vec_free(best_mu[k]);
     vec_free(best_sigmapar[k]);
-    vec_free(mu_kldgrad[k]);
-    vec_free(sigma_kldgrad[k]);
     vec_free(sigma_penalty_grad[k]);
     vec_free(tmp_mu_kldgrad[k]);
     vec_free(tmp_sigma_kldgrad[k]);
@@ -1477,8 +1459,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   sfree(v_sigma);
   sfree(best_mu);
   sfree(best_sigmapar);
-  sfree(mu_kldgrad);
-  sfree(sigma_kldgrad);
   sfree(sigma_penalty_grad);
   sfree(tmp_mu_kldgrad);
   sfree(tmp_sigma_kldgrad);
