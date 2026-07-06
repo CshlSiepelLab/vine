@@ -1097,6 +1097,13 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   SchedMetrics *sm = smalloc(sizeof(SchedMetrics));
   sm->grad_norm = 0;
 
+  /* note the configured migration warmup phase if needed */
+  if (data->crispr_mod != NULL && data->migtable != NULL && !silent) {
+    fprintf(stderr, "Running %d warmup iterations without migration "
+            "model...\n", CPR_MIG_WARMUP_ITERS);
+    data->crispr_mod->mig_warmup = TRUE;
+  }
+
   do {
     /* simple update to user */
     if (t > 0 && t % 100 == 0) {
@@ -1149,19 +1156,11 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       taylor_stash = NULL;
     }
 
-    /* update migration warmup status */
-    if (data->crispr_mod != NULL && data->migtable != NULL) {
-      if (t < CPR_MIG_WARMUP_ITERS) {
-        if (t == 0 && !silent)
-          fprintf(stderr, "Running %d warmup iterations without migration "
-                  "model...\n", CPR_MIG_WARMUP_ITERS);
-        data->crispr_mod->mig_warmup = TRUE;
-      }
-      else {
-        if (t == CPR_MIG_WARMUP_ITERS && !silent)
-          fprintf(stderr, "Warmup complete; enabling migration model...\n");
-        data->crispr_mod->mig_warmup = FALSE;
-      }
+    /* turn off migration warmup if needed */
+    if (data->crispr_mod != NULL && data->migtable != NULL && 
+        t == CPR_MIG_WARMUP_ITERS && !silent) {
+      fprintf(stderr, "Warmup complete; enabling migration model...\n");
+      data->crispr_mod->mig_warmup = FALSE;
     }
 
     /* per-component elbo computation */
