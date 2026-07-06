@@ -325,6 +325,29 @@ static double compute_entropy_term_and_grads(multi_MVN *component,
   return -0.5 * (fulld * (1.0 + log(2 * M_PI)) + logdet);
 }
 
+/* Closed-form KLD (and gradients) for the single mixture component case,
+   scaled to match the Monte Carlo KLD estimate used when ncomponents > 1. */
+static double compute_closed_form_kld(mixture_MVN *mixmvn, CovarData *data,
+                                         int fulld, Vector *sigma_kldgrad,
+                                         Vector *mu_kldgrad) {
+  double logdet = mmvn_log_det(mixmvn->components[0]);
+  double scale = data->kld_upweight / (data->pointscale * data->pointscale);
+  double kld;
+
+  if (data->treeprior == NULL)
+    kld = compute_standard_normal_kl_term_and_grads(mixmvn->components[0],
+                                                       data, fulld, logdet,
+                                                       sigma_kldgrad, mu_kldgrad);
+  else
+    kld = compute_entropy_term_and_grads(mixmvn->components[0], data,
+                                           fulld, logdet, sigma_kldgrad);
+
+  kld *= scale;
+  vec_scale(sigma_kldgrad, scale);
+  vec_scale(mu_kldgrad, scale);
+  return kld;
+}
+
 static double add_mixture_weight_dirichlet_prior(mixture_MVN *mixmvn,
                                                        Vector *component_elbo,
                                                        Vector *weight_kldgrad,
@@ -1141,34 +1164,16 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       }
     }
 
-    /* compute closed form terms for the single mixture component case */
-    kld = 0.0;
-    if (mixmvn->ncomponents == 1) {
-      double logdet = mmvn_log_det(mixmvn->components[0]);
-      if (data->treeprior == NULL)
-        kld = compute_standard_normal_kl_term_and_grads(mixmvn->components[0],
-                                                           data, fulld, logdet,
-                                                           sigma_kldgrad[0],
-                                                           mu_kldgrad[0]);
-      else
-        kld = compute_entropy_term_and_grads(mixmvn->components[0], data,
-                                               fulld, logdet,
-                                               sigma_kldgrad[0]);
-      
-      /* scale kld and grad */
-      double scale = data->kld_upweight / (data->pointscale * data->pointscale);
-      kld *= scale;
-      vec_scale(sigma_kldgrad[0], scale);
-      vec_scale(mu_kldgrad[0], scale);
-    }
-
     /* per-component elbo computation */
+    kld = 0.0;
     avell = ave_lprior = avemigll = ll_at_mean = elb = penalty = 0.0;
     double cavell, cave_lprior, cavemigll, cll_at_mean, celb, cpenalty, wk;
     int c;
     for (k = 0; k < ncomponents; k++) {
       wk = vec_get(mixmvn->weights, k);
-      double ckld = ncomponents == 1 ? kld : 0.0;
+      double ckld = ncomponents == 1 ?
+        compute_closed_form_kld(mixmvn, data, fulld, sigma_kldgrad[k],
+                                  mu_kldgrad[k]) : 0.0;
 
       cavell = 0.0;
       cave_lprior = 0.0;
@@ -1228,7 +1233,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       /* accumulate mixture weighted elbo components */
       avell += wk * cavell;
       ave_lprior += wk * cave_lprior;
-      kld += ncomponents == 1 ? 0.0 : wk * ckld;
+      kld += wk * ckld;
       penalty += wk * cpenalty;
       avemigll += wk * cavemigll;
       ll_at_mean += wk * cll_at_mean;
