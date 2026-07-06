@@ -740,7 +740,7 @@ int main(int argc, char *argv[]) {
         if (!silent) fprintf(stderr, "Writing posterior mean tree...\n");
         if (mixmvn->ncomponents > 1 && !silent) fprintf(stderr, "Posterior mean tree not implemented for mixture models, so using the first component mean only.\n");
 
-        Vector *mu_full = vec_new(mixmvn->components[0]->mvn->mu->size);
+        Vector *mu_full = vec_new(covar_data->nseqs * covar_data->dim);
         mmvn_save_mu(mixmvn->components[0], mu_full);
         TreeNode *t = mean_tree(mu_full, names, covar_data);
 
