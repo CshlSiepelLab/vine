@@ -64,7 +64,6 @@ typedef struct cvdat {
   Matrix *Lapl_pinv_evecs;
   Matrix *R; /* used for LOWR; has dimension lowrank x nseqs */
   double var_reg; /* multiplier for variance regularizer */
-  double var_pen; /* the current value of the variance penalty */
   unsigned int hyperbolic; /* whether or not hyperbolic geometry is used */
   double negcurvature; /* for hyperbolic case */
   MSA *msa;            /* multiple alignment under analysis if available */

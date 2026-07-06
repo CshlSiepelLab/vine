@@ -318,29 +318,29 @@ void rescale_grad(Vector *grad, Vector *rsgrad, multi_MVN *mmvn, CovarData *data
   }
 }
 
-/* Compute penalty for variance and its gradient  */
-void compute_variance_penalty(Vector *grad, multi_MVN *mmvn,
-                                 CovarData *data, int component) {  
+/* Compute penalty for variance and its gradient. */
+double compute_variance_penalty(Vector *grad, multi_MVN *mmvn,
+                                   CovarData *data, int component) {  
   int i, j, n = mmvn->n, d = mmvn->d;
   int start_idx = n*d;  /* starting index for variance parameters */
+  double penalty = 0;
   assert(component >= 0 && component < data->n_covar_components);
   
   if (data->type == CONST || data->type == DIST) {
     /* L2 penalty applied to log lambda (which is the free parameter) */
     double loglambda = vec_get(data->covar_params[component], 0);
     double mult = data->var_reg * PENALTY_LOGLAMBDA_CONST;  /* constant applied to log lambda */
-    data->var_pen = mult * loglambda * loglambda; /* L2 penalty */
+    penalty = mult * loglambda * loglambda; /* L2 penalty */
     vec_set(grad, start_idx, -2.0 * mult * loglambda); /* derivative of L2 penalty; 
                                                           negative because penalty 
                                                           will be subtracted */
   }
   else if (data->type == DIAG) {
     /* similar to above but L2 penalty applied to each diagonal element */
-    data->var_pen = 0;
     double mult = data->var_reg * PENALTY_LOGLAMBDA_DIAG;
     for (i = 0; i < data->covar_params[component]->size; i++) {
       double loglambda_i = vec_get(data->covar_params[component], i);
-      data->var_pen += mult * loglambda_i * loglambda_i;
+      penalty += mult * loglambda_i * loglambda_i;
       vec_set(grad, start_idx + i, -2.0 * mult * loglambda_i); 
     }
   }
@@ -351,14 +351,13 @@ void compute_variance_penalty(Vector *grad, multi_MVN *mmvn,
        eigenvalues of the embedded low-rank matrix */
     MVN *Rmvn = mmvn->mvn->lowRmvn;
     assert(Rmvn->evals != NULL);
-    data->var_pen = 0;
     double mult = data->var_reg * PENALTY_LOGLAMBDA_LOWR;
     double eval_floor = 1.0e-6;
     for (i = 0; i < Rmvn->dim; i++) {
       double eval = vec_get(Rmvn->evals, i);
       if (eval < eval_floor) eval = eval_floor;
       double logeval = log(eval);
-      data->var_pen += mult * logeval * logeval;
+      penalty += mult * logeval * logeval;
     }
     
     /* the gradient for this penalty is 2*mult * R * V * diag(log
@@ -389,6 +388,7 @@ void compute_variance_penalty(Vector *grad, multi_MVN *mmvn,
     mat_free(Rgrad);
     mat_free(tmp);
   }
+  return penalty;
 }
 
 /* alternative versions of gradient calculation. Can be cross-checked

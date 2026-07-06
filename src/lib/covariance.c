@@ -124,7 +124,6 @@ CovarData *new_covar_data(enum covar_type covar_param, Matrix *dist, int dim,
   retval->reuse_subsamp = 0;
   retval->tuplecdf = NULL;
   retval->tuplecounts = NULL;
-  retval->var_pen = 0.0;
   retval->tree_diam_leaf1 = -1;
   retval->tree_diam_leaf2 = -1;
   retval->seq_to_node_map = NULL;

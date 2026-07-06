@@ -479,9 +479,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     unsigned int clipped = FALSE;
     double clip_scale = 1.0;
     
-    /* we can precompute the KLD because it does not depend on the data under this model,
-       (see equation 7, Doersch arXiv 2016). This does not apply to the mixture case, which
-       will be handled using monte carlo below. */
+    /* zero respective calculation params and gradients for this iteration */
     kld = 0;
     vec_zero(weight_grad);
     vec_zero(weight_kldgrad);
@@ -491,7 +489,12 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       vec_zero(sigma_kldgrad[k]);
       vec_zero(model_grad_components[k]);
       vec_zero(model_natgrad_components[k]);
+      vec_zero(sigma_penalty_grad[k]);
     }
+
+    /* In the single component case, we can precompute the KLD because it does not depend on the data under this model,
+       (see equation 7, Doersch arXiv 2016). This does not apply to the mixture case, which
+       will be handled using monte carlo below. */
     if (ncomponents == 1) {
       multi_MVN *component = mixmvn->components[0];
       double logdet = mmvn_log_det(component);
@@ -509,17 +512,15 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
                                   kld_gradient_scale(data));
     }
 
-    /* The variance penalty follows the same sampled-component objective as
-       the likelihood terms; its expectation is weighted by mixture weights. */
+    /* The variance penalty expectation is weighted by mixture weights. */
     penalty = 0;
     for (k = 0; k < ncomponents; k++) {
-      vec_zero(sigma_penalty_grad[k]);
-      compute_variance_penalty(sigma_penalty_grad[k],
-                                  mixmvn->components[k], data, k);
-      vec_set(component_penalty, k, data->var_pen);
-      penalty += vec_get(mixmvn->weights, k) * data->var_pen;
+      double ck_penalty = compute_variance_penalty(sigma_penalty_grad[k],
+                                                     mixmvn->components[k],
+                                                     data, k);
+      vec_set(component_penalty, k, ck_penalty);
+      penalty += vec_get(mixmvn->weights, k) * ck_penalty;
     }
-    data->var_pen = penalty;
 
 
     /* now estimate ELBO and gradient, either by Monte Carlo integration or by
