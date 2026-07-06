@@ -41,48 +41,6 @@ static Vector *vec_new_zero(int size) {
   return v;
 }
 
-static double rescale_mean_grad_el(Vector *grad, multi_MVN *mmvn,
-                                      CovarData *data, int i) {
-  if (data->natural_grad != TRUE)
-    return vec_get(grad, i);
-
-  if (data->type == CONST || data->type == DIAG)
-    return vec_get(grad, i) * mat_get(mmvn->mvn->sigma, i, i);
-  else {
-    double dotp = 0.0;
-    int sigmarow = i / mmvn->d, d = i % mmvn->d;
-    for (int j = 0; j < mmvn->mvn->sigma->ncols; j++)
-      dotp += mat_get(mmvn->mvn->sigma, sigmarow, j) *
-        vec_get(grad, j*mmvn->d + d);
-    return dotp;
-  }
-}
-
-static double rescale_sigma_grad_el(Vector *grad, multi_MVN *mmvn,
-                                       CovarData *data, int i,
-                                       int start_idx) {
-  double g = vec_get(grad, start_idx + i);
-
-  if (data->natural_grad != TRUE)
-    return g;
-
-  if (data->type == CONST)
-    return g * 2.0/(mmvn->n * mmvn->d);
-  else if (data->type == DIAG)
-    return g * 2.0;
-  else if (data->type == DIST)
-    return g * 2.0/(mmvn->n-1);
-  else {
-    double dotp = 0.0;
-    int row = i / data->lowrank, col = i % data->lowrank;
-    assert(data->type == LOWR);
-    for (int j = 0; j < mmvn->mvn->sigma->ncols; j++)
-      dotp += mat_get(mmvn->mvn->sigma, row, j) *
-        vec_get(grad, start_idx + j*data->lowrank + col);
-    return dotp;
-  }
-}
-
 /* Return the flow component owning nuisance parameter idx, or -1 for
    non-flow nuisance parameters.  This mirrors nuisance.c's parameter order. */
 static int nuis_flow_component(TreeModel *mod, CovarData *data, int idx) {
@@ -1310,8 +1268,21 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
         save_nuis_params(best_nuis_params, mod, data);
     }
 
-    /* rescale gradient by approximate inverse Fisher information to
-       put on similar scales; seems to help with optimization */
+    /* Fold KLD gradients into the component parameter gradients before
+       applying the approximate natural-gradient scaling. */
+    for (k = 0; k < ncomponents; k++) {
+      for (j = 0; j < fulld; j++)
+        vec_set(model_grad_components[k], j,
+                vec_get(model_grad_components[k], j) +
+                vec_get(mu_kldgrad[k], j));
+      for (j = 0; j < data->covar_params[k]->size; j++)
+        vec_set(model_grad_components[k], fulld + j,
+                vec_get(model_grad_components[k], fulld + j) +
+                vec_get(sigma_kldgrad[k], j));
+    }
+
+    /* Rescale the complete component gradient by approximate inverse Fisher
+       information to put parameters on similar optimization scales. */
     for (k = 0; k < ncomponents; k++) {
       if (data->natural_grad == TRUE)
         rescale_grad(model_grad_components[k],
@@ -1322,18 +1293,15 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     /* we won't do this with nuisance params */
 
     /* update scheduler with norm of the actual Adam update and clip if
-       necessary.  Mean KLD gradients are stored by component, so include
-       them explicitly rather than measuring only direct model gradients. */
+       necessary. */
     grad_norm_sq = 0.0;
     for (k = 0; k < ncomponents; k++) {
       for (j = 0; j < fulld; j++) {
         double g = vec_get(model_natgrad_components[k], j);
-        g += rescale_mean_grad_el(mu_kldgrad[k], mixmvn->components[k], data, j);
         grad_norm_sq += g * g;
       }
       for (j = 0; j < data->covar_params[k]->size; j++) {
-        double g = vec_get(model_natgrad_components[k], fulld + j) +
-          rescale_sigma_grad_el(sigma_kldgrad[k], mixmvn->components[k], data, j, 0);
+        double g = vec_get(model_natgrad_components[k], fulld + j);
         grad_norm_sq += g * g;
       }
     }
@@ -1361,8 +1329,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       for (j = 0; j < fulld; j++) {
         double m = vec_get(m_mu[k], j), v = vec_get(v_mu[k], j);
         double g = vec_get(model_natgrad_components[k], j);
-        g += clip_scale * rescale_mean_grad_el(mu_kldgrad[k],
-                                                  mixmvn->components[k], data, j);
         mmvn_set_mu_el(mixmvn->components[k], j,
                         adam_scalar_update(mmvn_get_mu_el(mixmvn->components[k], j),
                                            &m, &v, t, g, sd->lr));
@@ -1379,9 +1345,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       sigma_t[k]++;
       for (j = 0; j < data->covar_params[k]->size; j++) {
         double m = vec_get(m_sigma[k], j), v = vec_get(v_sigma[k], j);
-        double g = vec_get(model_natgrad_components[k], fulld + j) +
-          clip_scale * rescale_sigma_grad_el(sigma_kldgrad[k], mixmvn->components[k],
-                                                data, j, 0);
+        double g = vec_get(model_natgrad_components[k], fulld + j);
         vec_set(data->covar_params[k], j,
                 adam_scalar_update(vec_get(data->covar_params[k], j),
                                    &m, &v, sigma_t[k], g, sd->lr));
