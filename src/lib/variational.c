@@ -987,19 +987,14 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
                         CovarData *data, FILE *logf,
                         unsigned int silent, unsigned int log_all) {
 
-  Vector *model_grad;          /* scratch direct gradient for one component */
-  Vector **model_grad_components = NULL;
-  Vector **model_natgrad_components = NULL;
-  Vector **mu_kldgrad = NULL;  /* per-component KLD mean gradients */
-  Vector **sigma_kldgrad = NULL; /* per-component KLD covariance gradients */
-  Vector **sigma_penalty_grad = NULL; /* per-component variance-penalty gradients */
-  Vector *weight_grad = NULL, *weight_kldgrad = NULL,
+  Vector *model_grad, **model_grad_components = NULL, 
+    **model_natgrad_components = NULL, **mu_kldgrad = NULL, 
+    **sigma_kldgrad = NULL, **sigma_penalty_grad = NULL, 
+    *weight_grad = NULL, *weight_kldgrad = NULL,
     *m_weight = NULL, *v_weight = NULL, *best_logits = NULL,
-    *component_elbo = NULL;
-  Vector *tmp_model_grad = NULL, *tmp_ave_nuis_grad = NULL,
-    *tmp_weight_kldgrad = NULL;
-  Vector **tmp_mu_kldgrad = NULL, **tmp_sigma_kldgrad = NULL;
-  Vector **m_mu = NULL, **v_mu = NULL, **best_mu = NULL,
+    *component_elbo = NULL, *tmp_model_grad = NULL, *tmp_ave_nuis_grad = NULL,
+    *tmp_weight_kldgrad = NULL, **tmp_mu_kldgrad = NULL, **tmp_sigma_kldgrad = NULL, 
+    **m_mu = NULL, **v_mu = NULL, **best_mu = NULL,
     **m_sigma = NULL, **v_sigma = NULL,
     **best_sigmapar = NULL;
   int n = data->nseqs, j, k, t = 0, stop = FALSE, bestt = -1, graddim,
