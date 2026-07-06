@@ -390,7 +390,7 @@ static double estimate_component_model_terms(
   return ll;
 }
 
-static double add_mixture_weight_prior_and_gradients(mixture_MVN *mixmvn,
+static double add_mixture_weight_dirichlet_prior(mixture_MVN *mixmvn,
                                                        Vector *component_elbo,
                                                        Vector *weight_kldgrad,
                                                        Vector *weight_grad,
@@ -398,14 +398,13 @@ static double add_mixture_weight_prior_and_gradients(mixture_MVN *mixmvn,
   int j;
   double weight_log_prior = 0.0;
 
-  if (mixmvn->ncomponents == 1)
-    return mix_elbo;
-
+  /* log density of a symmetric Dirichlet prior, ignoring constants */
   for (j = 0; j < mixmvn->ncomponents; j++) {
     double wj = vec_get(mixmvn->weights, j);
     weight_log_prior += (MIXTURE_WEIGHT_PRIOR_ALPHA - 1.0) * log(wj);
   }
 
+  /* compute gradients of the log-prior with respect to the mixture weights */
   for (j = 0; j < mixmvn->ncomponents; j++) {
     double wj = vec_get(mixmvn->weights, j);
     vec_set(weight_grad, j,
@@ -574,17 +573,18 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     if (mixmvn->ncomponents == 1) {
       double logdet = mmvn_log_det(mixmvn->components[0]);
       if (data->treeprior == NULL)
-        *kld = compute_standard_normal_kl_term_and_grads(mixmvn->components[0], data,
-                                                            fulld, logdet,
-                                                            sigma_kldgrad[0],
-                                                            mu_kldgrad[0]);
+        kld = compute_standard_normal_kl_term_and_grads(mixmvn->components[0],
+                                                           data, fulld, logdet,
+                                                           sigma_kldgrad[0],
+                                                           mu_kldgrad[0]);
       else
-        *kld = compute_entropy_term_and_grads(mixmvn->components[0], data, fulld, logdet,
-                                                sigma_kldgrad[0]);
+        kld = compute_entropy_term_and_grads(mixmvn->components[0], data,
+                                               fulld, logdet,
+                                               sigma_kldgrad[0]);
       
       /* scale kld and grad */
       double scale = kld_gradient_scale(data);
-      *kld *= scale;
+      kld *= scale;
       vec_scale(sigma_kldgrad[0], scale);
       vec_scale(mu_kldgrad[0], scale);
     }
@@ -602,36 +602,35 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       data->subsample = TRUE;
       data->subsampsize = sd->m;
       data->reuse_subsamp = !sd->resample_sites;
-      *subsamp_rescale = (double)data->msa->length / data->subsampsize;
+      subsamp_rescale = (double)data->msa->length / data->subsampsize;
     }
     else {
       data->subsample = FALSE;
-      *subsamp_rescale = 1.0;
+      subsamp_rescale = 1.0;
     }
 
     /* decide whether to re-enable Taylor approximation */
-    if (*taylor_stash != NULL && data->taylor == NULL &&
-        t == *reenable_taylor_t) {
+    if (taylor_stash != NULL && data->taylor == NULL &&
+        t == reenable_taylor_t) {
       if (!silent)
         fprintf(stderr, "WARNING: re-enabling Taylor approximation.\n");
-      data->taylor = *taylor_stash;
-      *taylor_stash = NULL;
+      data->taylor = taylor_stash;
+      taylor_stash = NULL;
     }
 
     /* update migration warmup status */
-    if (data->crispr_mod == NULL || data->migtable == NULL)
-      return;
-
-    if (t < CPR_MIG_WARMUP_ITERS) {
-      if (t == 0 && !silent)
-        fprintf(stderr, "Running %d warmup iterations without migration "
-                "model...\n", CPR_MIG_WARMUP_ITERS);
-      data->crispr_mod->mig_warmup = TRUE;
-    }
-    else {
-      if (t == CPR_MIG_WARMUP_ITERS && !silent)
-        fprintf(stderr, "Warmup complete; enabling migration model...\n");
-      data->crispr_mod->mig_warmup = FALSE;
+    if (data->crispr_mod != NULL && data->migtable != NULL) {
+      if (t < CPR_MIG_WARMUP_ITERS) {
+        if (t == 0 && !silent)
+          fprintf(stderr, "Running %d warmup iterations without migration "
+                  "model...\n", CPR_MIG_WARMUP_ITERS);
+        data->crispr_mod->mig_warmup = TRUE;
+      }
+      else {
+        if (t == CPR_MIG_WARMUP_ITERS && !silent)
+          fprintf(stderr, "Warmup complete; enabling migration model...\n");
+        data->crispr_mod->mig_warmup = FALSE;
+      }
     }
 
     /* per-component elbo computation */
@@ -703,9 +702,12 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
           vec_set(ave_nuis_grad, j, vec_get(ave_nuis_grad, j) +
                   wk * vec_get(tmp_ave_nuis_grad, j));
     }
-    elb = add_mixture_weight_prior_and_gradients(mixmvn, component_elbo,
-                                                   weight_kldgrad, weight_grad,
-                                                   elb);
+
+    if (ncomponents > 1) {
+      elb = add_mixture_weight_dirichlet_prior(mixmvn, component_elbo,
+                                                weight_kldgrad, weight_grad,
+                                                elb);
+    }
 
     /* don't select best during migration warmup: migration is excluded from
      * the ELBO then, making warmup ELBOs artificially high and incomparable
