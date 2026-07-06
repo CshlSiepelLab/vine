@@ -336,11 +336,86 @@ static double compute_entropy_term_and_grads(multi_MVN *component,
   return -0.5 * (fulld * (1.0 + log(2 * M_PI)) + logdet);
 }
 
-static void scale_kld_term_and_grads(double *kld, Vector *sigma_grad,
-                                        Vector *mu_grad, double scale) {
-  *kld *= scale;
-  vec_scale(sigma_grad, scale);
-  vec_scale(mu_grad, scale);
+static double estimate_component_model_terms(
+    TreeModel *mod, mixture_MVN *mixmvn, int component, CovarData *data,
+    int nminibatch, Vector *model_grad, Vector *nuis_grad,
+    double *lprior, double *kld, double *migll, double *ll_at_mean,
+    double subsamp_rescale,
+    Vector **sigma_kldgrad, Vector **mu_kldgrad, Vector *weight_kldgrad,
+    TaylorData **taylor_stash, int *reenable_taylor_t, int t,
+    unsigned int silent) {
+  double ll = 0.0;
+
+  *lprior = 0.0;
+  *migll = 0.0;
+  *ll_at_mean = 0.0;
+
+  vec_zero(model_grad);
+  if (nuis_grad != NULL)
+    vec_zero(nuis_grad);
+
+  if (data->taylor != NULL) {
+    ll = elbo_hybrid(mod, mixmvn, component, data, nminibatch,
+                       model_grad, nuis_grad, lprior, migll, ll_at_mean);
+    if ((data->crispr_mod != NULL &&
+         data->crispr_mod->zero_likl == TRUE) || !isfinite(ll)) {
+      if (!silent)
+        fprintf(stderr, "WARNING: Taylor approximation produced invalid "
+                "likelihood; switching to Monte Carlo.\n");
+      *reenable_taylor_t = t + 10;
+      *taylor_stash = data->taylor;
+      data->taylor = NULL;
+    }
+    else if (mixmvn->ncomponents > 1) {
+      elbo_mix_kld_montecarlo(mixmvn, component, data, nminibatch,
+                                 kld, sigma_kldgrad, mu_kldgrad,
+                                 weight_kldgrad);
+    }
+  }
+
+  if (data->taylor == NULL) {
+    *ll_at_mean = 0.0;
+    ll = elbo_montecarlo(mod, mixmvn, component, data, nminibatch,
+                           model_grad, nuis_grad, lprior, migll, kld,
+                           sigma_kldgrad, mu_kldgrad, weight_kldgrad);
+  }
+
+  if (data->subsample == TRUE) {
+    vec_scale(model_grad, subsamp_rescale);
+    if (nuis_grad != NULL)
+      vec_scale(nuis_grad, subsamp_rescale);
+    ll *= subsamp_rescale;
+  }
+
+  return ll;
+}
+
+static double add_mixture_weight_prior_and_gradients(mixture_MVN *mixmvn,
+                                                       Vector *component_elbo,
+                                                       Vector *weight_kldgrad,
+                                                       Vector *weight_grad,
+                                                       double mix_elbo) {
+  int j;
+  double weight_log_prior = 0.0;
+
+  if (mixmvn->ncomponents == 1)
+    return mix_elbo;
+
+  for (j = 0; j < mixmvn->ncomponents; j++) {
+    double wj = vec_get(mixmvn->weights, j);
+    weight_log_prior += (MIXTURE_WEIGHT_PRIOR_ALPHA - 1.0) * log(wj);
+  }
+
+  for (j = 0; j < mixmvn->ncomponents; j++) {
+    double wj = vec_get(mixmvn->weights, j);
+    vec_set(weight_grad, j,
+            vec_get(weight_kldgrad, j) +
+            wj * (vec_get(component_elbo, j) - mix_elbo) +
+            (MIXTURE_WEIGHT_PRIOR_ALPHA - 1.0) *
+            (1.0 - mixmvn->ncomponents * wj));
+  }
+
+  return mix_elbo + weight_log_prior;
 }
 
 /* optimize variational model by stochastic gradient ascent using the
@@ -478,159 +553,137 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     sched_next(s, st, sm, sd);
     unsigned int clipped = FALSE;
     double clip_scale = 1.0;
-    
-    /* zero respective calculation params and gradients for this iteration */
-    kld = 0;
+
+    /* zero gradients */
     vec_zero(weight_grad);
     vec_zero(weight_kldgrad);
     vec_zero(component_elbo);
-    for (k = 0; k < ncomponents; k++) {
+    for (k = 0; k < mixmvn->ncomponents; k++) {
       vec_zero(mu_kldgrad[k]);
       vec_zero(sigma_kldgrad[k]);
       vec_zero(model_grad_components[k]);
       vec_zero(model_natgrad_components[k]);
       vec_zero(sigma_penalty_grad[k]);
+      assert(model_grad_components[k]->size == graddim);
     }
+    if (ave_nuis_grad != NULL)
+      vec_zero(ave_nuis_grad);
 
-    /* In the single component case, we can precompute the KLD because it does not depend on the data under this model,
-       (see equation 7, Doersch arXiv 2016). This does not apply to the mixture case, which
-       will be handled using monte carlo below. */
-    if (ncomponents == 1) {
-      multi_MVN *component = mixmvn->components[0];
-      double logdet = mmvn_log_det(component);
-
+    /* compute closed form terms for the single mixture component case */
+    kld = 0.0;
+    if (mixmvn->ncomponents == 1) {
+      double logdet = mmvn_log_det(mixmvn->components[0]);
       if (data->treeprior == NULL)
-        kld = compute_standard_normal_kl_term_and_grads(component, data,
-                                                          fulld, logdet,
-                                                          sigma_kldgrad[0],
-                                                          mu_kldgrad[0]);
+        *kld = compute_standard_normal_kl_term_and_grads(mixmvn->components[0], data,
+                                                            fulld, logdet,
+                                                            sigma_kldgrad[0],
+                                                            mu_kldgrad[0]);
       else
-        kld = compute_entropy_term_and_grads(component, data, fulld, logdet,
+        *kld = compute_entropy_term_and_grads(mixmvn->components[0], data, fulld, logdet,
                                                 sigma_kldgrad[0]);
-
-      scale_kld_term_and_grads(&kld, sigma_kldgrad[0], mu_kldgrad[0],
-                                  kld_gradient_scale(data));
+      
+      /* scale kld and grad */
+      double scale = kld_gradient_scale(data);
+      *kld *= scale;
+      vec_scale(sigma_kldgrad[0], scale);
+      vec_scale(mu_kldgrad[0], scale);
     }
 
-    /* The variance penalty expectation is weighted by mixture weights. */
-    penalty = 0;
-    for (k = 0; k < ncomponents; k++) {
+    /* compute variance penalty terms */
+    for (k = 0; k < mixmvn->ncomponents; k++) {
       double ck_penalty = compute_variance_penalty(sigma_penalty_grad[k],
-                                                     mixmvn->components[k],
-                                                     data, k);
+                                                    mixmvn->components[k],
+                                                    data, k);
       vec_set(component_penalty, k, ck_penalty);
-      penalty += (ncomponents == 1 ? 1.0 : vec_get(mixmvn->weights, k)) *
-        ck_penalty;
     }
-
-
-    /* now estimate ELBO and gradient, either by Monte Carlo integration or by
-     * the Taylor approximation */
-
-    /* first set up subsampling based on scheduler parameters (but not
-       in crispr mode or with multithreading) */
+    
+    /* configure subsampling */
     if (!sd->full_grad_now && data->crispr_mod == NULL && data->nthreads == 1) {
       data->subsample = TRUE;
       data->subsampsize = sd->m;
       data->reuse_subsamp = !sd->resample_sites;
-      subsamp_rescale = (double)data->msa->length / data->subsampsize;
+      *subsamp_rescale = (double)data->msa->length / data->subsampsize;
     }
-    else { /* no subsampling */
+    else {
       data->subsample = FALSE;
-      subsamp_rescale = 1.0;
+      *subsamp_rescale = 1.0;
     }
 
-    /* check whether to re-enable Taylor approximation */
-    if (taylor_stash != NULL && data->taylor == NULL && t == reenable_taylor_t) {
-      if (!silent) fprintf(stderr, "WARNING: re-enabling Taylor approximation.\n");
-      data->taylor = taylor_stash;
-      taylor_stash = NULL;
-    }
-    
-    /* migration warmup: disable migration for first CPR_MIG_WARMUP_ITERS
-       iterations to let tree topology converge before migration activates */
-    if (data->crispr_mod != NULL && data->migtable != NULL) {
-      if (t < CPR_MIG_WARMUP_ITERS) {
-        if (t == 0 && !silent)
-          fprintf(stderr, "Running %d warmup iterations without migration "
-                  "model...\n", CPR_MIG_WARMUP_ITERS);
-        data->crispr_mod->mig_warmup = TRUE;
-      } else {
-        if (t == CPR_MIG_WARMUP_ITERS && !silent)
-          fprintf(stderr, "Warmup complete; enabling migration model...\n");
-        data->crispr_mod->mig_warmup = FALSE;
-      }
+    /* decide whether to re-enable Taylor approximation */
+    if (*taylor_stash != NULL && data->taylor == NULL &&
+        t == *reenable_taylor_t) {
+      if (!silent)
+        fprintf(stderr, "WARNING: re-enabling Taylor approximation.\n");
+      data->taylor = *taylor_stash;
+      *taylor_stash = NULL;
     }
 
-    if (ncomponents > 1) {
-      avell = ave_lprior = avemigll = kld = ll_at_mean = elb = 0.0;
-      if (ave_nuis_grad != NULL)
-        vec_zero(ave_nuis_grad);
+    /* update migration warmup status */
+    if (data->crispr_mod == NULL || data->migtable == NULL)
+      return;
 
-      for (k = 0; k < ncomponents; k++) {
-        double wk = vec_get(mixmvn->weights, k);
-        double ckld = 0.0, cavell, cave_lprior = 0.0, cavemigll = 0.0,
-          cll_at_mean = 0.0, celb;
+    if (t < CPR_MIG_WARMUP_ITERS) {
+      if (t == 0 && !silent)
+        fprintf(stderr, "Running %d warmup iterations without migration "
+                "model...\n", CPR_MIG_WARMUP_ITERS);
+      data->crispr_mod->mig_warmup = TRUE;
+    }
+    else {
+      if (t == CPR_MIG_WARMUP_ITERS && !silent)
+        fprintf(stderr, "Warmup complete; enabling migration model...\n");
+      data->crispr_mod->mig_warmup = FALSE;
+    }
 
-        vec_zero(tmp_model_grad);
-        if (tmp_ave_nuis_grad != NULL)
-          vec_zero(tmp_ave_nuis_grad);
+    /* per-component elbo computation */
+    avell = ave_lprior = avemigll = ll_at_mean = elb = 0.0;
+    penalty = 0.0;
+    for (k = 0; k < ncomponents; k++) {
+      int c;
+      double wk = mixmvn->ncomponents == 1 ? 1.0 : vec_get(mixmvn->weights, k);
+      double ckld = ncomponents == 1 ? kld : 0.0;
+      double cavell, cave_lprior, cavemigll, cll_at_mean, celb;
 
-        if (data->taylor != NULL) {
-          cavell = elbo_hybrid(mod, mixmvn, k, data, nminibatch,
-                                  tmp_model_grad, tmp_ave_nuis_grad,
-                                  &cave_lprior, &cavemigll, &cll_at_mean);
-          if ((data->crispr_mod != NULL &&
-               data->crispr_mod->zero_likl == TRUE) || !isfinite(cavell)) {
-            if (!silent)
-              fprintf(stderr, "WARNING: Taylor approximation produced invalid "
-                      "likelihood; switching to Monte Carlo.\n");
-            reenable_taylor_t = t + 10;
-            taylor_stash = data->taylor;
-            data->taylor = NULL;
-          }
-          else {
-            elbo_mix_kld_montecarlo(mixmvn, k, data, nminibatch,
-                                       &ckld, tmp_sigma_kldgrad,
-                                       tmp_mu_kldgrad, tmp_weight_kldgrad);
-          }
-        }
+      cavell = estimate_component_model_terms(mod, mixmvn, k, data,
+                                                nminibatch, tmp_model_grad,
+                                                tmp_ave_nuis_grad,
+                                                &cave_lprior, &ckld,
+                                                &cavemigll, &cll_at_mean,
+                                                subsamp_rescale,
+                                                tmp_sigma_kldgrad,
+                                                tmp_mu_kldgrad,
+                                                tmp_weight_kldgrad,
+                                                &taylor_stash,
+                                                &reenable_taylor_t, t,
+                                                silent);
+      celb = cavell + cave_lprior - ckld -
+        vec_get(component_penalty, k) + cavemigll;
+      vec_set(component_elbo, k, celb);
 
-        if (data->taylor == NULL) {
-          cll_at_mean = 0.0;
-          cavell = elbo_montecarlo(mod, mixmvn, k, data, nminibatch,
-                                      tmp_model_grad, tmp_ave_nuis_grad,
-                                      &cave_lprior, &cavemigll, &ckld,
-                                      tmp_sigma_kldgrad, tmp_mu_kldgrad,
-                                      tmp_weight_kldgrad);
-        }
+      avell += wk * cavell;
+      ave_lprior += wk * cave_lprior;
+      kld += ncomponents == 1 ? 0.0 : wk * ckld;
+      penalty += wk * vec_get(component_penalty, k);
+      avemigll += wk * cavemigll;
+      ll_at_mean += wk * cll_at_mean;
+      elb += wk * celb;
 
-        if (data->subsample == TRUE) {
-          vec_scale(tmp_model_grad, subsamp_rescale);
-          if (tmp_ave_nuis_grad != NULL)
-            vec_scale(tmp_ave_nuis_grad, subsamp_rescale);
-          cavell *= subsamp_rescale;
-        }
+      for (j = 0; j < graddim; j++)
+        vec_set(model_grad_components[k], j,
+                vec_get(model_grad_components[k], j) +
+                wk * vec_get(tmp_model_grad, j) +
+                wk * vec_get(sigma_penalty_grad[k], j));
 
-        celb = cavell + cave_lprior - ckld -
-          vec_get(component_penalty, k) + cavemigll;
-        vec_set(component_elbo, k, celb);
-        avell += wk * cavell;
-        ave_lprior += wk * cave_lprior;
-        avemigll += wk * cavemigll;
-        kld += wk * ckld;
-        ll_at_mean += wk * cll_at_mean;
-        elb += wk * celb;
-
-        for (j = 0; j < graddim; j++)
-          vec_set(model_grad_components[k], j,
-                  vec_get(model_grad_components[k], j) +
-                  wk * vec_get(tmp_model_grad, j));
+      /* Preserve the previous single-component covariance-gradient path: the
+         closed-form term participates in Fisher rescaling and is also kept in
+         the separate KL-gradient vector used by the Adam update below. */
+      if (ncomponents == 1)
         for (j = 0; j < data->covar_params[k]->size; j++)
           vec_set(model_grad_components[k], fulld + j,
                   vec_get(model_grad_components[k], fulld + j) +
-                  wk * vec_get(sigma_penalty_grad[k], fulld + j));
-        for (int c = 0; c < ncomponents; c++) {
+                  vec_get(sigma_kldgrad[k], j));
+
+      if (ncomponents > 1) {
+        for (c = 0; c < ncomponents; c++) {
           for (j = 0; j < fulld; j++)
             vec_set(mu_kldgrad[c], j,
                     vec_get(mu_kldgrad[c], j) +
@@ -643,68 +696,16 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
         for (j = 0; j < ncomponents; j++)
           vec_set(weight_kldgrad, j, vec_get(weight_kldgrad, j) +
                   wk * vec_get(tmp_weight_kldgrad, j));
-        if (ave_nuis_grad != NULL)
-          for (j = 0; j < n_nuisance_params; j++)
-            vec_set(ave_nuis_grad, j, vec_get(ave_nuis_grad, j) +
-                    wk * vec_get(tmp_ave_nuis_grad, j));
       }
 
-      double mix_elb = elb;
-      double weight_log_prior = 0.0;
-      for (j = 0; j < ncomponents; j++) {
-        double wj = vec_get(mixmvn->weights, j);
-        weight_log_prior += (MIXTURE_WEIGHT_PRIOR_ALPHA - 1.0) * log(wj);
-      }
-      elb += weight_log_prior;
-      for (j = 0; j < ncomponents; j++) {
-        double wj = vec_get(mixmvn->weights, j);
-        vec_set(weight_grad, j,
-                vec_get(weight_kldgrad, j) +
-                wj * (vec_get(component_elbo, j) - mix_elb) +
-                (MIXTURE_WEIGHT_PRIOR_ALPHA - 1.0) *
-                (1.0 - ncomponents * wj));
-      }
+      if (ave_nuis_grad != NULL)
+        for (j = 0; j < n_nuisance_params; j++)
+          vec_set(ave_nuis_grad, j, vec_get(ave_nuis_grad, j) +
+                  wk * vec_get(tmp_ave_nuis_grad, j));
     }
-    else {
-      if (data->taylor != NULL) {
-        avell = elbo_hybrid(mod, mixmvn, 0, data, nminibatch,
-                               model_grad, ave_nuis_grad, &ave_lprior,
-                               &avemigll, &ll_at_mean);
-        if ((data->crispr_mod != NULL &&
-             data->crispr_mod->zero_likl == TRUE) || !isfinite(avell)) {
-          if (!silent)
-            fprintf(stderr, "WARNING: Taylor approximation produced invalid "
-                    "likelihood; switching to Monte Carlo.\n");
-          reenable_taylor_t = t + 10;
-          taylor_stash = data->taylor;
-          data->taylor = NULL;
-        }
-      }
-
-      if (data->taylor == NULL) {
-        ll_at_mean = 0;  /* not available in MC path */
-        avell = elbo_montecarlo(mod, mixmvn, 0, data, nminibatch,
-                                   model_grad, ave_nuis_grad, &ave_lprior,
-                                   &avemigll, &kld, sigma_kldgrad,
-                                   mu_kldgrad, weight_kldgrad);
-      }
-
-      if (data->subsample == TRUE) {
-        vec_scale(model_grad, subsamp_rescale);
-        if (ave_nuis_grad != NULL)
-          vec_scale(ave_nuis_grad, subsamp_rescale);
-        avell *= subsamp_rescale;
-      }
-
-      for (j = 0; j < data->covar_params[0]->size; j++)
-        vec_set(model_grad, fulld + j,
-                vec_get(model_grad, fulld + j) +
-                vec_get(sigma_kldgrad[0], j));
-      vec_plus_eq(model_grad, sigma_penalty_grad[0]);
-      vec_copy(model_grad_components[0], model_grad);
-
-      elb = avell + ave_lprior - kld - penalty + avemigll;
-    }
+    elb = add_mixture_weight_prior_and_gradients(mixmvn, component_elbo,
+                                                   weight_kldgrad, weight_grad,
+                                                   elb);
 
     /* don't select best during migration warmup: migration is excluded from
      * the ELBO then, making warmup ELBOs artificially high and incomparable
