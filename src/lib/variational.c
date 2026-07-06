@@ -273,25 +273,28 @@ static double compute_standard_normal_kl_term_and_grads(multi_MVN *component,
   int j;
   double trace = mmvn_trace(component);
 
-  for (j = 0; j < fulld; j++)
-    vec_set(mu_grad, j, -1.0 * mmvn_get_mu_el(component, j));
+  if (mu_grad != NULL)
+    for (j = 0; j < fulld; j++)
+      vec_set(mu_grad, j, -1.0 * mmvn_get_mu_el(component, j));
 
-  for (j = 0; j < sigma_grad->size; j++) {
-    double gj = 0.0;
+  if (sigma_grad != NULL) {
+    for (j = 0; j < sigma_grad->size; j++) {
+      double gj = 0.0;
 
-    /* The covariance derivative includes the trace and log determinant terms.
-       LOWR uses a matrix expression below because its parameters interact. */
-    if (data->type == CONST || data->type == DIST)
-      gj = 0.5 * (fulld - trace);
-    else if (data->type == DIAG)
-      gj = 0.5 * (1.0 - mat_get(component->mvn->sigma, j, j));
-    else
-      continue;
-    vec_set(sigma_grad, j, gj);
+      /* The covariance derivative includes the trace and log determinant terms.
+         LOWR uses a matrix expression below because its parameters interact. */
+      if (data->type == CONST || data->type == DIST)
+        gj = 0.5 * (fulld - trace);
+      else if (data->type == DIAG)
+        gj = 0.5 * (1.0 - mat_get(component->mvn->sigma, j, j));
+      else
+        continue;
+      vec_set(sigma_grad, j, gj);
+    }
+
+    if (data->type == LOWR)
+      set_kld_sigma_grad_LOWR(sigma_grad, component);
   }
-
-  if (data->type == LOWR)
-    set_kld_sigma_grad_LOWR(sigma_grad, component);
 
   return 0.5 * (trace + mmvn_mu2(component) - fulld - logdet);
 }
@@ -306,21 +309,23 @@ static double compute_entropy_term_and_grads(multi_MVN *component,
                                                 Vector *sigma_grad) {
   int j;
 
-  for (j = 0; j < sigma_grad->size; j++) {
-    double gj = 0.0;
+  if (sigma_grad != NULL) {
+    for (j = 0; j < sigma_grad->size; j++) {
+      double gj = 0.0;
 
-    /* Mean parameters do not affect entropy. */
-    if (data->type == CONST || data->type == DIST)
-      gj = 0.5 * fulld;
-    else if (data->type == DIAG)
-      gj = 0.5;
-    else
-      continue;
-    vec_set(sigma_grad, j, gj);
+      /* Mean parameters do not affect entropy. */
+      if (data->type == CONST || data->type == DIST)
+        gj = 0.5 * fulld;
+      else if (data->type == DIAG)
+        gj = 0.5;
+      else
+        continue;
+      vec_set(sigma_grad, j, gj);
+    }
+
+    if (data->type == LOWR)
+      set_entropy_sigma_grad_LOWR(sigma_grad, component);
   }
-
-  if (data->type == LOWR)
-    set_entropy_sigma_grad_LOWR(sigma_grad, component);
 
   return -0.5 * (fulld * (1.0 + log(2 * M_PI)) + logdet);
 }
@@ -343,8 +348,10 @@ static double compute_closed_form_kld(mixture_MVN *mixmvn, CovarData *data,
                                            fulld, logdet, sigma_kldgrad);
 
   kld *= scale;
-  vec_scale(sigma_kldgrad, scale);
-  vec_scale(mu_kldgrad, scale);
+  if (sigma_kldgrad != NULL)
+    vec_scale(sigma_kldgrad, scale);
+  if (mu_kldgrad != NULL)
+    vec_scale(mu_kldgrad, scale);
   return kld;
 }
 
@@ -686,6 +693,15 @@ static double elbo_mix_kld_montecarlo(mixture_MVN *mixmvn, int component,
   if (weight_kldgrad != NULL)
     vec_zero(weight_kldgrad);
 
+  if (mixmvn->ncomponents == 1) {
+    *kld = compute_closed_form_kld(mixmvn, data, fulld,
+                                      sigma_kldgrad != NULL ? sigma_kldgrad[0] : NULL,
+                                      mu_kldgrad != NULL ? mu_kldgrad[0] : NULL);
+    vec_free(points);
+    vec_free(points_std);
+    return *kld;
+  }
+
   for (int i = 0; i < nminibatch; i++) {
     sample_points(mixmvn->components[component], points, points_std, i);
     kld_sum += mix_kld_sample_grad(mixmvn, component, data, points,
@@ -718,7 +734,7 @@ double elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
   double ll, migll = 0, lprior = 0, avell = 0,
     ave_lprior_sum = 0, avemigll_sum = 0;
   int n = data->nseqs, dim = data->dim, fulld = n*dim;
-  int estimate_kld = (mixmvn->ncomponents > 1 && kld != NULL);
+  int estimate_kld = (kld != NULL);
   int estimate_kld_grad = (estimate_kld && sigma_kldgrad != NULL);
   double scale = data->kld_upweight /
     (nminibatch * data->pointscale * data->pointscale);
@@ -739,7 +755,10 @@ double elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
   }
 
   if (estimate_kld)
-    *kld = 0;
+    *kld = mixmvn->ncomponents == 1 ?
+      compute_closed_form_kld(mixmvn, data, fulld,
+                                estimate_kld_grad ? sigma_kldgrad[0] : NULL,
+                                mu_kldgrad != NULL ? mu_kldgrad[0] : NULL) : 0;
 
   points = vec_new(fulld);
   if (data->type == LOWR) /* in this case, the underlying standard
@@ -765,7 +784,7 @@ double elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
     avell += ll;
     avemigll_sum += migll;
     ave_lprior_sum += lprior;
-    if (estimate_kld)
+    if (estimate_kld && mixmvn->ncomponents > 1)
       *kld += mix_kld_sample_grad(mixmvn, component, data, points,
                                      points_std,
                                      estimate_kld_grad ? sigma_kldgrad : NULL,
@@ -789,14 +808,16 @@ double elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
     *ave_lprior = ave_lprior_sum;
   if (avemigll != NULL)
     *avemigll = avemigll_sum;
-  if (estimate_kld)
+  if (estimate_kld && mixmvn->ncomponents > 1)
     *kld *= scale;
   if (estimate_kld_grad) {
-    for (int c = 0; c < mixmvn->ncomponents; c++)
-      vec_scale(sigma_kldgrad[c], scale);
-    if (mu_kldgrad != NULL)
+    if (mixmvn->ncomponents > 1) {
       for (int c = 0; c < mixmvn->ncomponents; c++)
-        vec_scale(mu_kldgrad[c], scale);
+        vec_scale(sigma_kldgrad[c], scale);
+      if (mu_kldgrad != NULL)
+        for (int c = 0; c < mixmvn->ncomponents; c++)
+          vec_scale(mu_kldgrad[c], scale);
+    }
   }
   if (weight_kldgrad != NULL)
     vec_scale(weight_kldgrad, scale);
@@ -1163,18 +1184,15 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     /* per-component elbo computation */
     kld = 0.0;
     avell = ave_lprior = avemigll = ll_at_mean = elb = penalty = 0.0;
-    double cavell, cave_lprior, cavemigll, cll_at_mean, celb, cpenalty, wk;
+    double cavell, cave_lprior, cavemigll, cll_at_mean, celb, cpenalty, wk, ckld;
     int c;
     for (k = 0; k < ncomponents; k++) {
-      wk = vec_get(mixmvn->weights, k);
-      double ckld = ncomponents == 1 ?
-        compute_closed_form_kld(mixmvn, data, fulld, sigma_kldgrad[k],
-                                  mu_kldgrad[k]) : 0.0;
-
       cavell = 0.0;
       cave_lprior = 0.0;
       cavemigll = 0.0;
       cll_at_mean = 0.0;
+      wk = vec_get(mixmvn->weights, k);
+      ckld = 0.0;
 
       vec_zero(tmp_model_grad);
       if (tmp_ave_nuis_grad != NULL)
@@ -1193,7 +1211,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
           taylor_stash = data->taylor;
           data->taylor = NULL;
         }
-        else if (mixmvn->ncomponents > 1) {
+        else {
           elbo_mix_kld_montecarlo(mixmvn, k, data, nminibatch,
                                     &ckld, tmp_sigma_kldgrad,
                                     tmp_mu_kldgrad, tmp_weight_kldgrad);
@@ -1241,17 +1259,18 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
                 wk * vec_get(tmp_model_grad, j) +
                 wk * vec_get(sigma_penalty_grad[k], j));
 
+      for (c = 0; c < ncomponents; c++) {
+        for (j = 0; j < fulld; j++)
+          vec_set(mu_kldgrad[c], j,
+                  vec_get(mu_kldgrad[c], j) +
+                  wk * vec_get(tmp_mu_kldgrad[c], j));
+        for (j = 0; j < data->covar_params[c]->size; j++)
+          vec_set(sigma_kldgrad[c], j,
+                  vec_get(sigma_kldgrad[c], j) +
+                  wk * vec_get(tmp_sigma_kldgrad[c], j));
+      }
+
       if (ncomponents > 1) {
-        for (c = 0; c < ncomponents; c++) {
-          for (j = 0; j < fulld; j++)
-            vec_set(mu_kldgrad[c], j,
-                    vec_get(mu_kldgrad[c], j) +
-                    wk * vec_get(tmp_mu_kldgrad[c], j));
-          for (j = 0; j < data->covar_params[c]->size; j++)
-            vec_set(sigma_kldgrad[c], j,
-                    vec_get(sigma_kldgrad[c], j) +
-                    wk * vec_get(tmp_sigma_kldgrad[c], j));
-        }
         for (j = 0; j < ncomponents; j++)
           vec_set(weight_kldgrad, j, vec_get(weight_kldgrad, j) +
                   wk * vec_get(tmp_weight_kldgrad, j));
