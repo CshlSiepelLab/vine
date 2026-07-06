@@ -352,579 +352,6 @@ static double add_mixture_weight_dirichlet_prior(mixture_MVN *mixmvn,
   return mix_elbo + weight_log_prior;
 }
 
-/* optimize variational model by stochastic gradient ascent using the
-   Adam algorithm.  Takes initial tree model and alignment and
-   distance matrix, dimensionality of Euclidean space to work in.
-   Note: alters distance matrix */
-void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
-                        double learnrate, int nbatches_conv, int min_nbatches,
-                        CovarData *data, FILE *logf,
-                        unsigned int silent, unsigned int log_all) {
-
-  Vector *model_grad;          /* scratch direct gradient for one component */
-  Vector **model_grad_components = NULL;
-  Vector **model_natgrad_components = NULL;
-  Vector **mu_kldgrad = NULL;  /* per-component KLD mean gradients */
-  Vector **sigma_kldgrad = NULL; /* per-component KLD covariance gradients */
-  Vector **sigma_penalty_grad = NULL; /* per-component variance-penalty gradients */
-  Vector *weight_grad = NULL, *weight_kldgrad = NULL,
-    *m_weight = NULL, *v_weight = NULL, *best_logits = NULL,
-    *component_penalty = NULL, *component_elbo = NULL;
-  Vector *tmp_model_grad = NULL, *tmp_ave_nuis_grad = NULL,
-    *tmp_weight_kldgrad = NULL;
-  Vector **tmp_mu_kldgrad = NULL, **tmp_sigma_kldgrad = NULL;
-  Vector **m_mu = NULL, **v_mu = NULL, **best_mu = NULL,
-    **m_sigma = NULL, **v_sigma = NULL,
-    **best_sigmapar = NULL;
-  int n = data->nseqs, j, k, t = 0, stop = FALSE, bestt = -1, graddim,
-    dim = data->dim, fulld = n*dim, reenable_taylor_t = -1,
-    ncomponents = mixmvn->ncomponents, weight_t = 0;
-  int *sigma_t = NULL;
-  double elb = 0, avell, avemigll, kld, bestelb = -INFTY, bestll = -INFTY,
-    bestkld = -INFTY, bestmigll = -INFTY,
-    running_tot = 0, last_running_tot = -INFTY, penalty = 0,
-    bestpenalty = 0, ave_lprior, best_lprior = -INFTY, subsamp_rescale = 1.0,
-    ll_at_mean = 0, bestll_at_mean = -INFTY, grad_norm_sq;
-  TaylorData *taylor_stash = NULL;
-
-  /* for nuisance parameters; these are parameters that are optimized
-     by stochastic gradient descent but are not fully sampled via the
-     variational distribution */
-  int n_nuisance_params = get_num_nuisance_params(mod, data);
-  Vector *ave_nuis_grad = NULL, *m_nuis = NULL, *v_nuis = NULL,
-    *m_nuis_prev = NULL, *v_nuis_prev = NULL, *best_nuis_params = NULL;
-  int *nuis_t = NULL;
-  if (mixmvn->components[0]->d * mixmvn->components[0]->n != dim * n)
-    die("ERROR in variational_inf: bad dimensions\n");
-
-  graddim = fulld + data->covar_params[0]->size;
-  model_grad = vec_new(graddim);
-  model_grad_components = smalloc(ncomponents * sizeof(Vector*));
-  model_natgrad_components = smalloc(ncomponents * sizeof(Vector*));
-  weight_grad = vec_new_zero(ncomponents);
-  weight_kldgrad = vec_new_zero(ncomponents);
-  m_weight = vec_new_zero(ncomponents);
-  v_weight = vec_new_zero(ncomponents);
-  best_logits = vec_new(ncomponents);
-  component_penalty = vec_new(ncomponents);
-  component_elbo = vec_new(ncomponents);
-  tmp_model_grad = vec_new(graddim);
-  tmp_weight_kldgrad = vec_new(ncomponents);
-  tmp_mu_kldgrad = smalloc(ncomponents * sizeof(Vector*));
-  tmp_sigma_kldgrad = smalloc(ncomponents * sizeof(Vector*));
-  vec_copy(best_logits, mixmvn->logits);
-  sigma_t = smalloc(ncomponents * sizeof(int));
-  m_mu = smalloc(ncomponents * sizeof(Vector*));
-  v_mu = smalloc(ncomponents * sizeof(Vector*));
-  m_sigma = smalloc(ncomponents * sizeof(Vector*));
-  v_sigma = smalloc(ncomponents * sizeof(Vector*));
-  best_mu = smalloc(ncomponents * sizeof(Vector*));
-  best_sigmapar = smalloc(ncomponents * sizeof(Vector*));
-  mu_kldgrad = smalloc(ncomponents * sizeof(Vector*));
-  sigma_kldgrad = smalloc(ncomponents * sizeof(Vector*));
-  sigma_penalty_grad = smalloc(ncomponents * sizeof(Vector*));
-
-  if (n_nuisance_params > 0) {
-    ave_nuis_grad = vec_new(n_nuisance_params);
-    m_nuis = vec_new_zero(n_nuisance_params);
-    v_nuis = vec_new_zero(n_nuisance_params);
-    m_nuis_prev = vec_new_zero(n_nuisance_params);
-    v_nuis_prev = vec_new_zero(n_nuisance_params);
-    best_nuis_params = vec_new(n_nuisance_params);
-    tmp_ave_nuis_grad = vec_new(n_nuisance_params);
-    nuis_t = smalloc(n_nuisance_params * sizeof(int));
-    for (j = 0; j < n_nuisance_params; j++)
-      nuis_t[j] = 0;
-  }
-
-  /* initialize component-specific moments and iteration counts*/
-  for (k = 0; k < ncomponents; k++) {
-    model_grad_components[k] = vec_new_zero(graddim);
-    model_natgrad_components[k] = vec_new_zero(graddim);
-    m_mu[k] = vec_new_zero(fulld);
-    v_mu[k] = vec_new_zero(fulld);
-    m_sigma[k] = vec_new_zero(data->covar_params[k]->size);
-    v_sigma[k] = vec_new_zero(data->covar_params[k]->size);
-    best_mu[k] = vec_new(fulld);
-    best_sigmapar[k] = vec_new(data->covar_params[k]->size);
-    mu_kldgrad[k] = vec_new_zero(fulld);
-    sigma_kldgrad[k] = vec_new_zero(data->covar_params[k]->size);
-    sigma_penalty_grad[k] = vec_new_zero(graddim);
-    tmp_mu_kldgrad[k] = vec_new_zero(fulld);
-    tmp_sigma_kldgrad[k] = vec_new_zero(data->covar_params[k]->size);
-    mmvn_save_mu(mixmvn->components[k], best_mu[k]);
-    vec_copy(best_sigmapar[k], data->covar_params[k]);
-    sigma_t[k] = 0;
-  }
-
-  log_header(mod, mixmvn, data, logf, fulld,
-                         n_nuisance_params, log_all);
-
-  /* set up scheduler; for CRISPR mode, start in full mode (no
-     subsampling) but still use adaptive gradient clipping */
-  int maxlen = data->crispr_mod == NULL ?
-    data->msa->length : data->crispr_mod->nsites;
-  int init_subsamp = data->crispr_mod == NULL ? NSUBSAMPLES : maxlen;
-  Scheduler *s = sched_new(maxlen, init_subsamp, 20,
-                           learnrate, 10, 50, 30);
-  SchedState *st = sched_new_state(s);
-  SchedDirectives *sd = smalloc(sizeof(SchedDirectives));
-  SchedMetrics *sm = smalloc(sizeof(SchedMetrics));
-  sm->grad_norm = 0;
-
-  do {
-    /* simple update to user */
-    if (t > 0 && t % 100 == 0) {
-      if (!silent) {
-        fprintf(stderr, "Iteration %d", t);
-        if (bestelb > -INFTY)
-          fprintf(stderr, "; best ELBO=%.2f", bestelb);
-        fprintf(stderr, "...\n");
-      }
-    }
-    
-    /* get directives from scheduler */
-    sched_next(s, st, sm, sd);
-    unsigned int clipped = FALSE;
-    double clip_scale = 1.0;
-
-    /* zero gradients */
-    vec_zero(weight_grad);
-    vec_zero(weight_kldgrad);
-    vec_zero(component_elbo);
-    for (k = 0; k < mixmvn->ncomponents; k++) {
-      vec_zero(mu_kldgrad[k]);
-      vec_zero(sigma_kldgrad[k]);
-      vec_zero(model_grad_components[k]);
-      vec_zero(model_natgrad_components[k]);
-      vec_zero(sigma_penalty_grad[k]);
-      assert(model_grad_components[k]->size == graddim);
-    }
-    if (ave_nuis_grad != NULL)
-      vec_zero(ave_nuis_grad);
-
-    /* compute closed form terms for the single mixture component case */
-    kld = 0.0;
-    if (mixmvn->ncomponents == 1) {
-      double logdet = mmvn_log_det(mixmvn->components[0]);
-      if (data->treeprior == NULL)
-        kld = compute_standard_normal_kl_term_and_grads(mixmvn->components[0],
-                                                           data, fulld, logdet,
-                                                           sigma_kldgrad[0],
-                                                           mu_kldgrad[0]);
-      else
-        kld = compute_entropy_term_and_grads(mixmvn->components[0], data,
-                                               fulld, logdet,
-                                               sigma_kldgrad[0]);
-      
-      /* scale kld and grad */
-      double scale = data->kld_upweight / (data->pointscale * data->pointscale);
-      kld *= scale;
-      vec_scale(sigma_kldgrad[0], scale);
-      vec_scale(mu_kldgrad[0], scale);
-    }
-
-    /* compute variance penalty terms */
-    for (k = 0; k < mixmvn->ncomponents; k++) {
-      double ck_penalty = compute_variance_penalty(sigma_penalty_grad[k],
-                                                    mixmvn->components[k],
-                                                    data, k);
-      vec_set(component_penalty, k, ck_penalty);
-    }
-    
-    /* configure subsampling */
-    if (!sd->full_grad_now && data->crispr_mod == NULL && data->nthreads == 1) {
-      data->subsample = TRUE;
-      data->subsampsize = sd->m;
-      data->reuse_subsamp = !sd->resample_sites;
-      subsamp_rescale = (double)data->msa->length / data->subsampsize;
-    }
-    else {
-      data->subsample = FALSE;
-      subsamp_rescale = 1.0;
-    }
-
-    /* decide whether to re-enable Taylor approximation */
-    if (taylor_stash != NULL && data->taylor == NULL &&
-        t == reenable_taylor_t) {
-      if (!silent)
-        fprintf(stderr, "WARNING: re-enabling Taylor approximation.\n");
-      data->taylor = taylor_stash;
-      taylor_stash = NULL;
-    }
-
-    /* update migration warmup status */
-    if (data->crispr_mod != NULL && data->migtable != NULL) {
-      if (t < CPR_MIG_WARMUP_ITERS) {
-        if (t == 0 && !silent)
-          fprintf(stderr, "Running %d warmup iterations without migration "
-                  "model...\n", CPR_MIG_WARMUP_ITERS);
-        data->crispr_mod->mig_warmup = TRUE;
-      }
-      else {
-        if (t == CPR_MIG_WARMUP_ITERS && !silent)
-          fprintf(stderr, "Warmup complete; enabling migration model...\n");
-        data->crispr_mod->mig_warmup = FALSE;
-      }
-    }
-
-    /* per-component elbo computation */
-    avell = ave_lprior = avemigll = ll_at_mean = elb = 0.0;
-    penalty = 0.0;
-    for (k = 0; k < ncomponents; k++) {
-      int c;
-      double wk = mixmvn->ncomponents == 1 ? 1.0 : vec_get(mixmvn->weights, k);
-      double ckld = ncomponents == 1 ? kld : 0.0;
-      double cavell, cave_lprior, cavemigll, cll_at_mean, celb;
-
-      cavell = 0.0;
-      cave_lprior = 0.0;
-      cavemigll = 0.0;
-      cll_at_mean = 0.0;
-
-      vec_zero(tmp_model_grad);
-      if (tmp_ave_nuis_grad != NULL)
-        vec_zero(tmp_ave_nuis_grad);
-
-      if (data->taylor != NULL) {
-        cavell = elbo_hybrid(mod, mixmvn, k, data, nminibatch,
-                              tmp_model_grad, tmp_ave_nuis_grad,
-                              &cave_lprior, &cavemigll, &cll_at_mean);
-        if ((data->crispr_mod != NULL &&
-            data->crispr_mod->zero_likl == TRUE) || !isfinite(cavell)) {
-          if (!silent)
-            fprintf(stderr, "WARNING: Taylor approximation produced invalid "
-                    "likelihood; switching to Monte Carlo.\n");
-          reenable_taylor_t = t + 10;
-          taylor_stash = data->taylor;
-          data->taylor = NULL;
-        }
-        else if (mixmvn->ncomponents > 1) {
-          elbo_mix_kld_montecarlo(mixmvn, k, data, nminibatch,
-                                    &ckld, tmp_sigma_kldgrad,
-                                    tmp_mu_kldgrad, tmp_weight_kldgrad);
-        }
-      }
-
-      if (data->taylor == NULL) {
-        cll_at_mean = 0.0;
-        cavell = elbo_montecarlo(mod, mixmvn, k, data, nminibatch,
-                                  tmp_model_grad, tmp_ave_nuis_grad,
-                                  &cave_lprior, &cavemigll, &ckld,
-                                  tmp_sigma_kldgrad, tmp_mu_kldgrad,
-                                  tmp_weight_kldgrad);
-      }
-
-      /* re-scale if subsampling */
-      if (data->subsample == TRUE) {
-        vec_scale(tmp_model_grad, subsamp_rescale);
-        if (tmp_ave_nuis_grad != NULL)
-          vec_scale(tmp_ave_nuis_grad, subsamp_rescale);
-        cavell *= subsamp_rescale;
-      }
-
-
-      /* compute the total elbo for this component */
-      celb = cavell + cave_lprior - ckld -
-        vec_get(component_penalty, k) + cavemigll;
-      vec_set(component_elbo, k, celb);
-
-      /* accumulate mixture weighted elbo components */
-      avell += wk * cavell;
-      ave_lprior += wk * cave_lprior;
-      kld += ncomponents == 1 ? 0.0 : wk * ckld;
-      penalty += wk * vec_get(component_penalty, k);
-      avemigll += wk * cavemigll;
-      ll_at_mean += wk * cll_at_mean;
-      elb += wk * celb;
-
-      for (j = 0; j < graddim; j++)
-        vec_set(model_grad_components[k], j,
-                vec_get(model_grad_components[k], j) +
-                wk * vec_get(tmp_model_grad, j) +
-                wk * vec_get(sigma_penalty_grad[k], j));
-
-      /* Preserve the previous single-component covariance-gradient path: the
-         closed-form term participates in Fisher rescaling and is also kept in
-         the separate KL-gradient vector used by the Adam update below. */
-      if (ncomponents == 1)
-        for (j = 0; j < data->covar_params[k]->size; j++)
-          vec_set(model_grad_components[k], fulld + j,
-                  vec_get(model_grad_components[k], fulld + j) +
-                  vec_get(sigma_kldgrad[k], j));
-
-      if (ncomponents > 1) {
-        for (c = 0; c < ncomponents; c++) {
-          for (j = 0; j < fulld; j++)
-            vec_set(mu_kldgrad[c], j,
-                    vec_get(mu_kldgrad[c], j) +
-                    wk * vec_get(tmp_mu_kldgrad[c], j));
-          for (j = 0; j < data->covar_params[c]->size; j++)
-            vec_set(sigma_kldgrad[c], j,
-                    vec_get(sigma_kldgrad[c], j) +
-                    wk * vec_get(tmp_sigma_kldgrad[c], j));
-        }
-        for (j = 0; j < ncomponents; j++)
-          vec_set(weight_kldgrad, j, vec_get(weight_kldgrad, j) +
-                  wk * vec_get(tmp_weight_kldgrad, j));
-      }
-
-      if (ave_nuis_grad != NULL)
-        for (j = 0; j < n_nuisance_params; j++)
-          vec_set(ave_nuis_grad, j, vec_get(ave_nuis_grad, j) +
-                  wk * vec_get(tmp_ave_nuis_grad, j));
-    }
-
-    if (ncomponents > 1) {
-      elb = add_mixture_weight_dirichlet_prior(mixmvn, component_elbo,
-                                                weight_kldgrad, weight_grad,
-                                                elb);
-    }
-
-    /* don't select best during migration warmup: migration is excluded from
-     * the ELBO then, making warmup ELBOs artificially high and incomparable
-     * to post-warmup ELBOs that include the migration log likelihood */
-    int mig_warmup_active = (data->crispr_mod != NULL && data->migtable != NULL
-                             && data->crispr_mod->mig_warmup);
-    if (elb > bestelb && (sd->full_grad_now || data->crispr_mod != NULL)
-        && !mig_warmup_active) {
-      bestelb = elb;
-      bestll = avell;  /* not necessarily best ll but ll corresponding to bestelb */
-      bestll_at_mean = ll_at_mean;  /* ll at posterior mean; 0 if MC path */
-      best_lprior = ave_lprior;
-      bestkld = kld;  
-      bestpenalty = penalty;
-      bestmigll = avemigll;
-      bestt = t;
-      for (k = 0; k < ncomponents; k++) {
-        mmvn_save_mu(mixmvn->components[k], best_mu[k]);
-        vec_copy(best_sigmapar[k], data->covar_params[k]);
-      }
-      vec_copy(best_logits, mixmvn->logits);
-      if (n_nuisance_params > 0)
-        save_nuis_params(best_nuis_params, mod, data);
-    }
-
-    /* rescale gradient by approximate inverse Fisher information to
-       put on similar scales; seems to help with optimization */
-    for (k = 0; k < ncomponents; k++) {
-      if (data->natural_grad == TRUE)
-        rescale_grad(model_grad_components[k],
-                        model_natgrad_components[k], mixmvn->components[k], data);
-      else
-        vec_copy(model_natgrad_components[k], model_grad_components[k]);
-    }
-    /* we won't do this with nuisance params */
-
-    /* update scheduler with norm of the actual Adam update and clip if
-       necessary.  Mean KLD gradients are stored by component, so include
-       them explicitly rather than measuring only direct model gradients. */
-    grad_norm_sq = 0.0;
-    for (k = 0; k < ncomponents; k++) {
-      for (j = 0; j < fulld; j++) {
-        double g = vec_get(model_natgrad_components[k], j);
-        g += rescale_mean_grad_el(mu_kldgrad[k], mixmvn->components[k], data, j);
-        grad_norm_sq += g * g;
-      }
-      for (j = 0; j < data->covar_params[k]->size; j++) {
-        double g = vec_get(model_natgrad_components[k], fulld + j) +
-          rescale_sigma_grad_el(sigma_kldgrad[k], mixmvn->components[k], data, j, 0);
-        grad_norm_sq += g * g;
-      }
-    }
-    if (ncomponents > 1)
-      for (j = 0; j < ncomponents; j++) {
-        double g = vec_get(weight_grad, j);
-        grad_norm_sq += g * g;
-      }
-    sm->grad_norm = sqrt(grad_norm_sq);
-    if (sd->clip_norm > 0 && sm->grad_norm > sd->clip_norm) {
-      clip_scale = sd->clip_norm / sm->grad_norm;
-      for (k = 0; k < ncomponents; k++)
-        vec_scale(model_natgrad_components[k], clip_scale);
-      clipped = TRUE;
-    }
-
-    /* Adam updates; see Kingma & Ba, arxiv 2014 */
-    t++;
-    data->variational_iter = t; /* useful for debugging in other routines */
-
-    /* Update mu.  In mixture mode every component receives its weighted
-       likelihood/prior gradient; all components also receive mixture-KLD mean
-       gradients because log q_mix depends on every component density. */
-    for (k = 0; k < ncomponents; k++) {
-      for (j = 0; j < fulld; j++) {
-        double m = vec_get(m_mu[k], j), v = vec_get(v_mu[k], j);
-        double g = vec_get(model_natgrad_components[k], j);
-        g += clip_scale * rescale_mean_grad_el(mu_kldgrad[k],
-                                                  mixmvn->components[k], data, j);
-        mmvn_set_mu_el(mixmvn->components[k], j,
-                        adam_scalar_update(mmvn_get_mu_el(mixmvn->components[k], j),
-                                           &m, &v, t, g, sd->lr));
-        vec_set(m_mu[k], j, m);
-        vec_set(v_mu[k], j, v);
-      }
-    }
-
-    /* Update sigma.  In mixture mode every component receives its weighted
-       likelihood/prior gradient; all components also receive mixture-KLD
-       covariance gradients because log q_mix depends on every component
-       density. */
-    for (k = 0; k < ncomponents; k++) {
-      sigma_t[k]++;
-      for (j = 0; j < data->covar_params[k]->size; j++) {
-        double m = vec_get(m_sigma[k], j), v = vec_get(v_sigma[k], j);
-        double g = vec_get(model_natgrad_components[k], fulld + j) +
-          clip_scale * rescale_sigma_grad_el(sigma_kldgrad[k], mixmvn->components[k],
-                                                data, j, 0);
-        vec_set(data->covar_params[k], j,
-                adam_scalar_update(vec_get(data->covar_params[k], j),
-                                   &m, &v, sigma_t[k], g, sd->lr));
-        vec_set(m_sigma[k], j, m);
-        vec_set(v_sigma[k], j, v);
-      }
-    }
-    mixmvn_update_covariance(mixmvn, data);
-
-    if (ncomponents > 1) {
-      weight_t++;
-      for (j = 0; j < ncomponents; j++) {
-        double m = vec_get(m_weight, j), v = vec_get(v_weight, j);
-        double g = clip_scale * vec_get(weight_grad, j);
-        vec_set(mixmvn->logits, j,
-                adam_scalar_update(vec_get(mixmvn->logits, j),
-                                   &m, &v, weight_t, g, sd->lr));
-        vec_set(m_weight, j, m);
-        vec_set(v_weight, j, v);
-      }
-      mixmvn_update_weights(mixmvn);
-    }
-
-    /* same thing for nuisance params, if necessary */
-    for (j = 0; j < n_nuisance_params; j++) {   
-      int flow_component = nuis_flow_component(mod, data, j);
-      double g, m, v, old_val, new_val;
-
-      if (ncomponents == 1 && flow_component >= 0 && flow_component != 0)
-        continue;
-
-      g = vec_get(ave_nuis_grad, j);
-      nuis_t[j]++;
-      m = vec_get(m_nuis_prev, j);
-      v = vec_get(v_nuis_prev, j);
-      old_val = nuis_param_get(mod, data, j);
-      new_val = adam_scalar_update(old_val, &m, &v, nuis_t[j], g,
-                                   sd->lr * 0.3);
-      nuis_param_pluseq(mod, data, j, new_val - old_val);
-      vec_set(m_nuis, j, m);
-      vec_set(v_nuis, j, v);
-      /* factor of 0.3 above to slow learning of nuisance params */
-    }
-    if (n_nuisance_params > 0) {
-      vec_copy(m_nuis_prev, m_nuis);
-      vec_copy(v_nuis_prev, v_nuis);
-    }
-    
-    log_iteration(mod, mixmvn, data, logf, taylor_stash, sm,
-                              t, avell, elb, ave_lprior, kld,
-                              penalty, avemigll, clipped,
-                              n_nuisance_params, log_all);
-    
-    /* check total elb every nbatches_conv to decide whether to stop */
-    running_tot += elb;
-    if (t % nbatches_conv == 0) {
-      log_running_elbo(logf, nbatches_conv, running_tot);
-      if ((sd->full_grad_now || data->crispr_mod != NULL) && t >= min_nbatches &&
-          1.001*running_tot <= last_running_tot*0.999)
-        /* sometimes get stuck increasingly asymptotically; stop if increase not more than about 0.1% */
-        stop = TRUE;
-
-      last_running_tot = running_tot;
-      running_tot = 0;
-    }    
-  } while(stop == FALSE);
-
-  /* Revert to the best parameters found after convergence */
-  for (k = 0; k < ncomponents; k++) {
-    mmvn_set_mu(mixmvn->components[k], best_mu[k]);
-    vec_copy(data->covar_params[k], best_sigmapar[k]);
-  }
-  vec_copy(mixmvn->logits, best_logits);
-  mixmvn_update_weights(mixmvn);
-  mixmvn_update_covariance(mixmvn, data);
-  if (n_nuisance_params > 0)
-    update_nuis_params(best_nuis_params, mod, data);
-
-  /* if using Taylor approximation, run one final MC pass at the restored
-     best parameters to get an unbiased estimate of E[lnL] for reporting.
-     The hybrid ELBO used during training can be biased (especially when
-     variance is at floor), so this gives an accurate final value. */
-  double final_mc_ll = 0;
-  if (data->taylor != NULL && logf != NULL) {
-    for (k = 0; k < ncomponents; k++) {
-      double component_mc_ll =
-        elbo_montecarlo(mod, mixmvn, k, data, nminibatch,
-                           model_grad, ave_nuis_grad,
-                           NULL, NULL, NULL, NULL, NULL, NULL);
-      final_mc_ll += vec_get(mixmvn->weights, k) * component_mc_ll;
-    }
-  }
-
-  log_final(mod, mixmvn, data, logf, bestt, bestelb, bestll,
-                        best_lprior, bestkld, bestpenalty, bestll_at_mean,
-                        final_mc_ll, bestmigll, n_nuisance_params);
-
-  if (!silent) fprintf(stderr, "Converged in %d iterations; ELBO=%.2f...\n", t, bestelb);
-
-  vec_free(model_grad);
-  vec_free(weight_grad);
-  vec_free(weight_kldgrad);
-  vec_free(m_weight);
-  vec_free(v_weight);
-  vec_free(best_logits);
-  vec_free(component_penalty);
-  vec_free(component_elbo);
-  vec_free(tmp_model_grad);
-  vec_free(tmp_weight_kldgrad);
-  for (k = 0; k < ncomponents; k++) {
-    vec_free(model_grad_components[k]);
-    vec_free(model_natgrad_components[k]);
-    vec_free(m_mu[k]);
-    vec_free(v_mu[k]);
-    vec_free(m_sigma[k]);
-    vec_free(v_sigma[k]);
-    vec_free(best_mu[k]);
-    vec_free(best_sigmapar[k]);
-    vec_free(mu_kldgrad[k]);
-    vec_free(sigma_kldgrad[k]);
-    vec_free(sigma_penalty_grad[k]);
-    vec_free(tmp_mu_kldgrad[k]);
-    vec_free(tmp_sigma_kldgrad[k]);
-  }
-  sfree(model_grad_components);
-  sfree(model_natgrad_components);
-  sfree(m_mu);
-  sfree(v_mu);
-  sfree(m_sigma);
-  sfree(v_sigma);
-  sfree(best_mu);
-  sfree(best_sigmapar);
-  sfree(mu_kldgrad);
-  sfree(sigma_kldgrad);
-  sfree(sigma_penalty_grad);
-  sfree(tmp_mu_kldgrad);
-  sfree(tmp_sigma_kldgrad);
-  sfree(sigma_t);
-  sfree(s); sfree(st); sfree(sd); sfree(sm);
-  
-  if (n_nuisance_params > 0) {
-    vec_free(ave_nuis_grad); vec_free(m_nuis); vec_free(v_nuis);
-    vec_free(m_nuis_prev); vec_free(v_nuis_prev); vec_free(best_nuis_params);
-    vec_free(tmp_ave_nuis_grad);
-    sfree(nuis_t);
-  }    
-}
-
 /* estimate key components of the ELBO by Monte Carlo integration,
    over a minibatch of size nminibatch. */ 
 static void lowr_map_std(multi_MVN *mmvn, Vector *points_std,
@@ -1526,4 +953,562 @@ void set_entropy_sigma_grad_LOWR(Vector *sigma_entgrad, multi_MVN *mmvn) {
               mat_get(Rgrad, i, j));
 
   mat_free(Rgrad);
+}
+
+/* optimize variational model by stochastic gradient ascent using the
+   Adam algorithm.  Takes initial tree model and alignment and
+   distance matrix, dimensionality of Euclidean space to work in.
+   Note: alters distance matrix */
+void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
+                        double learnrate, int nbatches_conv, int min_nbatches,
+                        CovarData *data, FILE *logf,
+                        unsigned int silent, unsigned int log_all) {
+
+  Vector *model_grad;          /* scratch direct gradient for one component */
+  Vector **model_grad_components = NULL;
+  Vector **model_natgrad_components = NULL;
+  Vector **mu_kldgrad = NULL;  /* per-component KLD mean gradients */
+  Vector **sigma_kldgrad = NULL; /* per-component KLD covariance gradients */
+  Vector **sigma_penalty_grad = NULL; /* per-component variance-penalty gradients */
+  Vector *weight_grad = NULL, *weight_kldgrad = NULL,
+    *m_weight = NULL, *v_weight = NULL, *best_logits = NULL,
+    *component_elbo = NULL;
+  Vector *tmp_model_grad = NULL, *tmp_ave_nuis_grad = NULL,
+    *tmp_weight_kldgrad = NULL;
+  Vector **tmp_mu_kldgrad = NULL, **tmp_sigma_kldgrad = NULL;
+  Vector **m_mu = NULL, **v_mu = NULL, **best_mu = NULL,
+    **m_sigma = NULL, **v_sigma = NULL,
+    **best_sigmapar = NULL;
+  int n = data->nseqs, j, k, t = 0, stop = FALSE, bestt = -1, graddim,
+    dim = data->dim, fulld = n*dim, reenable_taylor_t = -1,
+    ncomponents = mixmvn->ncomponents, weight_t = 0;
+  int *sigma_t = NULL;
+  double elb = 0, avell, avemigll, kld, bestelb = -INFTY, bestll = -INFTY,
+    bestkld = -INFTY, bestmigll = -INFTY,
+    running_tot = 0, last_running_tot = -INFTY, penalty = 0,
+    bestpenalty = 0, ave_lprior, best_lprior = -INFTY, subsamp_rescale = 1.0,
+    ll_at_mean = 0, bestll_at_mean = -INFTY, grad_norm_sq;
+  TaylorData *taylor_stash = NULL;
+
+  /* for nuisance parameters; these are parameters that are optimized
+     by stochastic gradient descent but are not fully sampled via the
+     variational distribution */
+  int n_nuisance_params = get_num_nuisance_params(mod, data);
+  Vector *ave_nuis_grad = NULL, *m_nuis = NULL, *v_nuis = NULL,
+    *m_nuis_prev = NULL, *v_nuis_prev = NULL, *best_nuis_params = NULL;
+  int *nuis_t = NULL;
+  if (mixmvn->components[0]->d * mixmvn->components[0]->n != dim * n)
+    die("ERROR in variational_inf: bad dimensions\n");
+
+  graddim = fulld + data->covar_params[0]->size;
+  model_grad = vec_new(graddim);
+  model_grad_components = smalloc(ncomponents * sizeof(Vector*));
+  model_natgrad_components = smalloc(ncomponents * sizeof(Vector*));
+  weight_grad = vec_new_zero(ncomponents);
+  weight_kldgrad = vec_new_zero(ncomponents);
+  m_weight = vec_new_zero(ncomponents);
+  v_weight = vec_new_zero(ncomponents);
+  best_logits = vec_new(ncomponents);
+  component_elbo = vec_new(ncomponents);
+  tmp_model_grad = vec_new(graddim);
+  tmp_weight_kldgrad = vec_new(ncomponents);
+  tmp_mu_kldgrad = smalloc(ncomponents * sizeof(Vector*));
+  tmp_sigma_kldgrad = smalloc(ncomponents * sizeof(Vector*));
+  vec_copy(best_logits, mixmvn->logits);
+  sigma_t = smalloc(ncomponents * sizeof(int));
+  m_mu = smalloc(ncomponents * sizeof(Vector*));
+  v_mu = smalloc(ncomponents * sizeof(Vector*));
+  m_sigma = smalloc(ncomponents * sizeof(Vector*));
+  v_sigma = smalloc(ncomponents * sizeof(Vector*));
+  best_mu = smalloc(ncomponents * sizeof(Vector*));
+  best_sigmapar = smalloc(ncomponents * sizeof(Vector*));
+  mu_kldgrad = smalloc(ncomponents * sizeof(Vector*));
+  sigma_kldgrad = smalloc(ncomponents * sizeof(Vector*));
+  sigma_penalty_grad = smalloc(ncomponents * sizeof(Vector*));
+
+  if (n_nuisance_params > 0) {
+    ave_nuis_grad = vec_new(n_nuisance_params);
+    m_nuis = vec_new_zero(n_nuisance_params);
+    v_nuis = vec_new_zero(n_nuisance_params);
+    m_nuis_prev = vec_new_zero(n_nuisance_params);
+    v_nuis_prev = vec_new_zero(n_nuisance_params);
+    best_nuis_params = vec_new(n_nuisance_params);
+    tmp_ave_nuis_grad = vec_new(n_nuisance_params);
+    nuis_t = smalloc(n_nuisance_params * sizeof(int));
+    for (j = 0; j < n_nuisance_params; j++)
+      nuis_t[j] = 0;
+  }
+
+  /* initialize component-specific moments and iteration counts*/
+  for (k = 0; k < ncomponents; k++) {
+    model_grad_components[k] = vec_new_zero(graddim);
+    model_natgrad_components[k] = vec_new_zero(graddim);
+    m_mu[k] = vec_new_zero(fulld);
+    v_mu[k] = vec_new_zero(fulld);
+    m_sigma[k] = vec_new_zero(data->covar_params[k]->size);
+    v_sigma[k] = vec_new_zero(data->covar_params[k]->size);
+    best_mu[k] = vec_new(fulld);
+    best_sigmapar[k] = vec_new(data->covar_params[k]->size);
+    mu_kldgrad[k] = vec_new_zero(fulld);
+    sigma_kldgrad[k] = vec_new_zero(data->covar_params[k]->size);
+    sigma_penalty_grad[k] = vec_new_zero(graddim);
+    tmp_mu_kldgrad[k] = vec_new_zero(fulld);
+    tmp_sigma_kldgrad[k] = vec_new_zero(data->covar_params[k]->size);
+    mmvn_save_mu(mixmvn->components[k], best_mu[k]);
+    vec_copy(best_sigmapar[k], data->covar_params[k]);
+    sigma_t[k] = 0;
+  }
+
+  log_header(mod, mixmvn, data, logf, fulld,
+                         n_nuisance_params, log_all);
+
+  /* set up scheduler; for CRISPR mode, start in full mode (no
+     subsampling) but still use adaptive gradient clipping */
+  int maxlen = data->crispr_mod == NULL ?
+    data->msa->length : data->crispr_mod->nsites;
+  int init_subsamp = data->crispr_mod == NULL ? NSUBSAMPLES : maxlen;
+  Scheduler *s = sched_new(maxlen, init_subsamp, 20,
+                           learnrate, 10, 50, 30);
+  SchedState *st = sched_new_state(s);
+  SchedDirectives *sd = smalloc(sizeof(SchedDirectives));
+  SchedMetrics *sm = smalloc(sizeof(SchedMetrics));
+  sm->grad_norm = 0;
+
+  do {
+    /* simple update to user */
+    if (t > 0 && t % 100 == 0) {
+      if (!silent) {
+        fprintf(stderr, "Iteration %d", t);
+        if (bestelb > -INFTY)
+          fprintf(stderr, "; best ELBO=%.2f", bestelb);
+        fprintf(stderr, "...\n");
+      }
+    }
+    
+    /* get directives from scheduler */
+    sched_next(s, st, sm, sd);
+    unsigned int clipped = FALSE;
+    double clip_scale = 1.0;
+
+    /* zero gradients */
+    vec_zero(weight_grad);
+    vec_zero(weight_kldgrad);
+    vec_zero(component_elbo);
+    for (k = 0; k < mixmvn->ncomponents; k++) {
+      vec_zero(mu_kldgrad[k]);
+      vec_zero(sigma_kldgrad[k]);
+      vec_zero(model_grad_components[k]);
+      vec_zero(model_natgrad_components[k]);
+      vec_zero(sigma_penalty_grad[k]);
+      assert(model_grad_components[k]->size == graddim);
+    }
+    if (ave_nuis_grad != NULL)
+      vec_zero(ave_nuis_grad);
+
+    /* compute closed form terms for the single mixture component case */
+    kld = 0.0;
+    if (mixmvn->ncomponents == 1) {
+      double logdet = mmvn_log_det(mixmvn->components[0]);
+      if (data->treeprior == NULL)
+        kld = compute_standard_normal_kl_term_and_grads(mixmvn->components[0],
+                                                           data, fulld, logdet,
+                                                           sigma_kldgrad[0],
+                                                           mu_kldgrad[0]);
+      else
+        kld = compute_entropy_term_and_grads(mixmvn->components[0], data,
+                                               fulld, logdet,
+                                               sigma_kldgrad[0]);
+      
+      /* scale kld and grad */
+      double scale = data->kld_upweight / (data->pointscale * data->pointscale);
+      kld *= scale;
+      vec_scale(sigma_kldgrad[0], scale);
+      vec_scale(mu_kldgrad[0], scale);
+    }
+    
+    /* configure subsampling */
+    if (!sd->full_grad_now && data->crispr_mod == NULL && data->nthreads == 1) {
+      data->subsample = TRUE;
+      data->subsampsize = sd->m;
+      data->reuse_subsamp = !sd->resample_sites;
+      subsamp_rescale = (double)data->msa->length / data->subsampsize;
+    }
+    else {
+      data->subsample = FALSE;
+      subsamp_rescale = 1.0;
+    }
+
+    /* decide whether to re-enable Taylor approximation */
+    if (taylor_stash != NULL && data->taylor == NULL &&
+        t == reenable_taylor_t) {
+      if (!silent)
+        fprintf(stderr, "WARNING: re-enabling Taylor approximation.\n");
+      data->taylor = taylor_stash;
+      taylor_stash = NULL;
+    }
+
+    /* update migration warmup status */
+    if (data->crispr_mod != NULL && data->migtable != NULL) {
+      if (t < CPR_MIG_WARMUP_ITERS) {
+        if (t == 0 && !silent)
+          fprintf(stderr, "Running %d warmup iterations without migration "
+                  "model...\n", CPR_MIG_WARMUP_ITERS);
+        data->crispr_mod->mig_warmup = TRUE;
+      }
+      else {
+        if (t == CPR_MIG_WARMUP_ITERS && !silent)
+          fprintf(stderr, "Warmup complete; enabling migration model...\n");
+        data->crispr_mod->mig_warmup = FALSE;
+      }
+    }
+
+    /* per-component elbo computation */
+    avell = ave_lprior = avemigll = ll_at_mean = elb = 0.0;
+    penalty = 0.0;
+    double cpenalty;
+    for (k = 0; k < ncomponents; k++) {
+      int c;
+      double wk = mixmvn->ncomponents == 1 ? 1.0 : vec_get(mixmvn->weights, k);
+      double ckld = ncomponents == 1 ? kld : 0.0;
+      double cavell, cave_lprior, cavemigll, cll_at_mean, celb;
+
+      cavell = 0.0;
+      cave_lprior = 0.0;
+      cavemigll = 0.0;
+      cll_at_mean = 0.0;
+
+      vec_zero(tmp_model_grad);
+      if (tmp_ave_nuis_grad != NULL)
+        vec_zero(tmp_ave_nuis_grad);
+
+      if (data->taylor != NULL) {
+        cavell = elbo_hybrid(mod, mixmvn, k, data, nminibatch,
+                              tmp_model_grad, tmp_ave_nuis_grad,
+                              &cave_lprior, &cavemigll, &cll_at_mean);
+        if ((data->crispr_mod != NULL &&
+            data->crispr_mod->zero_likl == TRUE) || !isfinite(cavell)) {
+          if (!silent)
+            fprintf(stderr, "WARNING: Taylor approximation produced invalid "
+                    "likelihood; switching to Monte Carlo.\n");
+          reenable_taylor_t = t + 10;
+          taylor_stash = data->taylor;
+          data->taylor = NULL;
+        }
+        else if (mixmvn->ncomponents > 1) {
+          elbo_mix_kld_montecarlo(mixmvn, k, data, nminibatch,
+                                    &ckld, tmp_sigma_kldgrad,
+                                    tmp_mu_kldgrad, tmp_weight_kldgrad);
+        }
+      }
+
+      if (data->taylor == NULL) {
+        cll_at_mean = 0.0;
+        cavell = elbo_montecarlo(mod, mixmvn, k, data, nminibatch,
+                                  tmp_model_grad, tmp_ave_nuis_grad,
+                                  &cave_lprior, &cavemigll, &ckld,
+                                  tmp_sigma_kldgrad, tmp_mu_kldgrad,
+                                  tmp_weight_kldgrad);
+      }
+
+      /* re-scale if subsampling */
+      if (data->subsample == TRUE) {
+        vec_scale(tmp_model_grad, subsamp_rescale);
+        if (tmp_ave_nuis_grad != NULL)
+          vec_scale(tmp_ave_nuis_grad, subsamp_rescale);
+        cavell *= subsamp_rescale;
+      }
+
+      /* compute component variance penalty */
+      cpenalty = compute_variance_penalty(sigma_penalty_grad[k],
+                                                    mixmvn->components[k],
+                                                    data, k);
+
+      /* compute the total elbo for this component */
+      celb = cavell + cave_lprior - ckld - cpenalty + cavemigll;
+      vec_set(component_elbo, k, celb);
+
+      /* accumulate mixture weighted elbo components */
+      avell += wk * cavell;
+      ave_lprior += wk * cave_lprior;
+      kld += ncomponents == 1 ? 0.0 : wk * ckld;
+      penalty += wk * cpenalty;
+      avemigll += wk * cavemigll;
+      ll_at_mean += wk * cll_at_mean;
+      elb += wk * celb;
+
+      for (j = 0; j < graddim; j++)
+        vec_set(model_grad_components[k], j,
+                vec_get(model_grad_components[k], j) +
+                wk * vec_get(tmp_model_grad, j) +
+                wk * vec_get(sigma_penalty_grad[k], j));
+
+      if (ncomponents > 1) {
+        for (c = 0; c < ncomponents; c++) {
+          for (j = 0; j < fulld; j++)
+            vec_set(mu_kldgrad[c], j,
+                    vec_get(mu_kldgrad[c], j) +
+                    wk * vec_get(tmp_mu_kldgrad[c], j));
+          for (j = 0; j < data->covar_params[c]->size; j++)
+            vec_set(sigma_kldgrad[c], j,
+                    vec_get(sigma_kldgrad[c], j) +
+                    wk * vec_get(tmp_sigma_kldgrad[c], j));
+        }
+        for (j = 0; j < ncomponents; j++)
+          vec_set(weight_kldgrad, j, vec_get(weight_kldgrad, j) +
+                  wk * vec_get(tmp_weight_kldgrad, j));
+      }
+
+      if (ave_nuis_grad != NULL)
+        for (j = 0; j < n_nuisance_params; j++)
+          vec_set(ave_nuis_grad, j, vec_get(ave_nuis_grad, j) +
+                  wk * vec_get(tmp_ave_nuis_grad, j));
+    }
+
+    if (ncomponents > 1) {
+      elb = add_mixture_weight_dirichlet_prior(mixmvn, component_elbo,
+                                                weight_kldgrad, weight_grad,
+                                                elb);
+    }
+
+    /* don't select best during migration warmup: migration is excluded from
+     * the ELBO then, making warmup ELBOs artificially high and incomparable
+     * to post-warmup ELBOs that include the migration log likelihood */
+    int mig_warmup_active = (data->crispr_mod != NULL && data->migtable != NULL
+                             && data->crispr_mod->mig_warmup);
+    if (elb > bestelb && (sd->full_grad_now || data->crispr_mod != NULL)
+        && !mig_warmup_active) {
+      bestelb = elb;
+      bestll = avell;  /* not necessarily best ll but ll corresponding to bestelb */
+      bestll_at_mean = ll_at_mean;  /* ll at posterior mean; 0 if MC path */
+      best_lprior = ave_lprior;
+      bestkld = kld;  
+      bestpenalty = penalty;
+      bestmigll = avemigll;
+      bestt = t;
+      for (k = 0; k < ncomponents; k++) {
+        mmvn_save_mu(mixmvn->components[k], best_mu[k]);
+        vec_copy(best_sigmapar[k], data->covar_params[k]);
+      }
+      vec_copy(best_logits, mixmvn->logits);
+      if (n_nuisance_params > 0)
+        save_nuis_params(best_nuis_params, mod, data);
+    }
+
+    /* rescale gradient by approximate inverse Fisher information to
+       put on similar scales; seems to help with optimization */
+    for (k = 0; k < ncomponents; k++) {
+      if (data->natural_grad == TRUE)
+        rescale_grad(model_grad_components[k],
+                        model_natgrad_components[k], mixmvn->components[k], data);
+      else
+        vec_copy(model_natgrad_components[k], model_grad_components[k]);
+    }
+    /* we won't do this with nuisance params */
+
+    /* update scheduler with norm of the actual Adam update and clip if
+       necessary.  Mean KLD gradients are stored by component, so include
+       them explicitly rather than measuring only direct model gradients. */
+    grad_norm_sq = 0.0;
+    for (k = 0; k < ncomponents; k++) {
+      for (j = 0; j < fulld; j++) {
+        double g = vec_get(model_natgrad_components[k], j);
+        g += rescale_mean_grad_el(mu_kldgrad[k], mixmvn->components[k], data, j);
+        grad_norm_sq += g * g;
+      }
+      for (j = 0; j < data->covar_params[k]->size; j++) {
+        double g = vec_get(model_natgrad_components[k], fulld + j) +
+          rescale_sigma_grad_el(sigma_kldgrad[k], mixmvn->components[k], data, j, 0);
+        grad_norm_sq += g * g;
+      }
+    }
+    if (ncomponents > 1)
+      for (j = 0; j < ncomponents; j++) {
+        double g = vec_get(weight_grad, j);
+        grad_norm_sq += g * g;
+      }
+    sm->grad_norm = sqrt(grad_norm_sq);
+    if (sd->clip_norm > 0 && sm->grad_norm > sd->clip_norm) {
+      clip_scale = sd->clip_norm / sm->grad_norm;
+      for (k = 0; k < ncomponents; k++)
+        vec_scale(model_natgrad_components[k], clip_scale);
+      clipped = TRUE;
+    }
+
+    /* Adam updates; see Kingma & Ba, arxiv 2014 */
+    t++;
+    data->variational_iter = t; /* useful for debugging in other routines */
+
+    /* Update mu.  In mixture mode every component receives its weighted
+       likelihood/prior gradient; all components also receive mixture-KLD mean
+       gradients because log q_mix depends on every component density. */
+    for (k = 0; k < ncomponents; k++) {
+      for (j = 0; j < fulld; j++) {
+        double m = vec_get(m_mu[k], j), v = vec_get(v_mu[k], j);
+        double g = vec_get(model_natgrad_components[k], j);
+        g += clip_scale * rescale_mean_grad_el(mu_kldgrad[k],
+                                                  mixmvn->components[k], data, j);
+        mmvn_set_mu_el(mixmvn->components[k], j,
+                        adam_scalar_update(mmvn_get_mu_el(mixmvn->components[k], j),
+                                           &m, &v, t, g, sd->lr));
+        vec_set(m_mu[k], j, m);
+        vec_set(v_mu[k], j, v);
+      }
+    }
+
+    /* Update sigma.  In mixture mode every component receives its weighted
+       likelihood/prior gradient; all components also receive mixture-KLD
+       covariance gradients because log q_mix depends on every component
+       density. */
+    for (k = 0; k < ncomponents; k++) {
+      sigma_t[k]++;
+      for (j = 0; j < data->covar_params[k]->size; j++) {
+        double m = vec_get(m_sigma[k], j), v = vec_get(v_sigma[k], j);
+        double g = vec_get(model_natgrad_components[k], fulld + j) +
+          clip_scale * rescale_sigma_grad_el(sigma_kldgrad[k], mixmvn->components[k],
+                                                data, j, 0);
+        vec_set(data->covar_params[k], j,
+                adam_scalar_update(vec_get(data->covar_params[k], j),
+                                   &m, &v, sigma_t[k], g, sd->lr));
+        vec_set(m_sigma[k], j, m);
+        vec_set(v_sigma[k], j, v);
+      }
+    }
+    mixmvn_update_covariance(mixmvn, data);
+
+    if (ncomponents > 1) {
+      weight_t++;
+      for (j = 0; j < ncomponents; j++) {
+        double m = vec_get(m_weight, j), v = vec_get(v_weight, j);
+        double g = clip_scale * vec_get(weight_grad, j);
+        vec_set(mixmvn->logits, j,
+                adam_scalar_update(vec_get(mixmvn->logits, j),
+                                   &m, &v, weight_t, g, sd->lr));
+        vec_set(m_weight, j, m);
+        vec_set(v_weight, j, v);
+      }
+      mixmvn_update_weights(mixmvn);
+    }
+
+    /* same thing for nuisance params, if necessary */
+    for (j = 0; j < n_nuisance_params; j++) {   
+      int flow_component = nuis_flow_component(mod, data, j);
+      double g, m, v, old_val, new_val;
+
+      if (ncomponents == 1 && flow_component >= 0 && flow_component != 0)
+        continue;
+
+      g = vec_get(ave_nuis_grad, j);
+      nuis_t[j]++;
+      m = vec_get(m_nuis_prev, j);
+      v = vec_get(v_nuis_prev, j);
+      old_val = nuis_param_get(mod, data, j);
+      new_val = adam_scalar_update(old_val, &m, &v, nuis_t[j], g,
+                                   sd->lr * 0.3);
+      nuis_param_pluseq(mod, data, j, new_val - old_val);
+      vec_set(m_nuis, j, m);
+      vec_set(v_nuis, j, v);
+      /* factor of 0.3 above to slow learning of nuisance params */
+    }
+    if (n_nuisance_params > 0) {
+      vec_copy(m_nuis_prev, m_nuis);
+      vec_copy(v_nuis_prev, v_nuis);
+    }
+    
+    log_iteration(mod, mixmvn, data, logf, taylor_stash, sm,
+                              t, avell, elb, ave_lprior, kld,
+                              penalty, avemigll, clipped,
+                              n_nuisance_params, log_all);
+    
+    /* check total elb every nbatches_conv to decide whether to stop */
+    running_tot += elb;
+    if (t % nbatches_conv == 0) {
+      log_running_elbo(logf, nbatches_conv, running_tot);
+      if ((sd->full_grad_now || data->crispr_mod != NULL) && t >= min_nbatches &&
+          1.001*running_tot <= last_running_tot*0.999)
+        /* sometimes get stuck increasingly asymptotically; stop if increase not more than about 0.1% */
+        stop = TRUE;
+
+      last_running_tot = running_tot;
+      running_tot = 0;
+    }    
+  } while(stop == FALSE);
+
+  /* Revert to the best parameters found after convergence */
+  for (k = 0; k < ncomponents; k++) {
+    mmvn_set_mu(mixmvn->components[k], best_mu[k]);
+    vec_copy(data->covar_params[k], best_sigmapar[k]);
+  }
+  vec_copy(mixmvn->logits, best_logits);
+  mixmvn_update_weights(mixmvn);
+  mixmvn_update_covariance(mixmvn, data);
+  if (n_nuisance_params > 0)
+    update_nuis_params(best_nuis_params, mod, data);
+
+  /* if using Taylor approximation, run one final MC pass at the restored
+     best parameters to get an unbiased estimate of E[lnL] for reporting.
+     The hybrid ELBO used during training can be biased (especially when
+     variance is at floor), so this gives an accurate final value. */
+  double final_mc_ll = 0;
+  if (data->taylor != NULL && logf != NULL) {
+    for (k = 0; k < ncomponents; k++) {
+      double component_mc_ll =
+        elbo_montecarlo(mod, mixmvn, k, data, nminibatch,
+                           model_grad, ave_nuis_grad,
+                           NULL, NULL, NULL, NULL, NULL, NULL);
+      final_mc_ll += vec_get(mixmvn->weights, k) * component_mc_ll;
+    }
+  }
+
+  log_final(mod, mixmvn, data, logf, bestt, bestelb, bestll,
+                        best_lprior, bestkld, bestpenalty, bestll_at_mean,
+                        final_mc_ll, bestmigll, n_nuisance_params);
+
+  if (!silent) fprintf(stderr, "Converged in %d iterations; ELBO=%.2f...\n", t, bestelb);
+
+  vec_free(model_grad);
+  vec_free(weight_grad);
+  vec_free(weight_kldgrad);
+  vec_free(m_weight);
+  vec_free(v_weight);
+  vec_free(best_logits);
+  vec_free(component_elbo);
+  vec_free(tmp_model_grad);
+  vec_free(tmp_weight_kldgrad);
+  for (k = 0; k < ncomponents; k++) {
+    vec_free(model_grad_components[k]);
+    vec_free(model_natgrad_components[k]);
+    vec_free(m_mu[k]);
+    vec_free(v_mu[k]);
+    vec_free(m_sigma[k]);
+    vec_free(v_sigma[k]);
+    vec_free(best_mu[k]);
+    vec_free(best_sigmapar[k]);
+    vec_free(mu_kldgrad[k]);
+    vec_free(sigma_kldgrad[k]);
+    vec_free(sigma_penalty_grad[k]);
+    vec_free(tmp_mu_kldgrad[k]);
+    vec_free(tmp_sigma_kldgrad[k]);
+  }
+  sfree(model_grad_components);
+  sfree(model_natgrad_components);
+  sfree(m_mu);
+  sfree(v_mu);
+  sfree(m_sigma);
+  sfree(v_sigma);
+  sfree(best_mu);
+  sfree(best_sigmapar);
+  sfree(mu_kldgrad);
+  sfree(sigma_kldgrad);
+  sfree(sigma_penalty_grad);
+  sfree(tmp_mu_kldgrad);
+  sfree(tmp_sigma_kldgrad);
+  sfree(sigma_t);
+  sfree(s); sfree(st); sfree(sd); sfree(sm);
+  
+  if (n_nuisance_params > 0) {
+    vec_free(ave_nuis_grad); vec_free(m_nuis); vec_free(v_nuis);
+    vec_free(m_nuis_prev); vec_free(v_nuis_prev); vec_free(best_nuis_params);
+    vec_free(tmp_ave_nuis_grad);
+    sfree(nuis_t);
+  }    
 }
