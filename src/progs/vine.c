@@ -43,7 +43,7 @@
 #define DEFAULT_KAPPA 4
 #define DEFAULT_RANK 3
 #define DEFAULT_MCMC_THIN 10
-#define DEFAULT_MIXTURE_JITTER_SD 0.1
+#define DEFAULT_MIXTURE_JITTER_FRAC 0.1
 
 /* default dimensionality is a linear function of log number of taxa */
 #define DEFAULT_DIM_INTERCEPT 3.25
@@ -663,8 +663,11 @@ int main(int argc, char *argv[]) {
         estimate_mmvn_from_distances(covar_data, mixmvn->components[0], 0); 
       
       /* initialize all other components as a jittered version of the first component's mean
-          and with identical covariance */
-      mixmvn_init_jitter_from_component(mixmvn, 0, DEFAULT_MIXTURE_JITTER_SD);
+          and with identical covariance; jitter is scaled to the embedding's
+          coordinate scale so components start meaningfully apart regardless
+          of tree size or branch-length scale */
+      mixmvn_init_jitter_from_component(mixmvn, 0,
+                                         DEFAULT_MIXTURE_JITTER_FRAC * covar_data->pointscale);
       mixmvn_update_covariance(mixmvn, covar_data);
 
       if (use_taylor && !silent) fprintf(stderr, "Using Taylor approximation for ELBO...\n");
