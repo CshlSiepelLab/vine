@@ -34,7 +34,7 @@
 
 /* Mild symmetric Dirichlet prior on mixture weights.  This discourages
    premature component collapse without forcing nearly uniform weights. */
-#define MIXTURE_WEIGHT_PRIOR_ALPHA 2.0
+#define MIXTURE_WEIGHT_PRIOR_ALPHA 50.0
 
 static Vector *vec_new_zero(int size) {
   Vector *v = vec_new(size);
