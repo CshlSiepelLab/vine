@@ -1311,7 +1311,13 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
         vec_set(v_mu[k], j, v);
       }
     }
-    gauge_fixing_apply(mixmvn, data, gauge_reference_mu, m_mu);
+
+    /* Fix the gauge symmetry between mixture components.
+        This could be done in the single component case too, but
+        it would add runtime which we want to avoid for now.*/
+    if (ncomponents > 1) {
+      gauge_fixing_apply(mixmvn, data, gauge_reference_mu, m_mu);
+    }
 
     /* Update sigma.  In mixture mode every component receives its weighted
        likelihood/prior gradient; all components also receive mixture-KLD
