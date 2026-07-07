@@ -39,9 +39,10 @@
 #define MIXTURE_WEIGHT_PRIOR_ALPHA 50.0 /* TODO: Determine automatically relative to ELBO?*/
 
 /* Bounded pairwise repulsion among mixture-component means.
-    Strength defines the (undirected) pairwise component maximum repulsion penalty.
-    Scale defines the (relative) embedding radius of significant repulsion penalty influence. */
-#define MIXTURE_MEAN_REPULSION_STRENGTH 50.0 /* TODO: Determine automatically relative to ELBO?*/
+    The strength is calibrated once per run so its mean-gradient norm is this
+    fraction of the non-repulsion mean-gradient norm.  This keeps the term on
+    the optimizer's scale instead of tying it to a raw ELBO value. */
+#define MIXTURE_MEAN_REPULSION_TARGET_GRAD_FRAC 0.10
 #define MIXTURE_MEAN_REPULSION_SCALE_FRAC 0.1
 
 static Vector *vec_new_zero(int size) {
@@ -332,13 +333,14 @@ static double add_mixture_weight_dirichlet_prior(mixture_MVN *mixmvn,
    The σ is the radius of significant influence, after which the penalty drops off
    a good amount, though not entirely since everything here is smooth gaussian. */
 static double add_mixture_mean_repulsion(mixture_MVN *mixmvn, CovarData *data,
-                                            Vector **param_grad, int fulld) {
+                                            Vector **param_grad, int fulld,
+                                            double strength) {
   int a, b, j;
   double penalty = 0.0;
   double sigma = MIXTURE_MEAN_REPULSION_SCALE_FRAC * data->pointscale;
   double sigma2 = sigma * sigma;
 
-  if (mixmvn->ncomponents <= 1 || MIXTURE_MEAN_REPULSION_STRENGTH == 0.0)
+  if (mixmvn->ncomponents <= 1 || strength == 0.0)
     return 0.0;
 
   /* repulsion penalty will sum over all (undirected) pairwise components*/
@@ -355,8 +357,7 @@ static double add_mixture_mean_repulsion(mixture_MVN *mixmvn, CovarData *data,
       d2 /= fulld;
 
       /* accumulate repulsion penalty */
-      repulsion = MIXTURE_MEAN_REPULSION_STRENGTH *
-        exp(-0.5 * d2 / sigma2);
+      repulsion = strength * exp(-0.5 * d2 / sigma2);
       grad_mult = repulsion / (sigma2 * fulld);
       penalty += repulsion;
 
@@ -372,6 +373,54 @@ static double add_mixture_mean_repulsion(mixture_MVN *mixmvn, CovarData *data,
   }
 
   return penalty;
+}
+
+static double mixture_mean_grad_l2_norm(Vector **param_grad, int ncomponents,
+                                     int fulld) {
+  int k, j;
+  double norm_sq = 0.0;
+
+  for (k = 0; k < ncomponents; k++)
+    for (j = 0; j < fulld; j++) {
+      double g = vec_get(param_grad[k], j);
+      norm_sq += g * g;
+    }
+
+  return sqrt(norm_sq);
+}
+
+/* Calibrate the strength of the mixture mean repulsion penalty to be a specified fraction
+    of the unpenalized gradients L2 norm. */
+static double calibrate_mixture_mean_repulsion(mixture_MVN *mixmvn,
+                                               CovarData *data,
+                                               Vector **base_grad,
+                                               int fulld,
+                                               unsigned int *calibrated) {
+  int k;
+  double base_norm, unit_norm, strength, eps = 1e-12;
+  Vector **unit_grad;
+
+  *calibrated = FALSE;
+  base_norm = mixture_mean_grad_l2_norm(base_grad, mixmvn->ncomponents, fulld);
+  if (base_norm <= eps)
+    return 0.0;
+
+  /* Measure the repulsion gradient produced by strength = 1. */
+  unit_grad = smalloc(mixmvn->ncomponents * sizeof(Vector*));
+  for (k = 0; k < mixmvn->ncomponents; k++)
+    unit_grad[k] = vec_new_zero(fulld);
+  add_mixture_mean_repulsion(mixmvn, data, unit_grad, fulld, 1.0);
+  unit_norm = mixture_mean_grad_l2_norm(unit_grad, mixmvn->ncomponents, fulld);
+  for (k = 0; k < mixmvn->ncomponents; k++)
+    vec_free(unit_grad[k]);
+  sfree(unit_grad);
+
+  if (unit_norm <= eps)
+    return 0.0;
+
+  strength = MIXTURE_MEAN_REPULSION_TARGET_GRAD_FRAC * base_norm / unit_norm;
+  *calibrated = TRUE;
+  return strength;
 }
 
 /* estimate key components of the ELBO by Monte Carlo integration,
@@ -1045,7 +1094,9 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     bestkld = -INFTY, bestmigll = -INFTY,
     running_tot = 0, last_running_tot = -INFTY, penalty = 0,
     bestpenalty = 0, ave_lprior, best_lprior = -INFTY, subsamp_rescale = 1.0,
-    ll_at_mean = 0, bestll_at_mean = -INFTY, grad_norm_sq;
+    ll_at_mean = 0, bestll_at_mean = -INFTY, grad_norm_sq,
+    repulsion_strength = 0.0;
+  unsigned int repulsion_calibrated = FALSE;
   TaylorData *taylor_stash = NULL;
 
   /* for nuisance parameters; these are parameters that are optimized
@@ -1306,8 +1357,23 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       elb = add_mixture_weight_dirichlet_prior(mixmvn, component_elbo,
                                                 weight_kld_param_grad, weight_param_grad,
                                                 elb);
+
+      if (!repulsion_calibrated) {
+        repulsion_strength =
+          calibrate_mixture_mean_repulsion(mixmvn, data,
+                                           var_component_param_grad, fulld,
+                                           &repulsion_calibrated);
+        if (repulsion_calibrated && !silent)
+          fprintf(stderr, "Mixture mean repulsion strength set to %.6g...\n",
+                  repulsion_strength);
+        if (repulsion_calibrated && logf != NULL)
+          fprintf(logf, "# Mixture mean repulsion strength: %.12g\n",
+                  repulsion_strength);
+      }
+
       cpenalty = add_mixture_mean_repulsion(mixmvn, data,
-                                             var_component_param_grad, fulld);
+                                             var_component_param_grad, fulld,
+                                             repulsion_strength);
       penalty += cpenalty;
       elb -= cpenalty;
     }
