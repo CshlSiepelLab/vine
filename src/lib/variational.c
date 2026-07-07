@@ -985,7 +985,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   int n_nuisance_params = get_num_nuisance_params(mod, data);
   Vector *nuis_param_grad = NULL, *m_nuis = NULL, *v_nuis = NULL,
     *m_nuis_prev = NULL, *v_nuis_prev = NULL, *best_nuis_params = NULL;
-  int *nuis_t = NULL;
   if (mixmvn->components[0]->d * mixmvn->components[0]->n != dim * n)
     die("ERROR in variational_inf: bad dimensions\n");
 
@@ -1021,9 +1020,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     v_nuis_prev = vec_new_zero(n_nuisance_params);
     best_nuis_params = vec_new(n_nuisance_params);
     tmp_nuis_param_grad = vec_new(n_nuisance_params);
-    nuis_t = smalloc(n_nuisance_params * sizeof(int));
-    for (j = 0; j < n_nuisance_params; j++)
-      nuis_t[j] = 0;
   }
 
   /* initialize component-specific moments and iteration counts*/
@@ -1355,11 +1351,10 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
         continue;
 
       g = vec_get(nuis_param_grad, j);
-      nuis_t[j]++;
       m = vec_get(m_nuis_prev, j);
       v = vec_get(v_nuis_prev, j);
       old_val = nuis_param_get(mod, data, j);
-      new_val = adam_scalar_update(old_val, &m, &v, nuis_t[j], g,
+      new_val = adam_scalar_update(old_val, &m, &v, t, g,
                                    sd->lr * 0.3);
       nuis_param_pluseq(mod, data, j, new_val - old_val);
       vec_set(m_nuis, j, m);
@@ -1462,6 +1457,5 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     vec_free(nuis_param_grad); vec_free(m_nuis); vec_free(v_nuis);
     vec_free(m_nuis_prev); vec_free(v_nuis_prev); vec_free(best_nuis_params);
     vec_free(tmp_nuis_param_grad);
-    sfree(nuis_t);
   }    
 }
