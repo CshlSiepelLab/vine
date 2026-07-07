@@ -68,8 +68,16 @@ static void log_header(TreeModel *mod, mixture_MVN *mixmvn,
     for (k = 0; k < ncomponents; k++)
       fprintf(logf, "mixweight.%d\t", k);
   if (log_all) {
-    for (j = 0; j < fulld; j++)
-      fprintf(logf, "mu.%d\t", j);
+    if (ncomponents > 1) {
+      for (k = 0; k < ncomponents; k++) {
+        fprintf(logf, "component.%d\t", k);
+        for (j = 0; j < fulld; j++)
+          fprintf(logf, "mu.%d.%d\t", k, j);
+      }
+    }
+    else
+      for (j = 0; j < fulld; j++)
+        fprintf(logf, "mu.%d\t", j);
     if (data->type == LOWR || data->type == DIAG) {
       for (k = 0; k < ncomponents; k++)
         for (j = 0; j < data->covar_params[k]->size; j++)
