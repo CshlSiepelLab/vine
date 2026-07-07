@@ -37,6 +37,45 @@ static int flow_nuis_count(CovarData *data) {
   return retval;
 }
 
+static int nuis_flow_component(TreeModel *mod, CovarData *data, int idx) {
+  if (data->crispr_mod != NULL)
+    idx -= 2;
+  else if (mod->subst_mod == HKY85)
+    idx -= 1;
+  else if (mod->subst_mod == REV)
+    idx -= data->gtr_params->size;
+
+  if (data->dgamma_cats > 1)
+    idx -= 1;
+
+  if (idx < 0)
+    return -1;
+
+  for (int c = 0; c < data->nflow_components; c++) {
+    if (data->rfs[c] != NULL) {
+      int nrf = rf_nuis_count(data->rfs[c]);
+      if (idx < nrf)
+        return c;
+      idx -= nrf;
+    }
+
+    if (data->pfs[c] != NULL) {
+      int npf = pf_nuis_count(data->pfs[c]);
+      if (idx < npf)
+        return c;
+      idx -= npf;
+    }
+  }
+
+  return -1;
+}
+
+int nuis_param_is_active(TreeModel *mod, CovarData *data, int idx,
+                         int ncomponents) {
+  int flow_component = nuis_flow_component(mod, data, idx);
+  return flow_component < 0 || flow_component < ncomponents;
+}
+
 /* helper functions for nuisance parameters in variational
    inference. For now these include only the HKY ti/tv parameter for
    DNA models and the silencing rate and leading branch length for

@@ -41,41 +41,6 @@ static Vector *vec_new_zero(int size) {
   return v;
 }
 
-/* Return the flow component owning nuisance parameter idx, or -1 for
-   non-flow nuisance parameters.  This mirrors nuisance.c's parameter order. */
-static int nuis_flow_component(TreeModel *mod, CovarData *data, int idx) {
-  if (data->crispr_mod != NULL)
-    idx -= 2;
-  else if (mod->subst_mod == HKY85)
-    idx -= 1;
-  else if (mod->subst_mod == REV)
-    idx -= data->gtr_params->size;
-
-  if (data->dgamma_cats > 1)
-    idx -= 1;
-
-  if (idx < 0)
-    return -1;
-
-  for (int c = 0; c < data->nflow_components; c++) {
-    if (data->rfs[c] != NULL) {
-      int nrf = data->rfs[c]->ctr->size + 2;
-      if (idx < nrf)
-        return c;
-      idx -= nrf;
-    }
-
-    if (data->pfs[c] != NULL) {
-      int npf = data->pfs[c]->ndim * 2 + 1;
-      if (idx < npf)
-        return c;
-      idx -= npf;
-    }
-  }
-
-  return -1;
-}
-
 static void log_header(TreeModel *mod, mixture_MVN *mixmvn,
                                       CovarData *data, FILE *logf,
                                       int fulld, int n_nuisance_params,
@@ -1384,10 +1349,9 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 
     /* same thing for nuisance params, if necessary */
     for (j = 0; j < n_nuisance_params; j++) {   
-      int flow_component = nuis_flow_component(mod, data, j);
       double g, m, v, old_val, new_val;
 
-      if (ncomponents == 1 && flow_component >= 0 && flow_component != 0)
+      if (!nuis_param_is_active(mod, data, j, ncomponents))
         continue;
 
       g = vec_get(nuis_param_grad, j);

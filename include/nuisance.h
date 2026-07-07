@@ -23,6 +23,9 @@ char *get_nuisance_param_name(TreeModel *mod, CovarData *data, int idx);
 
 void update_nuis_grad(TreeModel *mod, CovarData *data, Vector *nuis_grad);
 
+int nuis_param_is_active(TreeModel *mod, CovarData *data, int idx,
+                         int ncomponents);
+
 void save_nuis_params(Vector *stored_vals, TreeModel *mod, CovarData *data);
 
 void update_nuis_params(Vector *stored_vals, TreeModel *mod, CovarData *data);
