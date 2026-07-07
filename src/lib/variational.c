@@ -36,6 +36,12 @@
    premature component collapse without forcing nearly uniform weights. */
 #define MIXTURE_WEIGHT_PRIOR_ALPHA 50.0
 
+/* Bounded pairwise repulsion among mixture-component means.  Distances are
+   measured as mean squared coordinate differences and scaled by pointscale,
+   so these values remain comparable across tree sizes and branch scales. */
+#define MIXTURE_MEAN_REPULSION_STRENGTH 1.0
+#define MIXTURE_MEAN_REPULSION_SCALE_FRAC 0.1
+
 static Vector *vec_new_zero(int size) {
   Vector *v = vec_new(size);
   vec_zero(v);
@@ -312,6 +318,48 @@ static double add_mixture_weight_dirichlet_prior(mixture_MVN *mixmvn,
   }
 
   return mix_elbo + weight_log_prior;
+}
+
+static double add_mixture_mean_repulsion(mixture_MVN *mixmvn, CovarData *data,
+                                            Vector **param_grad, int fulld) {
+  int a, b, j;
+  double penalty = 0.0;
+  double scale = MIXTURE_MEAN_REPULSION_SCALE_FRAC * data->pointscale;
+  double scale2 = scale * scale;
+
+  if (mixmvn->ncomponents <= 1 || MIXTURE_MEAN_REPULSION_STRENGTH == 0.0)
+    return 0.0;
+
+  if (scale2 <= 0.0)
+    scale2 = MIXTURE_MEAN_REPULSION_SCALE_FRAC * MIXTURE_MEAN_REPULSION_SCALE_FRAC;
+
+  for (a = 0; a < mixmvn->ncomponents - 1; a++) {
+    for (b = a + 1; b < mixmvn->ncomponents; b++) {
+      double d2 = 0.0, repulsion, grad_mult;
+
+      for (j = 0; j < fulld; j++) {
+        double diff = mmvn_get_mu_el(mixmvn->components[a], j) -
+          mmvn_get_mu_el(mixmvn->components[b], j);
+        d2 += diff * diff;
+      }
+      d2 /= fulld;
+
+      repulsion = MIXTURE_MEAN_REPULSION_STRENGTH *
+        exp(-0.5 * d2 / scale2);
+      grad_mult = repulsion / (scale2 * fulld);
+      penalty += repulsion;
+
+      for (j = 0; j < fulld; j++) {
+        double diff = mmvn_get_mu_el(mixmvn->components[a], j) -
+          mmvn_get_mu_el(mixmvn->components[b], j);
+        double g = grad_mult * diff;
+        vec_set(param_grad[a], j, vec_get(param_grad[a], j) + g);
+        vec_set(param_grad[b], j, vec_get(param_grad[b], j) - g);
+      }
+    }
+  }
+
+  return penalty;
 }
 
 /* estimate key components of the ELBO by Monte Carlo integration,
@@ -1246,6 +1294,10 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       elb = add_mixture_weight_dirichlet_prior(mixmvn, component_elbo,
                                                 weight_kld_param_grad, weight_param_grad,
                                                 elb);
+      cpenalty = add_mixture_mean_repulsion(mixmvn, data,
+                                             var_component_param_grad, fulld);
+      penalty += cpenalty;
+      elb -= cpenalty;
     }
 
     /* don't select best during migration warmup: migration is excluded from
