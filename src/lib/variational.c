@@ -960,7 +960,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
                         unsigned int silent, unsigned int log_all) {
 
   Vector *model_param_grad, **var_component_param_grad = NULL,
-    **var_component_nat_param_grad = NULL, **sigma_penalty_param_grad = NULL,
+    **sigma_penalty_param_grad = NULL,
     *weight_param_grad = NULL, *weight_kld_param_grad = NULL,
     *m_weight = NULL, *v_weight = NULL, *best_logits = NULL,
     *component_elbo = NULL, *tmp_model_param_grad = NULL, *tmp_nuis_param_grad = NULL,
@@ -991,7 +991,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   graddim = fulld + data->covar_params[0]->size;
   model_param_grad = vec_new(graddim);
   var_component_param_grad = smalloc(ncomponents * sizeof(Vector*));
-  var_component_nat_param_grad = smalloc(ncomponents * sizeof(Vector*));
   weight_param_grad = vec_new_zero(ncomponents);
   weight_kld_param_grad = vec_new_zero(ncomponents);
   m_weight = vec_new_zero(ncomponents);
@@ -1025,7 +1024,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   /* initialize component-specific moments and iteration counts*/
   for (k = 0; k < ncomponents; k++) {
     var_component_param_grad[k] = vec_new_zero(graddim);
-    var_component_nat_param_grad[k] = vec_new_zero(graddim);
     m_mu[k] = vec_new_zero(fulld);
     v_mu[k] = vec_new_zero(fulld);
     m_sigma[k] = vec_new_zero(data->covar_params[k]->size);
@@ -1085,7 +1083,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     vec_zero(component_elbo);
     for (k = 0; k < mixmvn->ncomponents; k++) {
       vec_zero(var_component_param_grad[k]);
-      vec_zero(var_component_nat_param_grad[k]);
       vec_zero(sigma_penalty_param_grad[k]);
       assert(var_component_param_grad[k]->size == graddim);
     }
@@ -1255,14 +1252,12 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
         save_nuis_params(best_nuis_params, mod, data);
     }
 
-    /* Rescale the complete component gradient by approximate inverse Fisher
-       information to put parameters on similar optimization scales. */
+    /* Rescale the complete component gradient in place by approximate inverse
+       Fisher information to put parameters on similar optimization scales. */
     for (k = 0; k < ncomponents; k++) {
       if (data->natural_grad == TRUE)
         rescale_grad(var_component_param_grad[k],
-                        var_component_nat_param_grad[k], mixmvn->components[k], data);
-      else
-        vec_copy(var_component_nat_param_grad[k], var_component_param_grad[k]);
+                        var_component_param_grad[k], mixmvn->components[k], data);
     }
     /* we won't do this with nuisance params */
 
@@ -1271,11 +1266,11 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     grad_norm_sq = 0.0;
     for (k = 0; k < ncomponents; k++) {
       for (j = 0; j < fulld; j++) {
-        double g = vec_get(var_component_nat_param_grad[k], j);
+        double g = vec_get(var_component_param_grad[k], j);
         grad_norm_sq += g * g;
       }
       for (j = 0; j < data->covar_params[k]->size; j++) {
-        double g = vec_get(var_component_nat_param_grad[k], fulld + j);
+        double g = vec_get(var_component_param_grad[k], fulld + j);
         grad_norm_sq += g * g;
       }
     }
@@ -1288,7 +1283,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     if (sd->clip_norm > 0 && sm->grad_norm > sd->clip_norm) {
       clip_scale = sd->clip_norm / sm->grad_norm;
       for (k = 0; k < ncomponents; k++)
-        vec_scale(var_component_nat_param_grad[k], clip_scale);
+        vec_scale(var_component_param_grad[k], clip_scale);
       clipped = TRUE;
     }
 
@@ -1302,7 +1297,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     for (k = 0; k < ncomponents; k++) {
       for (j = 0; j < fulld; j++) {
         double m = vec_get(m_mu[k], j), v = vec_get(v_mu[k], j);
-        double g = vec_get(var_component_nat_param_grad[k], j);
+        double g = vec_get(var_component_param_grad[k], j);
         mmvn_set_mu_el(mixmvn->components[k], j,
                         adam_scalar_update(mmvn_get_mu_el(mixmvn->components[k], j),
                                            &m, &v, t, g, sd->lr));
@@ -1319,7 +1314,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       sigma_t[k]++;
       for (j = 0; j < data->covar_params[k]->size; j++) {
         double m = vec_get(m_sigma[k], j), v = vec_get(v_sigma[k], j);
-        double g = vec_get(var_component_nat_param_grad[k], fulld + j);
+        double g = vec_get(var_component_param_grad[k], fulld + j);
         vec_set(data->covar_params[k], j,
                 adam_scalar_update(vec_get(data->covar_params[k], j),
                                    &m, &v, sigma_t[k], g, sd->lr));
@@ -1428,7 +1423,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   vec_free(tmp_weight_kld_param_grad);
   for (k = 0; k < ncomponents; k++) {
     vec_free(var_component_param_grad[k]);
-    vec_free(var_component_nat_param_grad[k]);
     vec_free(m_mu[k]);
     vec_free(v_mu[k]);
     vec_free(m_sigma[k]);
@@ -1440,7 +1434,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     vec_free(tmp_sigma_kld_param_grad[k]);
   }
   sfree(var_component_param_grad);
-  sfree(var_component_nat_param_grad);
   sfree(m_mu);
   sfree(v_mu);
   sfree(m_sigma);

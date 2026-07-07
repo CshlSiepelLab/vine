@@ -264,8 +264,15 @@ double compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn,
    natural gradient scale */
 void rescale_grad(Vector *grad, Vector *rsgrad, multi_MVN *mmvn, CovarData *data) {
   int i, j, fulld = mmvn->n * mmvn->d;
+  Vector *src = grad;
+
+  if (grad == rsgrad && (data->type == DIST || data->type == LOWR)) {
+    src = vec_new(grad->size);
+    vec_copy(src, grad);
+  }
+
   for (i = 0; i < grad->size; i++) {
-    double g = vec_get(grad, i);
+    double g = vec_get(src, i);
     
     if (i < fulld) { /* mean gradients */
       if (data->type == CONST || data->type == DIAG) 
@@ -276,7 +283,7 @@ void rescale_grad(Vector *grad, Vector *rsgrad, multi_MVN *mmvn, CovarData *data
         int sigmarow = i / mmvn->d;  /* project down to sigma */
         int d = i % mmvn->d; /* corresponding dimension */
         for (j = 0; j < mmvn->mvn->sigma->ncols; j++)
-          dotp += mat_get(mmvn->mvn->sigma, sigmarow, j) * vec_get(grad, j*mmvn->d + d);
+          dotp += mat_get(mmvn->mvn->sigma, sigmarow, j) * vec_get(src, j*mmvn->d + d);
         g = dotp;
       }
     }
@@ -303,7 +310,7 @@ void rescale_grad(Vector *grad, Vector *rsgrad, multi_MVN *mmvn, CovarData *data
       *rsRgrad = mat_new(mmvn->n, data->lowrank);
     for (i = 0; i < mmvn->n; i++)
       for (j = 0; j < data->lowrank; j++)
-        mat_set(Rgrad, i, j, vec_get(grad, fulld + i*data->lowrank + j));
+        mat_set(Rgrad, i, j, vec_get(src, fulld + i*data->lowrank + j));
 
     /* multiply on the left by sigma */
     mat_mult(rsRgrad, mmvn->mvn->sigma, Rgrad);
@@ -316,6 +323,9 @@ void rescale_grad(Vector *grad, Vector *rsgrad, multi_MVN *mmvn, CovarData *data
     mat_free(Rgrad);
     mat_free(rsRgrad);
   }
+
+  if (src != grad)
+    vec_free(src);
 }
 
 /* Compute penalty for variance and its gradient. */
