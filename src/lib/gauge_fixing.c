@@ -70,15 +70,18 @@ static void rotate_euclidean_vectors(Vector *x, int nrows, int dim,
 }
 
 /* Compute the orthogonal Procrustes transformation that best aligns
-   the centered embedding `x` to the centered reference embedding.
-   Returns TRUE if a numerically stable rotation/reflection matrix
-   could be computed and stores it in `Q`. */
+   the centered embedding `x` to the centered reference embedding and
+   stores it in `Q`. If the eigendecomposition needed for the polar
+   decomposition fails or is numerically degenerate (e.g. a collapsed
+   embedding), falls back to the identity so callers get translation-
+   only gauge fixing instead of an Inf/NaN rotation. */
 static void compute_procrustes_rotation(Matrix *Q, Vector *x, Vector *ref,
                                        int n, int dim) {
   Matrix *C = mat_new(dim, dim), *CtC = mat_new(dim, dim),
     *evecs = mat_new(dim, dim);
   Vector *evals = vec_new(dim);
-  int i, a, b, l, m;
+  int i, a, b, l, m, stable;
+  double eps = 1e-10;
 
   mat_zero(C);
   mat_zero(CtC);
@@ -96,17 +99,24 @@ static void compute_procrustes_rotation(Matrix *Q, Vector *x, Vector *ref,
       mat_set(CtC, a, b, val);
     }
 
-  mat_diagonalize_sym(CtC, evals, evecs);
+  stable = (mat_diagonalize_sym(CtC, evals, evecs) == 0);
+  for (l = 0; stable && l < dim; l++)
+    if (vec_get(evals, l) < eps)
+      stable = FALSE;
 
-  mat_zero(Q);
-  for (a = 0; a < dim; a++)
-    for (b = 0; b < dim; b++) {
-      double val = 0.0;
-      for (m = 0; m < dim; m++)
-        for (l = 0; l < dim; l++)
-          val += mat_get(C, a, m) * mat_get(evecs, m, l) *
-                  mat_get(evecs, b, l) / sqrt(vec_get(evals, l));
-      mat_set(Q, a, b, val);
+  if (!stable) {
+    mat_set_identity(Q);
+  } else {
+    mat_zero(Q);
+    for (a = 0; a < dim; a++)
+      for (b = 0; b < dim; b++) {
+        double val = 0.0;
+        for (m = 0; m < dim; m++)
+          for (l = 0; l < dim; l++)
+            val += mat_get(C, a, m) * mat_get(evecs, m, l) *
+                    mat_get(evecs, b, l) / sqrt(vec_get(evals, l));
+        mat_set(Q, a, b, val);
+      }
   }
 
   mat_free(C);
@@ -187,12 +197,13 @@ void gauge_fixing_apply_euclidean(mixture_MVN *mixmvn, CovarData *data,
   for (k = 0; k < mixmvn->ncomponents; k++) {
     Vector *mu = vec_new(data->nseqs * data->dim);
     Vector *center = vec_new(data->dim);
-    Matrix *Q = mat_new(data->dim, data->dim);
+    Matrix *Q = NULL;
     int do_rotate = FALSE;
 
     mmvn_save_mu(mixmvn->components[k], mu);
     center_euclidean_embedding(mu, data->nseqs, data->dim, center);
     if (rotate) {
+      Q = mat_new(data->dim, data->dim);
       compute_procrustes_rotation(Q, mu, reference_mu,
                                               data->nseqs, data->dim);
       rotate_euclidean_vectors(mu, data->nseqs, data->dim, Q);
@@ -203,7 +214,8 @@ void gauge_fixing_apply_euclidean(mixture_MVN *mixmvn, CovarData *data,
     mmvn_set_mu(mixmvn->components[k], mu);
     transform_flows_to_euclidean_basis(data, k, center, Q, do_rotate);
 
-    mat_free(Q);
+    if (Q != NULL)
+      mat_free(Q);
     vec_free(center);
     vec_free(mu);
   }

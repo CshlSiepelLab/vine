@@ -1051,7 +1051,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       symmetry between mixture components. */
   if (ncomponents > 1) {
     gauge_reference_mu = gauge_fixing_new_euclidean_reference(mixmvn, data);
-    gauge_fixing_apply_euclidean(mixmvn, data, gauge_reference_mu, m_mu);
+    gauge_fixing_apply_euclidean(mixmvn, data, gauge_reference_mu, NULL);
     for (k = 0; k < ncomponents; k++)
       mmvn_save_mu(mixmvn->components[k], best_mu[k]);
   }
