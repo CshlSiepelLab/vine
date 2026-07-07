@@ -33,13 +33,15 @@
 #define CPR_MIG_WARMUP_ITERS 150
 
 /* Mild symmetric Dirichlet prior on mixture weights.  This discourages
-   premature component collapse without forcing nearly uniform weights. */
-#define MIXTURE_WEIGHT_PRIOR_ALPHA 50.0
+   premature component collapse without forcing nearly uniform weights. 
+   Alpha here is a scaling factor for the penalty, which really only 
+   defines a scale relative the the ELBO scale. */
+#define MIXTURE_WEIGHT_PRIOR_ALPHA 50.0 /* TODO: Determine automatically relative to ELBO?*/
 
-/* Bounded pairwise repulsion among mixture-component means.  Distances are
-   measured as mean squared coordinate differences and scaled by pointscale,
-   so these values remain comparable across tree sizes and branch scales. */
-#define MIXTURE_MEAN_REPULSION_STRENGTH 50.0
+/* Bounded pairwise repulsion among mixture-component means.
+    Strength defines the (undirected) pairwise component maximum repulsion penalty.
+    Scale defines the (relative) embedding radius of significant repulsion penalty influence. */
+#define MIXTURE_MEAN_REPULSION_STRENGTH 50.0 /* TODO: Determine automatically relative to ELBO?*/
 #define MIXTURE_MEAN_REPULSION_SCALE_FRAC 0.1
 
 static Vector *vec_new_zero(int size) {
