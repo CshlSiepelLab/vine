@@ -21,11 +21,8 @@
 #include <phast/eigen.h>
 #include <phast/misc.h>
 
-static int rotation_is_covariance_compatible(CovarData *data) {
-  return data->type == CONST || data->type == DIST || data->type == LOWR;
-}
-
-static void center_embedding(Vector *x, int n, int dim, Vector *center) {
+static void center_euclidean_embedding(Vector *x, int n, int dim,
+                                       Vector *center) {
   int i, d;
 
   assert(x->size == n * dim);
@@ -41,7 +38,8 @@ static void center_embedding(Vector *x, int n, int dim, Vector *center) {
       vec_set(x, i*dim + d, vec_get(x, i*dim + d) - vec_get(center, d));
 }
 
-static void rotate_row_vectors(Vector *x, int nrows, int dim, Matrix *Q) {
+static void rotate_euclidean_vectors(Vector *x, int nrows, int dim,
+                                     Matrix *Q) {
   int row, a, b;
   Vector *rot = vec_new(x->size);
 
@@ -60,8 +58,8 @@ static void rotate_row_vectors(Vector *x, int nrows, int dim, Matrix *Q) {
   vec_free(rot);
 }
 
-static int procrustes_rotation(Matrix *Q, Vector *x, Vector *ref,
-                               int n, int dim) {
+static int compute_procrustes_rotation(Matrix *Q, Vector *x, Vector *ref,
+                                       int n, int dim) {
   Matrix *C = mat_new(dim, dim), *CtC = mat_new(dim, dim),
     *evecs = mat_new(dim, dim);
   Vector *evals = vec_new(dim);
@@ -112,9 +110,9 @@ static int procrustes_rotation(Matrix *Q, Vector *x, Vector *ref,
   return ok;
 }
 
-static void transform_flows_to_basis(CovarData *data, int component,
-                                     Vector *center, Matrix *Q,
-                                     int rotate) {
+static void transform_flows_to_euclidean_basis(CovarData *data, int component,
+                                               Vector *center, Matrix *Q,
+                                               int rotate) {
   int d;
 
   if (data->rfs[component] != NULL) {
@@ -122,9 +120,10 @@ static void transform_flows_to_basis(CovarData *data, int component,
       vec_set(data->rfs[component]->ctr, d,
               vec_get(data->rfs[component]->ctr, d) - vec_get(center, d));
     if (rotate) {
-      rotate_row_vectors(data->rfs[component]->ctr, 1, data->dim, Q);
+      rotate_euclidean_vectors(data->rfs[component]->ctr, 1, data->dim, Q);
       if (data->rfs[component]->ctr_grad != NULL)
-        rotate_row_vectors(data->rfs[component]->ctr_grad, 1, data->dim, Q);
+        rotate_euclidean_vectors(data->rfs[component]->ctr_grad, 1,
+                                 data->dim, Q);
     }
   }
 
@@ -135,17 +134,20 @@ static void transform_flows_to_basis(CovarData *data, int component,
     data->pfs[component]->b += bshift;
 
     if (rotate) {
-      rotate_row_vectors(data->pfs[component]->u, 1, data->dim, Q);
-      rotate_row_vectors(data->pfs[component]->w, 1, data->dim, Q);
+      rotate_euclidean_vectors(data->pfs[component]->u, 1, data->dim, Q);
+      rotate_euclidean_vectors(data->pfs[component]->w, 1, data->dim, Q);
       if (data->pfs[component]->u_grad != NULL)
-        rotate_row_vectors(data->pfs[component]->u_grad, 1, data->dim, Q);
+        rotate_euclidean_vectors(data->pfs[component]->u_grad, 1,
+                                 data->dim, Q);
       if (data->pfs[component]->w_grad != NULL)
-        rotate_row_vectors(data->pfs[component]->w_grad, 1, data->dim, Q);
+        rotate_euclidean_vectors(data->pfs[component]->w_grad, 1,
+                                 data->dim, Q);
     }
   }
 }
 
-Vector *gauge_fixing_new_reference(mixture_MVN *mixmvn, CovarData *data) {
+Vector *gauge_fixing_new_euclidean_reference(mixture_MVN *mixmvn,
+                                             CovarData *data) {
   Vector *reference_mu, *center;
 
   if (mixmvn->ncomponents <= 1 || data->hyperbolic)
@@ -154,14 +156,17 @@ Vector *gauge_fixing_new_reference(mixture_MVN *mixmvn, CovarData *data) {
   reference_mu = vec_new(data->nseqs * data->dim);
   center = vec_new(data->dim);
   mmvn_save_mu(mixmvn->components[0], reference_mu);
-  center_embedding(reference_mu, data->nseqs, data->dim, center);
+  center_euclidean_embedding(reference_mu, data->nseqs, data->dim, center);
   vec_free(center);
   return reference_mu;
 }
 
-void gauge_fixing_apply(mixture_MVN *mixmvn, CovarData *data,
-                        Vector *reference_mu, Vector **mu_moment) {
-  int k, rotate = rotation_is_covariance_compatible(data);
+void gauge_fixing_apply_euclidean(mixture_MVN *mixmvn, CovarData *data,
+                                  Vector *reference_mu, Vector **mu_moment) {
+  int k;
+
+  /* DIAG covariance is not compatible with this gauge fixing approach */
+  int rotate = data->type == CONST || data->type == DIST || data->type == LOWR;
 
   if (reference_mu == NULL)
     return;
@@ -173,16 +178,16 @@ void gauge_fixing_apply(mixture_MVN *mixmvn, CovarData *data,
     int do_rotate = FALSE;
 
     mmvn_save_mu(mixmvn->components[k], mu);
-    center_embedding(mu, data->nseqs, data->dim, center);
-    if (rotate && procrustes_rotation(Q, mu, reference_mu,
-                                      data->nseqs, data->dim)) {
-      rotate_row_vectors(mu, data->nseqs, data->dim, Q);
+    center_euclidean_embedding(mu, data->nseqs, data->dim, center);
+    if (rotate && compute_procrustes_rotation(Q, mu, reference_mu,
+                                              data->nseqs, data->dim)) {
+      rotate_euclidean_vectors(mu, data->nseqs, data->dim, Q);
       if (mu_moment != NULL && mu_moment[k] != NULL)
-        rotate_row_vectors(mu_moment[k], data->nseqs, data->dim, Q);
+        rotate_euclidean_vectors(mu_moment[k], data->nseqs, data->dim, Q);
       do_rotate = TRUE;
     }
     mmvn_set_mu(mixmvn->components[k], mu);
-    transform_flows_to_basis(data, k, center, Q, do_rotate);
+    transform_flows_to_euclidean_basis(data, k, center, Q, do_rotate);
 
     mat_free(Q);
     vec_free(center);

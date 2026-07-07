@@ -1047,10 +1047,14 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     sigma_t[k] = 0;
   }
 
-  gauge_reference_mu = gauge_fixing_new_reference(mixmvn, data);
-  gauge_fixing_apply(mixmvn, data, gauge_reference_mu, m_mu);
-  for (k = 0; k < ncomponents; k++)
-    mmvn_save_mu(mixmvn->components[k], best_mu[k]);
+  /* Define the reference basis to fix the gauge 
+      symmetry between mixture components. */
+  if (ncomponents > 1) {
+    gauge_reference_mu = gauge_fixing_new_euclidean_reference(mixmvn, data);
+    gauge_fixing_apply_euclidean(mixmvn, data, gauge_reference_mu, m_mu);
+    for (k = 0; k < ncomponents; k++)
+      mmvn_save_mu(mixmvn->components[k], best_mu[k]);
+  }
 
   log_header(mod, mixmvn, data, logf, fulld,
                          n_nuisance_params, log_all);
@@ -1324,7 +1328,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
         This could be done in the single component case too, but
         it would add runtime which we want to avoid for now.*/
     if (ncomponents > 1) {
-      gauge_fixing_apply(mixmvn, data, gauge_reference_mu, m_mu);
+      gauge_fixing_apply_euclidean(mixmvn, data, gauge_reference_mu, m_mu);
     }
 
     /* Update sigma.  In mixture mode every component receives its weighted

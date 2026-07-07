@@ -15,9 +15,10 @@
 #include <covariance.h>
 #include <mixture_mvn.h>
 
-Vector *gauge_fixing_new_reference(mixture_MVN *mixmvn, CovarData *data);
+Vector *gauge_fixing_new_euclidean_reference(mixture_MVN *mixmvn,
+                                             CovarData *data);
 
-void gauge_fixing_apply(mixture_MVN *mixmvn, CovarData *data,
-                        Vector *reference_mu, Vector **mu_moment);
+void gauge_fixing_apply_euclidean(mixture_MVN *mixmvn, CovarData *data,
+                                  Vector *reference_mu, Vector **mu_moment);
 
 #endif
