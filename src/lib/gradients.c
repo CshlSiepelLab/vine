@@ -386,8 +386,9 @@ double compute_variance_penalty(Vector *grad, multi_MVN *mmvn,
     mat_scale(Rgrad, 2 * mult);
     vec_free(logdiag);   
     
-    /* finally add entries to corresponding gradient components */
-    vec_zero(grad);
+    /* finally add entries to corresponding gradient components;
+       assumes grad is already zeroed on input, as in the other cases
+       above */
     for (i = 0; i < data->R->nrows; i++)
       for (j = 0; j < data->R->ncols; j++)
         vec_set(grad, start_idx + i*data->R->ncols + j,
