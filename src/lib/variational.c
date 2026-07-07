@@ -39,7 +39,7 @@
 /* Bounded pairwise repulsion among mixture-component means.  Distances are
    measured as mean squared coordinate differences and scaled by pointscale,
    so these values remain comparable across tree sizes and branch scales. */
-#define MIXTURE_MEAN_REPULSION_STRENGTH 1.0
+#define MIXTURE_MEAN_REPULSION_STRENGTH 50.0
 #define MIXTURE_MEAN_REPULSION_SCALE_FRAC 0.1
 
 static Vector *vec_new_zero(int size) {
@@ -320,23 +320,31 @@ static double add_mixture_weight_dirichlet_prior(mixture_MVN *mixmvn,
   return mix_elbo + weight_log_prior;
 }
 
+/* Add pairwise Gaussian repulsion between mixture component means.
+   For each component pair of means μ_i and μ_j, adds the penalty
+       α exp(-||μ_i - μ_j||² / (2σ²))
+   where α is the repulsion strength and σ is the repulsion length scale. 
+   The max pairwise penalty term here is the repulsion strength value since
+   α exp(0) = α. As ||μ_i - μ_j||² increases, meaning the distance between the
+   means increases, the penalty decreases since exp(-x) is approx 0 for large x. 
+   The σ is the radius of significant influence, after which the penalty drops off
+   a good amount, though not entirely since everything here is smooth gaussian. */
 static double add_mixture_mean_repulsion(mixture_MVN *mixmvn, CovarData *data,
                                             Vector **param_grad, int fulld) {
   int a, b, j;
   double penalty = 0.0;
-  double scale = MIXTURE_MEAN_REPULSION_SCALE_FRAC * data->pointscale;
-  double scale2 = scale * scale;
+  double sigma = MIXTURE_MEAN_REPULSION_SCALE_FRAC * data->pointscale;
+  double sigma2 = sigma * sigma;
 
   if (mixmvn->ncomponents <= 1 || MIXTURE_MEAN_REPULSION_STRENGTH == 0.0)
     return 0.0;
 
-  if (scale2 <= 0.0)
-    scale2 = MIXTURE_MEAN_REPULSION_SCALE_FRAC * MIXTURE_MEAN_REPULSION_SCALE_FRAC;
-
+  /* repulsion penalty will sum over all (undirected) pairwise components*/
   for (a = 0; a < mixmvn->ncomponents - 1; a++) {
     for (b = a + 1; b < mixmvn->ncomponents; b++) {
       double d2 = 0.0, repulsion, grad_mult;
 
+      /* compute mean squared distance between component means */
       for (j = 0; j < fulld; j++) {
         double diff = mmvn_get_mu_el(mixmvn->components[a], j) -
           mmvn_get_mu_el(mixmvn->components[b], j);
@@ -344,11 +352,13 @@ static double add_mixture_mean_repulsion(mixture_MVN *mixmvn, CovarData *data,
       }
       d2 /= fulld;
 
+      /* accumulate repulsion penalty */
       repulsion = MIXTURE_MEAN_REPULSION_STRENGTH *
-        exp(-0.5 * d2 / scale2);
-      grad_mult = repulsion / (scale2 * fulld);
+        exp(-0.5 * d2 / sigma2);
+      grad_mult = repulsion / (sigma2 * fulld);
       penalty += repulsion;
 
+      /* accumulate gradients with respect to the component means */
       for (j = 0; j < fulld; j++) {
         double diff = mmvn_get_mu_el(mixmvn->components[a], j) -
           mmvn_get_mu_el(mixmvn->components[b], j);
