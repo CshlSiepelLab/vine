@@ -104,8 +104,8 @@ double compute_model_grad(TreeModel *mod, multi_MVN *mmvn, Vector *points,
   if (!isfinite(ll_base)) /* can happen with crispr model; force calling code to deal with it */
     return ll_base;
         
-  /* now derive partial derivatives wrt free parameters from dL/dx */
-  vec_zero(grad);
+  /* now derive partial derivatives wrt free parameters from dL/dx;
+     assumes grad is already zeroed on input */
   loglambda_grad = 0;
   for (i = 0; i < n; i++) {  
     for (k = 0; k < d; k++) {
