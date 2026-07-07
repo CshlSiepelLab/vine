@@ -42,8 +42,8 @@
     The strength is calibrated once per run so its mean-gradient norm is this
     fraction of the non-repulsion mean-gradient norm.  This keeps the term on
     the optimizer's scale instead of tying it to a raw ELBO value. */
-#define MIXTURE_MEAN_REPULSION_TARGET_GRAD_FRAC 0.10
-#define MIXTURE_MEAN_REPULSION_SCALE_FRAC 0.1
+#define MIXTURE_MEAN_REPULSION_TARGET_GRAD_FRAC 0.3
+#define MIXTURE_MEAN_REPULSION_SCALE_FRAC 0.15
 
 static Vector *vec_new_zero(int size) {
   Vector *v = vec_new(size);
