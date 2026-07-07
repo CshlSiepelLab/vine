@@ -31,15 +31,18 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 
 double elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
                           CovarData *data,
-                          int nminibatch, Vector *model_grad,
-                          Vector *ave_nuis_grad, double *ave_lprior,
+                          int nminibatch, Vector *model_param_grad,
+                          Vector *nuis_param_grad, double *ave_lprior,
                           double *avemigll, double *kld,
-                          Vector **sigma_kldgrad,
-                          Vector **mu_kldgrad,
-                          Vector *weight_kldgrad);
+                          Vector **sigma_kld_param_grad,
+                          Vector **mu_kld_param_grad,
+                          Vector *weight_kld_param_grad);
 
 List *var_sample(int nsamples, mixture_MVN *mixmvn, CovarData *data,
                     char** names, Vector *logdens);
+
+TreeNode *infer_distance_tree(Matrix *D, char **names, Matrix *dt_dD,
+                              Neighbors *nb, CovarData *data);
 
 TreeNode *mean_tree(Vector *mu, char **names, CovarData *data);
 

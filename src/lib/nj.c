@@ -401,32 +401,6 @@ double distance_on_tree(TreeNode *root, TreeNode *n1, TreeNode *n2) {
   
 }
 
-/* Wrapper for various distance-based tree inference algorithms. */
-TreeNode *infer_distance_tree(Matrix *D, char **names, Matrix *dt_dD, Neighbors *nb,
-                              CovarData *data) {
-  if (data->ultrametric) {
-    TreeNode *t = upgma_infer_tree(D, names, dt_dD);
-
-    if (data->no_zero_br == TRUE)
-      repair_zero_br(t);
-    return t;
-  }
-  else {
-    TreeNode *tree = nj_infer_tree(D, names, dt_dD, nb);
-    if (data->treeprior != NULL && data->treeprior->relclock == TRUE) { /* need to reroot in this case */
-      if (data->seq_to_node_map == NULL) /* only need to do this once */
-        update_seq_to_node_map(tree, names, data);
-      if (data->tree_diam_leaf1 < 0 || data->tree_diam_leaf2 < 0)
-        update_diam_leaves(D, data);  /* needed upon init */
-      TreeNode *mp = tr_find_midpoint(tree, data->seq_to_node_map[data->tree_diam_leaf1],
-                                      data->seq_to_node_map[data->tree_diam_leaf2]);
-      TreeNode *newtree = tr_reroot2(tree, mp);
-      tree = newtree;
-    }
-    return tree;
-  }
-}
-
 void update_seq_to_node_map(TreeNode *tree, char **names, CovarData *data) {
   List *leaves = lst_new_ptr(tree->nnodes/2);
   if (data->seq_to_node_map != NULL)

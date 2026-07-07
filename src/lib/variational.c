@@ -799,6 +799,32 @@ double elbo_montecarlo(TreeModel *mod, mixture_MVN *mixmvn, int component,
   return avell;
 }
 
+/* Wrapper for various distance-based tree inference algorithms. */
+TreeNode *infer_distance_tree(Matrix *D, char **names, Matrix *dt_dD, Neighbors *nb,
+                              CovarData *data) {
+  if (data->ultrametric) {
+    TreeNode *t = upgma_infer_tree(D, names, dt_dD);
+
+    if (data->no_zero_br == TRUE)
+      repair_zero_br(t);
+    return t;
+  }
+  else {
+    TreeNode *tree = nj_infer_tree(D, names, dt_dD, nb);
+    if (data->treeprior != NULL && data->treeprior->relclock == TRUE) {
+      if (data->seq_to_node_map == NULL)
+        update_seq_to_node_map(tree, names, data);
+      if (data->tree_diam_leaf1 < 0 || data->tree_diam_leaf2 < 0)
+        update_diam_leaves(D, data);  /* needed upon init */
+      TreeNode *mp = tr_find_midpoint(tree, data->seq_to_node_map[data->tree_diam_leaf1],
+                                      data->seq_to_node_map[data->tree_diam_leaf2]);
+      TreeNode *newtree = tr_reroot2(tree, mp);
+      tree = newtree;
+    }
+    return tree;
+  }
+}
+
 /* sample a list of trees from the approximate posterior distribution
    and return as a new list.  If logdens is non-null, return
    corresponding vector of log densities for the samples */

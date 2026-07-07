@@ -54,9 +54,6 @@ Matrix *tree_to_distances(TreeNode *tree, char **names, int n);
 
 double distance_on_tree(TreeNode *root, TreeNode *n1, TreeNode *n2);
 
-TreeNode *infer_distance_tree(Matrix *D, char **names, Matrix *dt_dD,
-                              Neighbors *nb, struct cvdat *covar_data);
-
 void update_seq_to_node_map(TreeNode *tree, char **names, struct cvdat *data);
 
 void update_diam_leaves(Matrix *D, struct cvdat *data);
