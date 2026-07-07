@@ -7,6 +7,7 @@ add_library(vine_core STATIC
     bitset.c
     covariance.c
     crispr.c
+    gauge_fixing.c
     geometry.c
     gradients.c
     hutchinson.c

@@ -408,6 +408,13 @@ int main(int argc, char *argv[]) {
     hyperbolic = FALSE;
   /* for convenience in scripting; nonhyperbolic considered special case of hyperbolic */
 
+  if (hyperbolic == TRUE && n_mixture_components > 1) {
+    if (!silent)
+      fprintf(stderr, "ERROR: --hyperbolic is not compatible with "
+              "--n-mixture-components > 1 for now due to gauge symmetry.\n");
+    exit(1);
+  }
+
   /* the relaxed clock is implemented on the ultrametric (UPGMA) time tree;
      --relclock enables that machinery internally (below), so forbid the
      confusing explicit combination. */

@@ -26,6 +26,7 @@
 #include <likelihoods.h>
 #include <hutchinson.h>
 #include <version.h>
+#include <gauge_fixing.h>
 
 /* number of warmup iterations to run with migration model disabled;
    allows tree topology to converge before migration inference activates */
@@ -966,7 +967,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     *component_elbo = NULL, *tmp_model_param_grad = NULL, *tmp_nuis_param_grad = NULL,
     *tmp_weight_kld_param_grad = NULL, **tmp_mu_kld_param_grad = NULL, **tmp_sigma_kld_param_grad = NULL, 
     **m_mu = NULL, **v_mu = NULL, **best_mu = NULL,
-    **m_sigma = NULL, **v_sigma = NULL,
+    **m_sigma = NULL, **v_sigma = NULL, *gauge_reference_mu = NULL,
     **best_sigmapar = NULL;
   int n = data->nseqs, j, k, t = 0, stop = FALSE, bestt = -1, graddim,
     dim = data->dim, fulld = n*dim, reenable_taylor_t = -1,
@@ -1037,6 +1038,11 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     vec_copy(best_sigmapar[k], data->covar_params[k]);
     sigma_t[k] = 0;
   }
+
+  gauge_reference_mu = gauge_fixing_new_reference(mixmvn, data);
+  gauge_fixing_apply(mixmvn, data, gauge_reference_mu, m_mu);
+  for (k = 0; k < ncomponents; k++)
+    mmvn_save_mu(mixmvn->components[k], best_mu[k]);
 
   log_header(mod, mixmvn, data, logf, fulld,
                          n_nuisance_params, log_all);
@@ -1305,6 +1311,7 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
         vec_set(v_mu[k], j, v);
       }
     }
+    gauge_fixing_apply(mixmvn, data, gauge_reference_mu, m_mu);
 
     /* Update sigma.  In mixture mode every component receives its weighted
        likelihood/prior gradient; all components also receive mixture-KLD
@@ -1421,6 +1428,8 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
   vec_free(component_elbo);
   vec_free(tmp_model_param_grad);
   vec_free(tmp_weight_kld_param_grad);
+  if (gauge_reference_mu != NULL)
+    vec_free(gauge_reference_mu);
   for (k = 0; k < ncomponents; k++) {
     vec_free(var_component_param_grad[k]);
     vec_free(m_mu[k]);
