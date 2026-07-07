@@ -8,12 +8,15 @@
  * See the LICENSE file in the project root for details.
  */
 
-/* Gauge fixing for Euclidean embedding mixtures.
+/* Euclidean gauge fixing for embedding mixtures.
 
-   The phylogenetic decoder depends on pairwise distances, so Euclidean
-   translation, rotation, and reflection are non-identifiable.  These helpers
-   keep mixture components in a shared coordinate basis without changing their
-   decoded pairwise distances when the covariance parameterization permits it. */
+   The phylogenetic decoder depends only on pairwise Euclidean distances,
+   making translation, rotation, and reflection of the latent embedding
+   non-identifiable. These helpers remove this gauge freedom by expressing
+   all mixture components in a common Euclidean coordinate system without
+   changing the decoded pairwise distances. This procedure is only valid
+   for covariance parameterizations that remain invariant under orthogonal
+   changes of basis. */
 
 #include <assert.h>
 #include <math.h>
@@ -21,6 +24,10 @@
 #include <phast/eigen.h>
 #include <phast/misc.h>
 
+/* Remove the translational gauge freedom by centering a Euclidean
+   embedding at the origin. The centroid is returned in `center`
+   so that associated model parameters (e.g. flow transforms) can
+   be updated consistently. Pairwise distances are unchanged. */
 static void center_euclidean_embedding(Vector *x, int n, int dim,
                                        Vector *center) {
   int i, d;
@@ -38,6 +45,10 @@ static void center_euclidean_embedding(Vector *x, int n, int dim,
       vec_set(x, i*dim + d, vec_get(x, i*dim + d) - vec_get(center, d));
 }
 
+/* Apply an orthogonal change of basis to a collection of Euclidean
+   row vectors. The transformation preserves Euclidean distances and
+   is used to align embeddings, gradients, and flow parameters to a
+   common coordinate system. */
 static void rotate_euclidean_vectors(Vector *x, int nrows, int dim,
                                      Matrix *Q) {
   int row, a, b;
@@ -58,6 +69,10 @@ static void rotate_euclidean_vectors(Vector *x, int nrows, int dim,
   vec_free(rot);
 }
 
+/* Compute the orthogonal Procrustes transformation that best aligns
+   the centered embedding `x` to the centered reference embedding.
+   Returns TRUE if a numerically stable rotation/reflection matrix
+   could be computed and stores it in `Q`. */
 static int compute_procrustes_rotation(Matrix *Q, Vector *x, Vector *ref,
                                        int n, int dim) {
   Matrix *C = mat_new(dim, dim), *CtC = mat_new(dim, dim),
@@ -110,6 +125,10 @@ static int compute_procrustes_rotation(Matrix *Q, Vector *x, Vector *ref,
   return ok;
 }
 
+/* Update normalizing-flow parameters after the embedding basis has
+   been translated and, optionally, rotated. This keeps the flow
+   transformation equivalent in the new Euclidean coordinate system
+   without changing the represented density. */
 static void transform_flows_to_euclidean_basis(CovarData *data, int component,
                                                Vector *center, Matrix *Q,
                                                int rotate) {
@@ -146,6 +165,11 @@ static void transform_flows_to_euclidean_basis(CovarData *data, int component,
   }
 }
 
+/* Construct a reference Euclidean embedding used to define a common
+   coordinate system across mixture components. The first component is
+   centered and stored as the alignment target. Returns NULL when gauge
+   fixing is unnecessary or unsupported (e.g. a single component or
+   hyperbolic embeddings). */
 Vector *gauge_fixing_new_euclidean_reference(mixture_MVN *mixmvn,
                                              CovarData *data) {
   Vector *reference_mu, *center;
@@ -161,6 +185,11 @@ Vector *gauge_fixing_new_euclidean_reference(mixture_MVN *mixmvn,
   return reference_mu;
 }
 
+/* Remove Euclidean gauge freedom from every mixture component by
+   centering each embedding and, when compatible with the covariance
+   parameterization, aligning it to the reference embedding using an
+   orthogonal Procrustes transformation. Associated flow parameters and
+   cached moments are transformed into the same coordinate basis. */
 void gauge_fixing_apply_euclidean(mixture_MVN *mixmvn, CovarData *data,
                                   Vector *reference_mu, Vector **mu_moment) {
   int k;
