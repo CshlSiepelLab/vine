@@ -2,6 +2,7 @@
 
 add_executable(vine vine.c)
 add_executable(evalTrees evalTrees.c)
+add_executable(compareTrees compareTrees.c)
 add_executable(crisprLnl crisprLnl.c)
 
 # ---- Optional codesigning (macOS) ----
@@ -17,7 +18,7 @@ endif()
 option(VINE_CODESIGN "Ad-hoc codesign executables on macOS after build" ${_vine_codesign_default})
 message(STATUS "VINE_CODESIGN=${VINE_CODESIGN} (CONDA_BUILD=$ENV{CONDA_BUILD})")
 
-foreach(tgt vine evalTrees crisprLnl)
+foreach(tgt vine evalTrees compareTrees crisprLnl)
     target_link_libraries(${tgt} PRIVATE vine_core)
     if(APPLE AND VINE_CODESIGN)
         add_custom_command(TARGET ${tgt} POST_BUILD
@@ -41,6 +42,7 @@ target_compile_definitions(vine PRIVATE VINE_VERSION="${VINE_VERSION}")
 install(TARGETS
   vine
   evalTrees
+  compareTrees
   crisprLnl
   RUNTIME DESTINATION bin
 )

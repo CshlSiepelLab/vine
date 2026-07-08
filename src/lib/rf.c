@@ -441,3 +441,113 @@ void tr_tree_entropy(List *trees, double *H_split, double *H_top,
   hsh_free(name2idx);
 }
 
+/* ---- helpers for tr_split_kl --------------------------------------------- */
+
+typedef struct { BitMask *mask; int count; } SplitCount;
+
+/* Collect unique non-trivial splits and their occurrence counts across a
+ * set of trees.  Returns a newly allocated array sorted by mask, with
+ * *nsc_out set to its length.  *nleaves_out (if non-NULL) is set to the
+ * number of leaves.  Returns NULL (with *nsc_out == 0) if trees is empty
+ * or has fewer than 3 leaves. */
+static SplitCount *collect_split_counts(List *trees, int *nsc_out, int *nleaves_out) {
+  *nsc_out = 0;
+  int S = lst_size(trees);
+  if (S == 0) { if (nleaves_out) *nleaves_out = 0; return NULL; }
+
+  TreeNode *t0 = lst_get_ptr(trees, 0);
+  List *names = tr_leaf_names(t0);
+  lst_qsort_str(names, ASCENDING);
+  int n = lst_size(names);
+  if (nleaves_out) *nleaves_out = n;
+  if (n < 3) { lst_free_strings(names); lst_free(names); return NULL; }
+
+  int W = (n + 63) >> 6;
+  int max_edges = 2 * n;
+  Hashtable *name2idx = hsh_new(2 * n);
+  for (int i = 0; i < n; i++) {
+    String *s = lst_get_ptr(names, i);
+    hsh_put_int(name2idx, s->chars, i);
+  }
+
+  MaskVec all;
+  mv_init(&all, S * (n - 3 > 0 ? n - 3 : 1));
+  for (int s = 0; s < S; s++) {
+    TreeNode *t = lst_get_ptr(trees, s);
+    SplitBLen *sbl = smalloc(max_edges * sizeof(SplitBLen));
+    int nbl = 0;
+    BitMask *root = dfs_splits_blen(t, NULL, name2idx, n, W, sbl, &nbl);
+    bm_free(root);
+    for (int k = 0; k < nbl; k++) {
+      int sz = bm_popcount(sbl[k].mask);
+      if (sz >= 2 && (n - sz) >= 2)
+        mv_push(&all, bm_clone(sbl[k].mask));
+      bm_free(sbl[k].mask);
+    }
+    sfree(sbl);
+  }
+  qsort(all.a, all.size, sizeof(BitMask*), bm_cmp_words);
+
+  SplitCount *out = smalloc((all.size > 0 ? all.size : 1) * sizeof(SplitCount));
+  int nsc = 0, i = 0;
+  while (i < all.size) {
+    int j = i + 1;
+    while (j < all.size && bm_cmp_words(&all.a[i], &all.a[j]) == 0) j++;
+    out[nsc].mask = bm_clone(all.a[i]);
+    out[nsc].count = j - i;
+    nsc++;
+    i = j;
+  }
+  mv_free(&all);
+  lst_free_strings(names);
+  lst_free(names);
+  hsh_free(name2idx);
+
+  *nsc_out = nsc;
+  return out;
+}
+
+/* ---- public function ----------------------------------------------------- */
+
+void tr_split_kl(List *trees_est, List *trees_ref, double *mean_kl) {
+  *mean_kl = 0.0;
+  int S_est = lst_size(trees_est), S_ref = lst_size(trees_ref);
+  if (S_est == 0 || S_ref == 0) return;
+
+  int nsc_e, nsc_r, n_e, n_r;
+  SplitCount *sce = collect_split_counts(trees_est, &nsc_e, &n_e);
+  SplitCount *scr = collect_split_counts(trees_ref, &nsc_r, &n_r);
+
+  if (n_e != n_r)
+    die("ERROR in tr_split_kl: estimate and reference trees have different numbers of leaves.\n");
+
+  int i = 0, j = 0, nsplits = 0;
+  double sum_kl = 0.0;
+  while (i < nsc_e || j < nsc_r) {
+    int cmp;
+    if (i >= nsc_e) cmp = 1;
+    else if (j >= nsc_r) cmp = -1;
+    else cmp = bm_cmp_words(&sce[i].mask, &scr[j].mask);
+
+    int c_e = (cmp <= 0) ? sce[i].count : 0;
+    int c_r = (cmp >= 0) ? scr[j].count : 0;
+
+    /* Laplace-smoothed inclusion probabilities so no split has p or q
+       exactly 0 or 1 (which would blow up the KL divergence below). */
+    double p = (c_e + 0.5) / (S_est + 1.0);
+    double q = (c_r + 0.5) / (S_ref + 1.0);
+    double kl = p * log(p / q) + (1.0 - p) * log((1.0 - p) / (1.0 - q));
+    sum_kl += kl;
+    nsplits++;
+
+    if (cmp <= 0) i++;
+    if (cmp >= 0) j++;
+  }
+
+  *mean_kl = (nsplits > 0) ? sum_kl / nsplits : 0.0;
+
+  for (int k = 0; k < nsc_e; k++) bm_free(sce[k].mask);
+  for (int k = 0; k < nsc_r; k++) bm_free(scr[k].mask);
+  sfree(sce); sfree(scr);
+}
+

@@ -41,4 +41,12 @@ double tr_robinson_foulds(TreeNode *t1, TreeNode *t2);
 void tr_tree_entropy(List *trees, double *H_split, double *H_top,
                      double *mean_var, double *mean_var_per_branch);
 
+/* Mean per-split Bernoulli KL divergence KL(p_est || p_ref), where p_est(s)
+ * and p_ref(s) are the posterior inclusion probabilities of non-trivial
+ * clade split s under the estimate and reference tree samples,
+ * respectively.  Averaged over the union of splits observed in either
+ * sample (Laplace-smoothed so no split has probability exactly 0 or 1).
+ * trees_est and trees_ref must be over the same set of leaf names. */
+void tr_split_kl(List *trees_est, List *trees_ref, double *mean_kl);
+
 #endif

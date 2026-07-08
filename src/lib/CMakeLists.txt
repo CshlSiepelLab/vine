@@ -26,6 +26,7 @@ add_library(vine_core STATIC
     sparse_matrix.c
     sparse_vector.c
     taylor.c
+    tree_parser.c
     tree_prior.c
     upgma.c
     variational.c
