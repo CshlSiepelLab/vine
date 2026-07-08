@@ -20,6 +20,7 @@
 /* Allocate memory and initialize each component mvn. */
 mixture_MVN *mixmvn_new(int ncomponents, int n, int d, enum mvn_type type) {
   int k;
+  double logit_jitter = 1e-3;
   mixture_MVN *mix;
 
   mix = smalloc(sizeof(mixture_MVN));
@@ -27,7 +28,9 @@ mixture_MVN *mixmvn_new(int ncomponents, int n, int d, enum mvn_type type) {
   mix->components = smalloc(ncomponents * sizeof(multi_MVN*));
   mix->logits = vec_new(ncomponents);
   mix->weights = vec_new(ncomponents);
-  vec_zero(mix->logits);
+  for (k = 0; k < ncomponents; k++)
+    vec_set(mix->logits, k,
+            ncomponents > 1 ? norm_draw(0, logit_jitter) : 0.0);
 
   for (k = 0; k < ncomponents; k++)
     mix->components[k] = mmvn_new(n, d, type);
