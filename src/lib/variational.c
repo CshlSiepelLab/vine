@@ -38,7 +38,7 @@
    weight-gradient norm is this fraction of the non-prior weight-gradient
    norm, analogous to the mean-repulsion calibration below but computed
    independently on the weight parameters. */
-#define MIXTURE_WEIGHT_PRIOR_TARGET_GRAD_FRAC 0.05
+#define MIXTURE_WEIGHT_PRIOR_TARGET_GRAD_FRAC 0.001
 
 /* Bounded pairwise repulsion among mixture-component means.
     The strength is calibrated once per run so its mean-gradient norm is this
@@ -1154,7 +1154,8 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     bestpenalty = 0, ave_lprior, best_lprior = -INFTY, subsamp_rescale = 1.0,
     ll_at_mean = 0, bestll_at_mean = -INFTY, grad_norm_sq,
     repulsion_strength = 0.0, weight_prior_alpha = 1.0;
-  unsigned int repulsion_calibrated = FALSE, weight_prior_alpha_calibrated = FALSE;
+  unsigned int repulsion_calibrated = FALSE, weight_prior_alpha_calibrated = FALSE,
+    header_written = FALSE;
   TaylorData *taylor_stash = NULL;
 
   /* for nuisance parameters; these are parameters that are optimized
@@ -1224,9 +1225,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     for (k = 0; k < ncomponents; k++)
       mmvn_save_mu(mixmvn->components[k], best_mu[k]);
   }
-
-  log_header(mod, mixmvn, data, logf, fulld,
-                         n_nuisance_params, log_all);
 
   /* set up scheduler; for CRISPR mode, start in full mode (no
      subsampling) but still use adaptive gradient clipping */
@@ -1588,6 +1586,12 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
       vec_copy(v_nuis_prev, v_nuis);
     }
     
+    if (!header_written) {
+      log_header(mod, mixmvn, data, logf, fulld,
+                             n_nuisance_params, log_all);
+      header_written = TRUE;
+    }
+
     log_iteration(mod, mixmvn, data, logf, taylor_stash, sm,
                               t, avell, elb, ave_lprior, kld,
                               penalty, avemigll, clipped,
