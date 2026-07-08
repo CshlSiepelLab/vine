@@ -33,10 +33,12 @@
 #define CPR_MIG_WARMUP_ITERS 150
 
 /* Mild symmetric Dirichlet prior on mixture weights.  This discourages
-   premature component collapse without forcing nearly uniform weights. 
-   Alpha here is a scaling factor for the penalty, which really only 
-   defines a scale relative the the ELBO scale. */
-#define MIXTURE_WEIGHT_PRIOR_ALPHA 50.0 /* TODO: Determine automatically relative to ELBO?*/
+   premature component collapse without forcing nearly uniform weights.
+   The prior's concentration (alpha) is calibrated once per run so its
+   weight-gradient norm is this fraction of the non-prior weight-gradient
+   norm, analogous to the mean-repulsion calibration below but computed
+   independently on the weight parameters. */
+#define MIXTURE_WEIGHT_PRIOR_TARGET_GRAD_FRAC 0.3
 
 /* Bounded pairwise repulsion among mixture-component means.
     The strength is calibrated once per run so its mean-gradient norm is this
@@ -296,31 +298,90 @@ static double compute_closed_form_kld(mixture_MVN *mixmvn, CovarData *data,
   return kld;
 }
 
-static double add_mixture_weight_dirichlet_prior(mixture_MVN *mixmvn,
-                                                       Vector *component_elbo,
-                                                       Vector *weight_kld_param_grad,
-                                                       Vector *weight_param_grad,
-                                                       double mix_elbo) {
+/* compute the (non-prior) gradient of the ELBO with respect to the mixture
+   weights; this is the "base" gradient against which the Dirichlet prior's
+   strength is calibrated below */
+static void compute_mixture_weight_base_grad(mixture_MVN *mixmvn,
+                                                Vector *component_elbo,
+                                                Vector *weight_kld_param_grad,
+                                                Vector *weight_param_grad,
+                                                double mix_elbo) {
   int j;
-  double weight_log_prior = 0.0;
 
-  /* log density of a symmetric Dirichlet prior, ignoring constants */
-  for (j = 0; j < mixmvn->ncomponents; j++) {
-    double wj = vec_get(mixmvn->weights, j);
-    weight_log_prior += (MIXTURE_WEIGHT_PRIOR_ALPHA - 1.0) * log(wj);
-  }
-
-  /* compute gradients of the log-prior with respect to the mixture weights */
   for (j = 0; j < mixmvn->ncomponents; j++) {
     double wj = vec_get(mixmvn->weights, j);
     vec_set(weight_param_grad, j,
             vec_get(weight_kld_param_grad, j) +
-            wj * (vec_get(component_elbo, j) - mix_elbo) +
-            (MIXTURE_WEIGHT_PRIOR_ALPHA - 1.0) *
-            (1.0 - mixmvn->ncomponents * wj));
+            wj * (vec_get(component_elbo, j) - mix_elbo));
+  }
+}
+
+/* add a symmetric Dirichlet(alpha) log-prior (ignoring constants) and its
+   gradient to the mixture weights; weight_param_grad is expected to already
+   hold the base (non-prior) gradient, to which the prior gradient is added */
+static double add_mixture_weight_dirichlet_prior(mixture_MVN *mixmvn,
+                                                       Vector *weight_param_grad,
+                                                       double alpha,
+                                                       double mix_elbo) {
+  int j;
+  double weight_log_prior = 0.0;
+
+  for (j = 0; j < mixmvn->ncomponents; j++) {
+    double wj = vec_get(mixmvn->weights, j);
+    weight_log_prior += (alpha - 1.0) * log(wj);
+    vec_set(weight_param_grad, j,
+            vec_get(weight_param_grad, j) +
+            (alpha - 1.0) * (1.0 - mixmvn->ncomponents * wj));
   }
 
   return mix_elbo + weight_log_prior;
+}
+
+static double vec_l2_norm_sq(Vector *v, int size) {
+  int j;
+  double norm_sq = 0.0;
+
+  for (j = 0; j < size; j++) {
+    double g = vec_get(v, j);
+    norm_sq += g * g;
+  }
+
+  return norm_sq;
+}
+
+/* Calibrate the Dirichlet prior's concentration (alpha) so that its
+   weight-gradient norm is a specified fraction of the base (non-prior)
+   weight-gradient norm.  This ties the prior's strength to the current
+   scale of the ELBO's own gradient (which varies with dataset size etc.)
+   rather than to a fixed constant.  alpha is always >= 1, so the prior
+   never encourages weights to collapse toward zero. */
+static double calibrate_mixture_weight_dirichlet_alpha(mixture_MVN *mixmvn,
+                                                          Vector *base_grad,
+                                                          unsigned int *calibrated) {
+  int j, ncomponents = mixmvn->ncomponents;
+  double base_norm, unit_norm, alpha, eps = 1e-12;
+  Vector *unit_grad;
+
+  *calibrated = FALSE;
+  base_norm = sqrt(vec_l2_norm_sq(base_grad, ncomponents));
+  if (base_norm <= eps)
+    return 1.0;
+
+  /* measure the prior's weight-gradient norm at (alpha - 1) = 1 */
+  unit_grad = vec_new_zero(ncomponents);
+  for (j = 0; j < ncomponents; j++) {
+    double wj = vec_get(mixmvn->weights, j);
+    vec_set(unit_grad, j, 1.0 - ncomponents * wj);
+  }
+  unit_norm = sqrt(vec_l2_norm_sq(unit_grad, ncomponents));
+  vec_free(unit_grad);
+
+  if (unit_norm <= eps)
+    return 1.0;
+
+  alpha = 1.0 + MIXTURE_WEIGHT_PRIOR_TARGET_GRAD_FRAC * base_norm / unit_norm;
+  *calibrated = TRUE;
+  return alpha;
 }
 
 /* Add pairwise Gaussian repulsion between mixture component means.
@@ -377,14 +438,11 @@ static double add_mixture_mean_repulsion(mixture_MVN *mixmvn, CovarData *data,
 
 static double mixture_mean_grad_l2_norm(Vector **param_grad, int ncomponents,
                                      int fulld) {
-  int k, j;
+  int k;
   double norm_sq = 0.0;
 
   for (k = 0; k < ncomponents; k++)
-    for (j = 0; j < fulld; j++) {
-      double g = vec_get(param_grad[k], j);
-      norm_sq += g * g;
-    }
+    norm_sq += vec_l2_norm_sq(param_grad[k], fulld);
 
   return sqrt(norm_sq);
 }
@@ -1095,8 +1153,8 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     running_tot = 0, last_running_tot = -INFTY, penalty = 0,
     bestpenalty = 0, ave_lprior, best_lprior = -INFTY, subsamp_rescale = 1.0,
     ll_at_mean = 0, bestll_at_mean = -INFTY, grad_norm_sq,
-    repulsion_strength = 0.0;
-  unsigned int repulsion_calibrated = FALSE;
+    repulsion_strength = 0.0, weight_prior_alpha = 1.0;
+  unsigned int repulsion_calibrated = FALSE, weight_prior_alpha_calibrated = FALSE;
   TaylorData *taylor_stash = NULL;
 
   /* for nuisance parameters; these are parameters that are optimized
@@ -1340,7 +1398,6 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
                   wk * vec_get(tmp_sigma_kld_param_grad[c], j));
       }
 
-      /* gradient for weight parameters */
       if (ncomponents > 1) {
         for (j = 0; j < ncomponents; j++)
           vec_set(weight_kld_param_grad, j, vec_get(weight_kld_param_grad, j) +
@@ -1354,9 +1411,24 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     }
 
     if (ncomponents > 1) {
-      elb = add_mixture_weight_dirichlet_prior(mixmvn, component_elbo,
-                                                weight_kld_param_grad, weight_param_grad,
-                                                elb);
+      compute_mixture_weight_base_grad(mixmvn, component_elbo,
+                                        weight_kld_param_grad, weight_param_grad,
+                                        elb);
+
+      if (!weight_prior_alpha_calibrated) {
+        weight_prior_alpha =
+          calibrate_mixture_weight_dirichlet_alpha(mixmvn, weight_param_grad,
+                                                    &weight_prior_alpha_calibrated);
+        if (weight_prior_alpha_calibrated && !silent)
+          fprintf(stderr, "Mixture weight Dirichlet prior alpha set to %.6g...\n",
+                  weight_prior_alpha);
+        if (weight_prior_alpha_calibrated && logf != NULL)
+          fprintf(logf, "# Mixture weight Dirichlet prior alpha: %.12g\n",
+                  weight_prior_alpha);
+      }
+
+      elb = add_mixture_weight_dirichlet_prior(mixmvn, weight_param_grad,
+                                                weight_prior_alpha, elb);
 
       if (!repulsion_calibrated) {
         repulsion_strength =
