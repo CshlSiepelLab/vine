@@ -13,6 +13,7 @@
 #include <getopt.h>
 #include <phast/misc.h>
 #include <phast/lists.h>
+#include <openblas/cblas.h>
 #include <kl.h>
 #include <tree_parser.h>
 #include "compareTrees.help"
@@ -23,19 +24,26 @@ int main(int argc, char *argv[]) {
   List *trees_est, *trees_ref;
   double split_kl, embed_kl;
   int dim = -1;   /* -1 means "use vine's default formula" */
+  int nthreads = 1;
 
   struct option long_opts[] = {
     {"dim", 1, 0, 'd'},
+    {"nthreads", 1, 0, 'n'},
     {"help", 0, 0, 'h'},
     {0, 0, 0, 0}
   };
 
-  while ((c = getopt_long(argc, argv, "d:h", long_opts, &opt_idx)) != -1) {
+  while ((c = getopt_long(argc, argv, "d:n:h", long_opts, &opt_idx)) != -1) {
     switch (c) {
     case 'd':
       dim = atoi(optarg);
       if (dim < 1)
         die("ERROR: --dim must be a positive integer.\n");
+      break;
+    case 'n':
+      nthreads = atoi(optarg);
+      if (nthreads < 1)
+        die("ERROR: --nthreads must be a positive integer.\n");
       break;
     case 'h':
       printf("%s", HELP);
@@ -47,6 +55,8 @@ int main(int argc, char *argv[]) {
 
   if (optind != argc - 2)
     die("Missing required arguments.  Try '%s -h'.\n", argv[0]);
+
+  openblas_set_num_threads(nthreads);
 
   est_fname = argv[optind];
   ref_fname = argv[optind + 1];

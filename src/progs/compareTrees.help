@@ -1,4 +1,4 @@
-char HELP[2356] = "\nPROGRAM: compareTrees\n\
+char HELP[2567] = "\nPROGRAM: compareTrees\n\
 \n\
 USAGE: compareTrees estimate.nwk reference.nwk > output.txt\n\
 \n\
@@ -39,6 +39,11 @@ OPTIONS:\n\
         Embedding dimensionality used for the embedding KL divergence.\n\
         Defaults to the same formula vine uses when --dimensionality is\n\
         not specified (based on the number of taxa).\n\
+\n\
+    --nthreads, -n <n>\n\
+        Number of threads used by OpenBLAS for the eigendecompositions\n\
+        underlying the embedding KL divergence.  Defaults to 1, matching\n\
+        vine's own default.\n\
 \n\
     --help, -h\n\
         Print this help message and exit.\n\

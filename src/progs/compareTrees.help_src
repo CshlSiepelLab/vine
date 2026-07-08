@@ -40,5 +40,10 @@ OPTIONS:
         Defaults to the same formula vine uses when --dimensionality is
         not specified (based on the number of taxa).
 
+    --nthreads, -n <n>
+        Number of threads used by OpenBLAS for the eigendecompositions
+        underlying the embedding KL divergence.  Defaults to 1, matching
+        vine's own default.
+
     --help, -h
         Print this help message and exit.
