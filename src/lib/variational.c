@@ -1304,6 +1304,8 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
     }
 
     /* per-component elbo computation */
+    if (data->taylor != NULL)
+      data->taylor->refreshed_now = FALSE;
     kld = 0.0;
     avell = ave_lprior = avemigll = ll_at_mean = elb = penalty = 0.0;
     double cavell, cave_lprior, cavemigll, cll_at_mean, celb, cpenalty, wk, ckld;
@@ -1450,9 +1452,17 @@ void variational_inf(TreeModel *mod, mixture_MVN *mixmvn, int nminibatch,
 
     /* don't select best during migration warmup: migration is excluded from
        the ELBO then, making warmup ELBOs artificially high and incomparable
-       to post-warmup ELBOs that include the migration log likelihood */
+       to post-warmup ELBOs that include the migration log likelihood.
+
+       Also, on the Taylor path, only compare against bestelb on iterations
+       where the trace/bias correction was just refreshed against an honest
+       MC pass (data->taylor->refreshed_now).  Between refreshes the cached
+       correction is stale and drifts optimistic as the variational
+       parameters move, producing a transient "best" elb right before each
+       scheduled refresh that collapses once the correction catches up. */
     if (elb > bestelb && (sd->full_grad_now || data->crispr_mod != NULL)
-        && !mig_warmup_active) {
+        && !mig_warmup_active
+        && (data->taylor == NULL || data->taylor->refreshed_now)) {
       bestelb = elb;
       bestll = avell;  /* not necessarily best ll but ll corresponding to bestelb */
       bestll_at_mean = ll_at_mean;  /* ll at posterior mean; 0 if MC path */
