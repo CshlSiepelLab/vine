@@ -38,7 +38,7 @@
    weight-gradient norm is this fraction of the non-prior weight-gradient
    norm, analogous to the mean-repulsion calibration below but computed
    independently on the weight parameters. */
-#define MIXTURE_WEIGHT_PRIOR_TARGET_GRAD_FRAC 0.3
+#define MIXTURE_WEIGHT_PRIOR_TARGET_GRAD_FRAC 0.05
 
 /* Bounded pairwise repulsion among mixture-component means.
     The strength is calibrated once per run so its mean-gradient norm is this
