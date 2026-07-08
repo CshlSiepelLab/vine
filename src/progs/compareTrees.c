@@ -13,7 +13,7 @@
 #include <getopt.h>
 #include <phast/misc.h>
 #include <phast/lists.h>
-#include <rf.h>
+#include <kl.h>
 #include <tree_parser.h>
 #include "compareTrees.help"
 
@@ -21,15 +21,22 @@ int main(int argc, char *argv[]) {
   int opt_idx, c;
   char *est_fname, *ref_fname;
   List *trees_est, *trees_ref;
-  double mean_kl;
+  double split_kl, embed_kl;
+  int dim = -1;   /* -1 means "use vine's default formula" */
 
   struct option long_opts[] = {
+    {"dim", 1, 0, 'd'},
     {"help", 0, 0, 'h'},
     {0, 0, 0, 0}
   };
 
-  while ((c = getopt_long(argc, argv, "h", long_opts, &opt_idx)) != -1) {
+  while ((c = getopt_long(argc, argv, "d:h", long_opts, &opt_idx)) != -1) {
     switch (c) {
+    case 'd':
+      dim = atoi(optarg);
+      if (dim < 1)
+        die("ERROR: --dim must be a positive integer.\n");
+      break;
     case 'h':
       printf("%s", HELP);
       exit(0);
@@ -52,14 +59,17 @@ int main(int argc, char *argv[]) {
 
   fprintf(stderr, "Computing split KL divergence (%d vs %d trees)...\n",
           lst_size(trees_est), lst_size(trees_ref));
+  tr_split_kl(trees_est, trees_ref, &split_kl);
 
-  tr_split_kl(trees_est, trees_ref, &mean_kl);
+  fprintf(stderr, "Computing embedding KL divergence...\n");
+  tr_embed_kl(trees_est, trees_ref, dim, &embed_kl);
 
   printf("Successfully processed %d trees from %s and %d trees from %s.\n",
          lst_size(trees_est), est_fname, lst_size(trees_ref), ref_fname);
-  printf("Mean split KL divergence of %s (estimate) from %s (reference):\n",
+  printf("Mean KL divergences of %s (estimate) from %s (reference):\n",
          est_fname, ref_fname);
-  printf("Mean_split_KL: %f\n", mean_kl);
+  printf("Mean_split_KL: %f\n", split_kl);
+  printf("Mean_embed_KL: %f\n", embed_kl);
 
   return 0;
 }

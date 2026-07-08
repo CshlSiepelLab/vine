@@ -41,12 +41,22 @@ double tr_robinson_foulds(TreeNode *t1, TreeNode *t2);
 void tr_tree_entropy(List *trees, double *H_split, double *H_top,
                      double *mean_var, double *mean_var_per_branch);
 
-/* Mean per-split Bernoulli KL divergence KL(p_est || p_ref), where p_est(s)
- * and p_ref(s) are the posterior inclusion probabilities of non-trivial
- * clade split s under the estimate and reference tree samples,
- * respectively.  Averaged over the union of splits observed in either
- * sample (Laplace-smoothed so no split has probability exactly 0 or 1).
- * trees_est and trees_ref must be over the same set of leaf names. */
-void tr_split_kl(List *trees_est, List *trees_ref, double *mean_kl);
+/* lexicographic comparison of two canonical splits (see BitMask above) */
+int tr_bitmask_cmp(const BitMask *a, const BitMask *b);
+
+/* free a BitMask returned by tr_collect_split_counts */
+void tr_bitmask_free(BitMask *m);
+
+/* (canonical split, occurrence count) pair, as returned by
+ * tr_collect_split_counts. */
+typedef struct { BitMask *mask; int count; } SplitCount;
+
+/* Collect unique non-trivial splits and their occurrence counts across a
+ * set of trees.  Returns a newly allocated array sorted by mask, with
+ * *nsc_out set to its length.  *nleaves_out (if non-NULL) is set to the
+ * number of leaves.  Returns NULL (with *nsc_out == 0) if trees is empty
+ * or has fewer than 3 leaves.  Caller frees each element's mask via
+ * tr_bitmask_free, then frees the returned array itself. */
+SplitCount *tr_collect_split_counts(List *trees, int *nsc_out, int *nleaves_out);
 
 #endif

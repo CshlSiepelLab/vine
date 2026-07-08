@@ -11,6 +11,7 @@ add_library(vine_core STATIC
     geometry.c
     gradients.c
     hutchinson.c
+    kl.c
     likelihoods.c
     migration.c
     mcmc.c

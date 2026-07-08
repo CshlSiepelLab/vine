@@ -56,9 +56,7 @@ static inline int bm_popcount(const BitMask *m) {
 }
 
 /* lexicographic compare (lowest word first is fine as long as consistent) */
-static int bm_cmp_words(const void *pa, const void *pb) {
-  const BitMask *a = *(BitMask* const*)pa;
-  const BitMask *b = *(BitMask* const*)pb;
+int tr_bitmask_cmp(const BitMask *a, const BitMask *b) {
   /* compare from high word to low word for nice order */
   for (int i = a->W - 1; i >= 0; --i) {
     if (a->w[i] < b->w[i]) return -1;
@@ -66,6 +64,14 @@ static int bm_cmp_words(const void *pa, const void *pb) {
   }
   return 0;
 }
+
+static int bm_cmp_words(const void *pa, const void *pb) {
+  const BitMask *a = *(BitMask* const*)pa;
+  const BitMask *b = *(BitMask* const*)pb;
+  return tr_bitmask_cmp(a, b);
+}
+
+void tr_bitmask_free(BitMask *m) { bm_free(m); }
 
 /* deep copy */
 static BitMask *bm_clone(const BitMask *m) {
@@ -461,16 +467,15 @@ void tr_tree_entropy(List *trees, double *H_split, double *H_top,
   hsh_free(name2idx);
 }
 
-/* ---- helpers for tr_split_kl --------------------------------------------- */
-
-typedef struct { BitMask *mask; int count; } SplitCount;
+/* ---- shared split-frequency helper (used by kl.c's tr_split_kl) ---------- */
 
 /* Collect unique non-trivial splits and their occurrence counts across a
  * set of trees.  Returns a newly allocated array sorted by mask, with
  * *nsc_out set to its length.  *nleaves_out (if non-NULL) is set to the
  * number of leaves.  Returns NULL (with *nsc_out == 0) if trees is empty
- * or has fewer than 3 leaves. */
-static SplitCount *collect_split_counts(List *trees, int *nsc_out, int *nleaves_out) {
+ * or has fewer than 3 leaves.  Caller frees each element's mask via
+ * tr_bitmask_free, then frees the returned array itself. */
+SplitCount *tr_collect_split_counts(List *trees, int *nsc_out, int *nleaves_out) {
   *nsc_out = 0;
   int S = lst_size(trees);
   if (S == 0) { if (nleaves_out) *nleaves_out = 0; return NULL; }
@@ -525,49 +530,5 @@ static SplitCount *collect_split_counts(List *trees, int *nsc_out, int *nleaves_
 
   *nsc_out = nsc;
   return out;
-}
-
-/* ---- public function ----------------------------------------------------- */
-
-void tr_split_kl(List *trees_est, List *trees_ref, double *mean_kl) {
-  *mean_kl = 0.0;
-  int S_est = lst_size(trees_est), S_ref = lst_size(trees_ref);
-  if (S_est == 0 || S_ref == 0) return;
-
-  int nsc_e, nsc_r, n_e, n_r;
-  SplitCount *sce = collect_split_counts(trees_est, &nsc_e, &n_e);
-  SplitCount *scr = collect_split_counts(trees_ref, &nsc_r, &n_r);
-
-  if (n_e != n_r)
-    die("ERROR in tr_split_kl: estimate and reference trees have different numbers of leaves.\n");
-
-  int i = 0, j = 0, nsplits = 0;
-  double sum_kl = 0.0;
-  while (i < nsc_e || j < nsc_r) {
-    int cmp;
-    if (i >= nsc_e) cmp = 1;
-    else if (j >= nsc_r) cmp = -1;
-    else cmp = bm_cmp_words(&sce[i].mask, &scr[j].mask);
-
-    int c_e = (cmp <= 0) ? sce[i].count : 0;
-    int c_r = (cmp >= 0) ? scr[j].count : 0;
-
-    /* Laplace-smoothed inclusion probabilities so no split has p or q
-       exactly 0 or 1 (which would blow up the KL divergence below). */
-    double p = (c_e + 0.5) / (S_est + 1.0);
-    double q = (c_r + 0.5) / (S_ref + 1.0);
-    double kl = p * log(p / q) + (1.0 - p) * log((1.0 - p) / (1.0 - q));
-    sum_kl += kl;
-    nsplits++;
-
-    if (cmp <= 0) i++;
-    if (cmp >= 0) j++;
-  }
-
-  *mean_kl = (nsplits > 0) ? sum_kl / nsplits : 0.0;
-
-  for (int k = 0; k < nsc_e; k++) bm_free(sce[k].mask);
-  for (int k = 0; k < nsc_r; k++) bm_free(scr[k].mask);
-  sfree(sce); sfree(scr);
 }
 
