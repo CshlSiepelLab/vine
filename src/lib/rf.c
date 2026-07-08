@@ -246,10 +246,17 @@ static int sbl_cmp(const void *pa, const void *pb) {
 
 /* DFS that collects ALL edges (including leaf edges), writing (canonical
    split, branch length) pairs into out[].  Returns the subtree BitMask for
-   node u (caller must bm_free it). */
-static BitMask *dfs_splits_blen(TreeNode *u, TreeNode *parent,
-                                Hashtable *name2idx, int n, int W,
-                                SplitBLen *out, int *nout) {
+   node u (caller must bm_free it).
+   is_root should be TRUE only for the initial (top-level) call.  When the
+   root has exactly two children -- the usual case for a Newick file
+   representing what is really an unrooted tree -- those two child edges
+   are the SAME true bipartition (each child's subtree is exactly the
+   complement of the other), so only one of them is recorded.  Without this,
+   a bifurcating-root tree yields 2n-2 edges instead of the correct 2n-3
+   for an unrooted binary tree, double-counting one split per tree. */
+static BitMask *dfs_splits_blen_r(TreeNode *u, TreeNode *parent, int is_root,
+                                  Hashtable *name2idx, int n, int W,
+                                  SplitBLen *out, int *nout) {
   if (u->lchild == NULL && u->rchild == NULL) {
     int idx = name_to_index(name2idx, u->name);
     if (idx < 0) die("Leaf '%s' not in name list.\n", u->name);
@@ -259,20 +266,33 @@ static BitMask *dfs_splits_blen(TreeNode *u, TreeNode *parent,
   }
   BitMask *mask_u = bm_new(W);
   TreeNode *ch[2] = {u->lchild, u->rchild};
+  int nchildren = (ch[0] && ch[0] != parent) + (ch[1] && ch[1] != parent);
+  int seen = 0;
   for (int ci = 0; ci < 2; ci++) {
     TreeNode *c = ch[ci];
     if (!c || c == parent) continue;
-    BitMask *mc = dfs_splits_blen(c, u, name2idx, n, W, out, nout);
+    BitMask *mc = dfs_splits_blen_r(c, u, FALSE, name2idx, n, W, out, nout);
     BitMask *can = bm_canonical_any(mc, n);
-    if (can) {
+    int skip_dup_root_edge = (is_root && nchildren == 2 && seen == 1);
+    if (can && !skip_dup_root_edge) {
       out[*nout].mask = can;
       out[*nout].blen = c->dparent > 0.0 ? c->dparent : 1e-300;
       (*nout)++;
     }
+    else if (can) {
+      bm_free(can);
+    }
     for (int i = 0; i < W; i++) mask_u->w[i] |= mc->w[i];
     bm_free(mc);
+    seen++;
   }
   return mask_u;
+}
+
+static BitMask *dfs_splits_blen(TreeNode *u, TreeNode *parent,
+                                Hashtable *name2idx, int n, int W,
+                                SplitBLen *out, int *nout) {
+  return dfs_splits_blen_r(u, parent, TRUE, name2idx, n, W, out, nout);
 }
 
 /* Per-tree data: sorted (canonical split, branch length) array. */
