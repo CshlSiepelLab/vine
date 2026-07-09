@@ -82,31 +82,26 @@ void tr_split_kl(List *trees_est, List *trees_ref, double *mean_kl) {
   sfree(sce); sfree(scr);
 }
 
-/* ---- helpers for tr_embed_kl ---------------------------------------------- */
-
-/* Embed one tree's leaves into a dim-dimensional Euclidean space via
-   classical MDS on its cophenetic distances (the same closed-form
-   procedure vine.c's --dist-embedding option uses), then return the
-   n*(n-1)/2 pairwise Euclidean distances between the embedded leaves,
-   in (i<j) order matching names[]/tree_to_distances. Caller frees the
-   returned Vector. */
+/* Turn one tree into a fixed-length vector of pairwise distances after
+    Euclidean embedding. */
 static Vector *embed_tree_pairwise_dists(TreeNode *tree, char **names, int n, int dim) {
-  Matrix *D = tree_to_distances(tree, names, n);
+  Matrix *D = tree_to_distances(tree, names, n);  /* cophenetic distance matrix */
+
+  /* MDS to get the Eublidean embedding from the pairwise distances */
   CovarData *data = new_covar_data(CONST, D, dim, NULL, NULL, names,
                                     FALSE, 1.0, 3, 1.0, FALSE, 1.0, FALSE,
                                     FALSE, FALSE, 1, NULL, NULL, FALSE);
   multi_MVN *mmvn = mmvn_new(n, dim, MVN_DIAG);
   estimate_mmvn_from_distances(data, mmvn, 0);
 
-  /* for MVN_DIAG, embedding coordinates are stored flat in mmvn->mvn->mu,
-     laid out as point i's k-th coordinate at index i*dim + k (matching
-     estimate_mmvn_from_distances_euclidean's mu_full layout); mmvn->mu[]
-     is only populated for MVN_GEN/MVN_LOWR. */
+  /* Get pairwise distances from the embedding coordinates */
   Vector *mu = mmvn->mvn->mu;
-  Vector *dists = vec_new(n * (n - 1) / 2);
+  Vector *dists = vec_new(n * (n - 1) / 2); /* one dist per unique leaf pair */
   int idx = 0;
   for (int i = 0; i < n; i++) {
     for (int j = i + 1; j < n; j++) {
+
+      /* Euclidean distance */
       double ssq = 0.0;
       for (int k = 0; k < dim; k++) {
         double diff = vec_get(mu, i*dim + k) - vec_get(mu, j*dim + k);
@@ -121,19 +116,22 @@ static Vector *embed_tree_pairwise_dists(TreeNode *tree, char **names, int n, in
   return dists;
 }
 
-/* accumulate per-pair (mean, sd) of embedded pairwise distances across
-   a set of trees. names/n define the fixed leaf order shared by both
-   estimate and reference sets. Caller frees the returned arrays. */
+/* Accumulate per-pair mean and standard deviation of embedded 
+    pairwise distances across a set of trees */
 static void embed_pair_stats(List *trees, char **names, int n, int dim,
                               double **mean_out, double **sd_out) {
   int S = lst_size(trees);
   int npairs = n * (n - 1) / 2;
-  double *sum = calloc(npairs, sizeof(double));
-  double *sumsq = calloc(npairs, sizeof(double));
+  double *sum = calloc(npairs, sizeof(double)); /* first moment */
+  double *sumsq = calloc(npairs, sizeof(double)); /* second moment */
 
   for (int s = 0; s < S; s++) {
     TreeNode *t = lst_get_ptr(trees, s);
+
+    /* embed the tree into a Euclidean space and get pairwise distances */
     Vector *d = embed_tree_pairwise_dists(t, names, n, dim);
+
+    /* accumulate moments */
     for (int k = 0; k < npairs; k++) {
       double v = vec_get(d, k);
       sum[k] += v;
@@ -142,6 +140,7 @@ static void embed_pair_stats(List *trees, char **names, int n, int dim,
     vec_free(d);
   }
 
+  /* compute mean and standard deviation */
   double *mean = smalloc(npairs * sizeof(double));
   double *sd = smalloc(npairs * sizeof(double));
   for (int k = 0; k < npairs; k++) {
