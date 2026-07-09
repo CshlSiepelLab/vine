@@ -92,15 +92,6 @@ typedef struct taylor_data {
   int warmup;  /* number of warmup iterations */
   int period;  /* period between updates */
   double beta; /* for averaging of T estimates */
-  unsigned int refreshed_now; /* set by elbo_hybrid whenever T_cache/elbo_bias
-                                 were just recomputed against a fresh MC pass
-                                 (any component) this call; the caller should
-                                 reset this to FALSE before each iteration and
-                                 only trust cross-iteration ELBO comparisons
-                                 (e.g. for "best" selection) when it is TRUE,
-                                 since between refreshes the correction is
-                                 stale and can make elb look better than it
-                                 really is */
 } TaylorData;
 
 TaylorData *tay_new(struct cvdat *data);

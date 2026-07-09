@@ -76,7 +76,6 @@ TaylorData *tay_new(CovarData *data) {
   td->warmup = 50; /* number of iterations before updates begin */
   td->period = 30; /* update period */
   td->beta = 0.3;
-  td->refreshed_now = FALSE;
 
   return td;
 }
@@ -1139,7 +1138,6 @@ double elbo_hybrid(TreeModel *mod, mixture_MVN *mixmvn, int component,
     if (cache_initialized != NULL)
       *cache_initialized = TRUE;
     td->component_last_refresh = component;
-    td->refreshed_now = TRUE;
 
     vec_free(mc_grad);
     if (mc_nuis) vec_free(mc_nuis);
