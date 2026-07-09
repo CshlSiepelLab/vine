@@ -15,18 +15,24 @@
 #include <phast/stringsplus.h>
 #include "tree_parser.h"
 
+/* input file should have one newick tree 
+    per line */
 List *tr_read_trees_from_file(const char *fname) {
   FILE *f = phast_fopen(fname, "r");
   String *line = str_new(STR_VERY_LONG_LEN);
+  /* set initial capacity that is auto allocated larger as needed */
   List *trees = lst_new_ptr(1000);
-  int lineno = 0;
+  int lineno = 0; /* count of trees */
   while (str_readline(line, f) != EOF) {
-    str_double_trim(line);
-    if (line->length == 0) continue;
+    str_double_trim(line);  /* remove whitespace */
+    if (line->length == 0) continue;  /* skip empty lines */
     lineno++;
     if (line->chars[0] != '(')
       die("ERROR in line %d of %s: Input does not look like a Newick-formatted tree.\n",
           lineno, fname);
+      
+    /* remove trailing semicolon if present since
+        tr_new_from_string() expects a string without it */
     if (line->chars[line->length-1] == ';')
       line->chars[--line->length] = '\0';
     lst_push_ptr(trees, tr_new_from_string(line->chars));
