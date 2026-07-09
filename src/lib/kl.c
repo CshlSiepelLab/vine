@@ -19,12 +19,9 @@
 #include <geometry.h>
 #include <multi_mvn.h>
 #include <rf.h>
+#include <vine.h>
 #include "kl.h"
 
-/* same default-dimensionality formula vine.c uses when --dimensionality
-   is not specified explicitly */
-#define KL_DEFAULT_DIM_INTERCEPT 3.25
-#define KL_DEFAULT_DIM_SLOPE 0.92
 
 void tr_split_kl(List *trees_est, List *trees_ref, double *mean_kl) {
   *mean_kl = 0.0;
@@ -158,7 +155,7 @@ void tr_embed_kl(List *trees_est, List *trees_ref, int dim, double *mean_kl) {
     names[i] = ((String*)lst_get_ptr(namelist, i))->chars;
 
   if (dim <= 0)
-    dim = (int) round(KL_DEFAULT_DIM_INTERCEPT + KL_DEFAULT_DIM_SLOPE * log((double)n));
+    dim = (int) round(DEFAULT_DIM_INTERCEPT + DEFAULT_DIM_SLOPE * log((double)n));
   if (dim < 1) dim = 1;
 
   double *mean_e, *sd_e, *mean_r, *sd_r;

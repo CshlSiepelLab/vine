@@ -33,6 +33,7 @@
 #include <mixture_mvn.h>
 #include <multiDAG.h>
 #include <version.h>
+#include <vine.h>
 #include "vine.help"
 
 #define DEFAULT_NSAMPLES 100
@@ -44,10 +45,6 @@
 #define DEFAULT_RANK 3
 #define DEFAULT_MCMC_THIN 10
 #define DEFAULT_MIXTURE_JITTER_FRAC 0.1
-
-/* default dimensionality is a linear function of log number of taxa */
-#define DEFAULT_DIM_INTERCEPT 3.25
-#define DEFAULT_DIM_SLOPE 0.92
 
 /* helper to write log file header with version and arguments */
 static inline void write_log_header(FILE *LOGF, int argc, char *argv[]) {
