@@ -155,11 +155,16 @@ static void embed_pair_stats(List *trees, char **names, int n, int dim,
   *sd_out = sd;
 }
 
+/* Compare two tree samples by embedding each tree into Euclidean space,
+    modeling each embedded leaf-pair distance as a univariate Gaussian,
+    and averaging the resulting per-pair Gaussian KL divergences. */
 void tr_embed_kl(List *trees_est, List *trees_ref, int dim, double *mean_kl) {
   *mean_kl = 0.0;
   int S_est = lst_size(trees_est), S_ref = lst_size(trees_ref);
-  if (S_est == 0 || S_ref == 0) return;
+  if (S_est == 0 || S_ref == 0)
+    die("ERROR in tr_split_kl: at least one input tree list is empty.\n");
 
+  /* Get the sorted list of leaf names from the first tree */
   TreeNode *t0 = lst_get_ptr(trees_est, 0);
   List *namelist = tr_leaf_names(t0);
   lst_qsort_str(namelist, ASCENDING);
@@ -170,22 +175,25 @@ void tr_embed_kl(List *trees_est, List *trees_ref, int dim, double *mean_kl) {
   for (int i = 0; i < n; i++)
     names[i] = ((String*)lst_get_ptr(namelist, i))->chars;
 
-  if (dim <= 0)
-    dim = vine_default_dim(n);
-  if (dim < 1) dim = 1;
+  /* Use vine's default dimensionality if not specified */
+  if (dim <= 0) dim = vine_default_dim(n);
 
+  /* Get the mean and sd for each pair in each tree list */
   double *mean_e, *sd_e, *mean_r, *sd_r;
   embed_pair_stats(trees_est, names, n, dim, &mean_e, &sd_e);
   embed_pair_stats(trees_ref, names, n, dim, &mean_r, &sd_r);
 
   int npairs = n * (n - 1) / 2;
-  double sum_kl = 0.0;
+  double sum_kl = 0.0;  
   for (int k = 0; k < npairs; k++) {
+    /* closed form Gaussian KL divergence */
     double kl = log(sd_r[k] / sd_e[k])
               + (sd_e[k]*sd_e[k] + (mean_e[k]-mean_r[k])*(mean_e[k]-mean_r[k])) / (2.0*sd_r[k]*sd_r[k])
               - 0.5;
     sum_kl += kl;
   }
+
+  /* compute mean KL divergence per pair */
   *mean_kl = (npairs > 0) ? sum_kl / npairs : 0.0;
 
   sfree(names);

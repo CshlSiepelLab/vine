@@ -18,7 +18,8 @@
 #define DEFAULT_DIM_SLOPE 0.92
 
 static inline int vine_default_dim(int ntaxa) {
-  return (int) round(DEFAULT_DIM_INTERCEPT + DEFAULT_DIM_SLOPE * log((double)ntaxa));
+  int dim = (int) round(DEFAULT_DIM_INTERCEPT + DEFAULT_DIM_SLOPE * log((double)ntaxa));
+  return (dim < 1) ? 1 : dim;
 }
 
 #endif /* VINE_H */
