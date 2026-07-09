@@ -23,41 +23,58 @@
 #include "kl.h"
 
 
+/* Compute the mean KL divergence between the split-frequency distributions of
+   two tree samples. Split inclusion probabilities are estimated from observed
+   frequencies with Laplace smoothing, the Bernoulli KL divergence is computed
+   for each split in the union of the samples, and the result is averaged
+   across splits. */
 void tr_split_kl(List *trees_est, List *trees_ref, double *mean_kl) {
   *mean_kl = 0.0;
-  int S_est = lst_size(trees_est), S_ref = lst_size(trees_ref);
-  if (S_est == 0 || S_ref == 0) return;
 
-  int nsc_e, nsc_r, n_e, n_r;
+  int S_est = lst_size(trees_est), S_ref = lst_size(trees_ref);
+  if (S_est == 0 || S_ref == 0)
+    die("ERROR in tr_split_kl: at least one input tree list is empty.\n");
+
+  /* get the two sorted lists of splits and their counts */
+  int nsc_e;  /* number of split counts in estimate */
+  int nsc_r;  /* number of split counts in reference */
+  int n_e;    /* number of leaves in estimate */
+  int n_r;    /* number of leaves in reference */
   SplitCount *sce = tr_collect_split_counts(trees_est, &nsc_e, &n_e);
   SplitCount *scr = tr_collect_split_counts(trees_ref, &nsc_r, &n_r);
 
   if (n_e != n_r)
     die("ERROR in tr_split_kl: estimate and reference trees have different numbers of leaves.\n");
 
+  /* walk through the two sorted lists of splits to compare them */
   int i = 0, j = 0, nsplits = 0;
   double sum_kl = 0.0;
   while (i < nsc_e || j < nsc_r) {
+    /* handle mismatched split lists to prevent out of bounds errors */
     int cmp;
     if (i >= nsc_e) cmp = 1;
     else if (j >= nsc_r) cmp = -1;
     else cmp = tr_bitmask_cmp(sce[i].mask, scr[j].mask);
 
+    /* if the split exists in only one sample then the other becomes zero*/
     int c_e = (cmp <= 0) ? sce[i].count : 0;
     int c_r = (cmp >= 0) ? scr[j].count : 0;
 
-    /* Laplace-smoothed inclusion probabilities so no split has p or q
-       exactly 0 or 1 (which would blow up the KL divergence below). */
+    /* Convert counts to Laplace-smoothed inclusion probabilities so no 
+        split has p or q exactly 0 or 1 (which would blow up the KL divergence below). */
     double p = (c_e + 0.5) / (S_est + 1.0);
     double q = (c_r + 0.5) / (S_ref + 1.0);
-    double kl = p * log(p / q) + (1.0 - p) * log((1.0 - p) / (1.0 - q));
-    sum_kl += kl;
+    double kl = p * log(p / q) + (1.0 - p) * log((1.0 - p) / (1.0 - q));  /* Bernoulli KL divergence */
+    sum_kl += kl; /* accumulate the marginal split-frequency KL divergence */
     nsplits++;
 
+    /* increment while respecting the mismatched split lists 
+        to prevent out of bounds errors */
     if (cmp <= 0) i++;
     if (cmp >= 0) j++;
   }
 
+  /* compute the mean KL divergence per split */
   *mean_kl = (nsplits > 0) ? sum_kl / nsplits : 0.0;
 
   for (int k = 0; k < nsc_e; k++) tr_bitmask_free(sce[k].mask);

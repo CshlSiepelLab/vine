@@ -260,7 +260,7 @@ static int sbl_cmp(const void *pa, const void *pb) {
    complement of the other), so only one of them is recorded.  Without this,
    a bifurcating-root tree yields 2n-2 edges instead of the correct 2n-3
    for an unrooted binary tree, double-counting one split per tree. */
-static BitMask *dfs_splits_blen_r(TreeNode *u, TreeNode *parent, int is_root,
+static BitMask *dfs_splits_blen(TreeNode *u, TreeNode *parent, int is_root,
                                   Hashtable *name2idx, int n, int W,
                                   SplitBLen *out, int *nout) {
   if (u->lchild == NULL && u->rchild == NULL) {
@@ -277,7 +277,7 @@ static BitMask *dfs_splits_blen_r(TreeNode *u, TreeNode *parent, int is_root,
   for (int ci = 0; ci < 2; ci++) {
     TreeNode *c = ch[ci];
     if (!c || c == parent) continue;
-    BitMask *mc = dfs_splits_blen_r(c, u, FALSE, name2idx, n, W, out, nout);
+    BitMask *mc = dfs_splits_blen(c, u, FALSE, name2idx, n, W, out, nout);
     BitMask *can = bm_canonical_any(mc, n);
     int skip_dup_root_edge = (is_root && nchildren == 2 && seen == 1);
     if (can && !skip_dup_root_edge) {
@@ -293,12 +293,6 @@ static BitMask *dfs_splits_blen_r(TreeNode *u, TreeNode *parent, int is_root,
     seen++;
   }
   return mask_u;
-}
-
-static BitMask *dfs_splits_blen(TreeNode *u, TreeNode *parent,
-                                Hashtable *name2idx, int n, int W,
-                                SplitBLen *out, int *nout) {
-  return dfs_splits_blen_r(u, parent, TRUE, name2idx, n, W, out, nout);
 }
 
 /* Per-tree data: sorted (canonical split, branch length) array. */
@@ -379,7 +373,7 @@ void tr_tree_entropy(List *trees, double *H_split, double *H_top,
     TreeNode *t = lst_get_ptr(trees, s);
     SplitBLen *sbl = smalloc(max_edges * sizeof(SplitBLen));
     int nbl = 0;
-    BitMask *root = dfs_splits_blen(t, NULL, name2idx, n, W, sbl, &nbl);
+    BitMask *root = dfs_splits_blen(t, NULL, TRUE, name2idx, n, W, sbl, &nbl);
     bm_free(root);
     qsort(sbl, nbl, sizeof(SplitBLen), sbl_cmp);
     tsd[s].sbl = sbl;
@@ -467,19 +461,24 @@ void tr_tree_entropy(List *trees, double *H_split, double *H_top,
   hsh_free(name2idx);
 }
 
-/* ---- shared split-frequency helper (used by kl.c's tr_split_kl) ---------- */
-
-/* Collect unique non-trivial splits and their occurrence counts across a
- * set of trees.  Returns a newly allocated array sorted by mask, with
- * *nsc_out set to its length.  *nleaves_out (if non-NULL) is set to the
- * number of leaves.  Returns NULL (with *nsc_out == 0) if trees is empty
- * or has fewer than 3 leaves.  Caller frees each element's mask via
- * tr_bitmask_free, then frees the returned array itself. */
+/* Count unique non-trivial splits across a sample of trees.
+ 
+    Uses the leaf names from the first tree to define a fixed, sorted leaf order,
+    then represents each split as a bitmask over that order. For every tree in
+    the sample, internal-edge splits are extracted, trivial splits are discarded
+    by requiring at least two leaves on each side, and the remaining split masks
+    are pooled across trees. The pooled masks are sorted and collapsed into a
+    newly allocated array of SplitCount records, where each record stores one
+    unique split mask and the number of trees/edges in which that split was
+    observed. */
 SplitCount *tr_collect_split_counts(List *trees, int *nsc_out, int *nleaves_out) {
   *nsc_out = 0;
   int S = lst_size(trees);
+
+  /* return if no trees */
   if (S == 0) { if (nleaves_out) *nleaves_out = 0; return NULL; }
 
+  /* get the sorted leaf names from the first tree */
   TreeNode *t0 = lst_get_ptr(trees, 0);
   List *names = tr_leaf_names(t0);
   lst_qsort_str(names, ASCENDING);
@@ -487,6 +486,7 @@ SplitCount *tr_collect_split_counts(List *trees, int *nsc_out, int *nleaves_out)
   if (nleaves_out) *nleaves_out = n;
   if (n < 3) { lst_free_strings(names); lst_free(names); return NULL; }
 
+  /* initialize the hash table for leaf name to index mapping */
   int W = (n + 63) >> 6;
   int max_edges = 2 * n;
   Hashtable *name2idx = hsh_new(2 * n);
@@ -495,14 +495,19 @@ SplitCount *tr_collect_split_counts(List *trees, int *nsc_out, int *nleaves_out)
     hsh_put_int(name2idx, s->chars, i);
   }
 
+  /* iterate over trees and collect split masks */
   MaskVec all;
   mv_init(&all, S * (n - 3 > 0 ? n - 3 : 1));
   for (int s = 0; s < S; s++) {
     TreeNode *t = lst_get_ptr(trees, s);
     SplitBLen *sbl = smalloc(max_edges * sizeof(SplitBLen));
     int nbl = 0;
-    BitMask *root = dfs_splits_blen(t, NULL, name2idx, n, W, sbl, &nbl);
+
+    /* compute splits for this tree */
+    BitMask *root = dfs_splits_blen(t, NULL, TRUE, name2idx, n, W, sbl, &nbl);
     bm_free(root);
+
+    /* remove trivial splits with less than 2 leaves on either side */
     for (int k = 0; k < nbl; k++) {
       int sz = bm_popcount(sbl[k].mask);
       if (sz >= 2 && (n - sz) >= 2)
@@ -511,8 +516,11 @@ SplitCount *tr_collect_split_counts(List *trees, int *nsc_out, int *nleaves_out)
     }
     sfree(sbl);
   }
+
+  /* sort so that identical splits are adjacent */
   qsort(all.a, all.size, sizeof(BitMask*), bm_cmp_words);
 
+  /* collapse into unique splits and count occurrences */
   SplitCount *out = smalloc((all.size > 0 ? all.size : 1) * sizeof(SplitCount));
   int nsc = 0, i = 0;
   while (i < all.size) {
