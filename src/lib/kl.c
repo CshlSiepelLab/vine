@@ -171,7 +171,7 @@ void tr_embed_kl(List *trees_est, List *trees_ref, int dim, double *mean_kl) {
     names[i] = ((String*)lst_get_ptr(namelist, i))->chars;
 
   if (dim <= 0)
-    dim = (int) round(DEFAULT_DIM_INTERCEPT + DEFAULT_DIM_SLOPE * log((double)n));
+    dim = vine_default_dim(n);
   if (dim < 1) dim = 1;
 
   double *mean_e, *sd_e, *mean_r, *sd_r;

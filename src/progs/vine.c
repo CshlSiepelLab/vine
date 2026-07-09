@@ -556,7 +556,7 @@ int main(int argc, char *argv[]) {
   /* set default dimensionality if not specified */
   if (dim == -1) {
     assert(DEFAULT_DIM_INTERCEPT >= 2);
-    dim = round(DEFAULT_DIM_INTERCEPT + DEFAULT_DIM_SLOPE * log((double)ntips));
+    dim = vine_default_dim(ntips);
     if (!silent) fprintf(stderr, "Setting dimensionality to default of %d based on %d taxa...\n", dim, ntips);
   }
   
