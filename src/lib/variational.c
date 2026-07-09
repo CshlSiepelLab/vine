@@ -233,8 +233,14 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
       data->reuse_subsamp = !sd->resample_sites;
       subsamp_rescale = (double)data->msa->length / data->subsampsize;
     }
-    else { /* no subsampling */
+    else { /* no subsampling: this step uses the full data (full-batch mode,
+              periodic full-gradient anchor, crispr, or multithreaded) */
       data->subsample = FALSE;
+      /* report the actual (full) size; otherwise subsampsize/reuse_subsamp
+         retain stale values from the last subsampling step and the log
+         misleadingly shows subsampling still active */
+      data->subsampsize = data->msa->length;
+      data->reuse_subsamp = FALSE;
       subsamp_rescale = 1.0;
     }
 
