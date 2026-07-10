@@ -1,4 +1,4 @@
-char HELP[2586] = "\nPROGRAM: evalTrees\n\
+char HELP[3502] = "\nPROGRAM: evalTrees\n\
 \n\
 USAGE: evalTrees trees.nwk > summary.txt\n\
 \n\
@@ -12,7 +12,8 @@ alignment represents held-out data matching the data used to fit the model,\n\
 the results can be interpreted as log pointwise predictive densities\n\
 (LPPDs), a measure of model fit that can meaningfully be compared across\n\
 different inference methods (e.g., Bayesian and ML).  Can also evaluate the\n\
-variability of topologies using --topology.\n\
+variability of topologies using --topology, or the branch-length accuracy of\n\
+the trees relative to a reference tree using --branch-score.\n\
 \n\
 OPTIONS:\n\
     --help, -h\n\
@@ -40,6 +41,18 @@ OPTIONS:\n\
         Instead of pairwise distances between taxa, consider the\n\
         distribution of topological distances of all sampled trees\n\
         from a given reference tree topology.\n\
+\n\
+    --branch-score, -b <reference.nwk>\n\
+        Evaluate the branch-score (Kuhner-Felsenstein) distance of the\n\
+        sampled trees to a given reference tree.  Unlike --topology, the\n\
+        lengths of all edges (including terminal edges) contribute, so this\n\
+        measures branch-length as well as topological agreement.  Reports the\n\
+        distribution of per-sample distances (as for --topology) followed by\n\
+        two additional lines: \"Point (posterior-mean-tree) BSD\", the distance\n\
+        between the reference and the posterior-mean split-length vector -- a\n\
+        point estimate of branch-length accuracy that is insensitive to\n\
+        posterior dispersion; and \"Reference tree length\", the total branch\n\
+        length of the reference (useful for normalization).\n\
 \n\
     --entropy, -e\n\
         Compute uncertainty measures for the tree distribution.  Reports\n\
