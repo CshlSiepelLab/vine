@@ -5,11 +5,13 @@ add_library(vine_core STATIC
     adam_scheduler.c
     backprop.c
     bitset.c
+    branch_score.c
     covariance.c
     crispr.c
     geometry.c
     gradients.c
     hutchinson.c
+    kl.c
     likelihoods.c
     migration.c
     mcmc.c
@@ -24,6 +26,8 @@ add_library(vine_core STATIC
     sparse_matrix.c
     sparse_vector.c
     taylor.c
+    tree_parser.c
+    tree_splits.c
     tree_prior.c
     upgma.c
     variational.c

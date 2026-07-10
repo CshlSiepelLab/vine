@@ -56,20 +56,20 @@ typedef struct NJGradCache {
   Vector *tuplecounts;        /* counts of each unique tuple */
 } NJGradCache;
 
-void nj_reset_tree_model(TreeModel *mod, TreeNode *newtree);
+void reset_tree_model(TreeModel *mod, TreeNode *newtree);
 
-double nj_ll_core(TreeModel *mod, CovarData *data, NJDerivs *derivs,
+double ll_core(TreeModel *mod, CovarData *data, NJDerivs *derivs,
                 NJGradCache *gcache, List *range);
 
-int *nj_build_seq_idx(List *leaves, char **names);
+int *build_seq_idx(List *leaves, char **names);
 
-int nj_get_seq_idx(char **names, char *name, int n);
+int get_seq_idx(char **names, char *name, int n);
 
-void nj_init_gtr_mapping(TreeModel *tm);
+void init_gtr_mapping(TreeModel *tm);
 
-double nj_compute_log_likelihood(TreeModel *mod, CovarData *data, Vector *branchgrad);
+double compute_log_likelihood(TreeModel *mod, CovarData *data, Vector *branchgrad);
 
-double nj_ll_parallel(TreeModel *mod, CovarData *data, Vector *branchgrad,
+double ll_parallel(TreeModel *mod, CovarData *data, Vector *branchgrad,
                       int nthreads_requested, NJGradCache *gcache);
 
 #endif

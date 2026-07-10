@@ -476,7 +476,7 @@ TreeNode* nj_fast_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *n
 
 /* compute pairwise distance between two DNA seqs using the
    Jukes-Cantor model */
-double nj_compute_JC_dist(MSA *msa, int i, int j) {
+double compute_JC_dist(MSA *msa, int i, int j) {
   int k, diff = 0, n = 0;
   double d;
   for (k = 0; k < msa->length; k++) {
@@ -504,7 +504,7 @@ double nj_compute_JC_dist(MSA *msa, int i, int j) {
 
 /* based on a multiple alignment, build and return a distance matrix
    using the Jukes-Cantor model.  Assume DNA alphabet */
-Matrix *nj_compute_JC_matr(MSA *msa) {
+Matrix *compute_JC_matr(MSA *msa) {
   int i, j;
   Matrix *retval = mat_new(msa->nseqs, msa->nseqs);
 
@@ -513,14 +513,14 @@ Matrix *nj_compute_JC_matr(MSA *msa) {
   for (i = 0; i < msa->nseqs; i++) 
     for (j = i+1; j < msa->nseqs; j++) 
       mat_set(retval, i, j,
-              nj_compute_JC_dist(msa, i, j));
+              compute_JC_dist(msa, i, j));
 
   return retval;  
 }
 
 /* compute a distance matrix from a tree, defining each pairwise
    distance as the edge length between the corresponding taxa */ 
-Matrix *nj_tree_to_distances(TreeNode *tree, char **names, int n) {
+Matrix *tree_to_distances(TreeNode *tree, char **names, int n) {
   TreeNode *n1, *n2;
   List *leaves = lst_new_ptr(tree->nnodes);
   int i, j, ii, jj;
@@ -539,7 +539,7 @@ Matrix *nj_tree_to_distances(TreeNode *tree, char **names, int n) {
   }
   
   if (lst_size(leaves) != n)
-    die("ERROR in nj_tree_to_distances: number of names must match number of leaves in tree.\n");
+    die("ERROR in tree_to_distances: number of names must match number of leaves in tree.\n");
 
   /* if the input tree had no branch lengths defined, all will have
      values of zero, which will be a problem.  In this case,
@@ -555,7 +555,7 @@ Matrix *nj_tree_to_distances(TreeNode *tree, char **names, int n) {
   D = mat_new(n, n);
   mat_zero(D);
 
-  seq_idx = nj_build_seq_idx(leaves, names);
+  seq_idx = build_seq_idx(leaves, names);
 
   /* O(n^2) operation but seems plenty fast in practice */
   for (i = 0; i < lst_size(leaves); i++) {
@@ -564,7 +564,7 @@ Matrix *nj_tree_to_distances(TreeNode *tree, char **names, int n) {
     for (j = i+1; j < lst_size(leaves); j++) {
       n2 = lst_get_ptr(leaves, j);
       jj = seq_idx[n2->id];
-      dist = nj_distance_on_tree(tree, n1, n2);
+      dist = distance_on_tree(tree, n1, n2);
       if (ii < jj)
         mat_set(D, ii, jj, dist);
       else
@@ -578,7 +578,7 @@ Matrix *nj_tree_to_distances(TreeNode *tree, char **names, int n) {
   return(D);
 }
 
-double nj_distance_on_tree(TreeNode *root, TreeNode *n1, TreeNode *n2) {
+double distance_on_tree(TreeNode *root, TreeNode *n1, TreeNode *n2) {
   double dist[root->nnodes];
   int id;
   TreeNode *n;
@@ -600,7 +600,7 @@ double nj_distance_on_tree(TreeNode *root, TreeNode *n1, TreeNode *n2) {
     totd2 += n->dparent;
 
   if (n->parent == NULL && dist[n->id] == -1)
-    die("ERROR in nj_distance_on_tree: got to root without finding LCA\n");
+    die("ERROR in distance_on_tree: got to root without finding LCA\n");
   
   /* at this point, it must be true that n is the LCA of n1 and n2 */ 
   return totd2 + dist[n->id];
@@ -608,22 +608,22 @@ double nj_distance_on_tree(TreeNode *root, TreeNode *n1, TreeNode *n2) {
 }
 
 /* wrapper for various distance-based tree inference algorithms */
-TreeNode *nj_inf(Matrix *D, char **names, Matrix *dt_dD, Neighbors *nb,
+TreeNode *infer_distance_tree(Matrix *D, char **names, Matrix *dt_dD, Neighbors *nb,
                  CovarData *data) {
   if (data->ultrametric) {
     TreeNode *t = upgma_fast_infer(D, names, dt_dD);
 
     if (data->no_zero_br == TRUE)
-      nj_repair_zero_br(t);
+      repair_zero_br(t);
     return t;
   }
   else {
     TreeNode *tree = nj_fast_infer(D, names, dt_dD, nb);
     if (data->treeprior != NULL && data->treeprior->relclock == TRUE) { /* need to reroot in this case */
       if (data->seq_to_node_map == NULL) /* only need to do this once */
-        nj_update_seq_to_node_map(tree, names, data);
+        update_seq_to_node_map(tree, names, data);
       if (data->tree_diam_leaf1 < 0 || data->tree_diam_leaf2 < 0)
-        nj_update_diam_leaves(D, data);  /* needed upon init */
+        update_diam_leaves(D, data);  /* needed upon init */
       TreeNode *mp = tr_find_midpoint(tree, data->seq_to_node_map[data->tree_diam_leaf1],
                                       data->seq_to_node_map[data->tree_diam_leaf2]);
       TreeNode *newtree = tr_reroot2(tree, mp);
@@ -633,7 +633,7 @@ TreeNode *nj_inf(Matrix *D, char **names, Matrix *dt_dD, Neighbors *nb,
   }
 }
 
-void nj_update_seq_to_node_map(TreeNode *tree, char **names, CovarData *data) {
+void update_seq_to_node_map(TreeNode *tree, char **names, CovarData *data) {
   List *leaves = lst_new_ptr(tree->nnodes/2);
   if (data->seq_to_node_map != NULL)
     sfree(data->seq_to_node_map);
@@ -646,7 +646,7 @@ void nj_update_seq_to_node_map(TreeNode *tree, char **names, CovarData *data) {
   }
 
   /* obtain mapping from leaf node ids to seq idxs */
-  int *seq_idx = nj_build_seq_idx(leaves, names);
+  int *seq_idx = build_seq_idx(leaves, names);
   
   /* we need the inverse of this mapping */
   data->seq_to_node_map = smalloc(data->msa->nseqs * sizeof(int));
@@ -661,9 +661,9 @@ void nj_update_seq_to_node_map(TreeNode *tree, char **names, CovarData *data) {
 }
 
 /* find leaves corresponding to largest distance in matrix.  Generally
-   this will be done as a side effect of nj_points_to_distances but upon initialization
+   this will be done as a side effect of points_to_distances but upon initialization
    it needs to be done separately */
-void nj_update_diam_leaves(Matrix *D, CovarData *data) {
+void update_diam_leaves(Matrix *D, CovarData *data) {
   double maxdist = 0;
   for (int i = 0; i < D->nrows; i++) {
     for (int j = i+1; j < D->ncols; j++) {
@@ -677,7 +677,7 @@ void nj_update_diam_leaves(Matrix *D, CovarData *data) {
   }
 }
 
-void nj_repair_zero_br(TreeNode *t) {
+void repair_zero_br(TreeNode *t) {
   for (int nodeidx = 0; nodeidx < lst_size(t->nodes); nodeidx++) {
     TreeNode *n = lst_get_ptr(t->nodes, nodeidx);
     if (n->parent != NULL && n->dparent < 0.0)

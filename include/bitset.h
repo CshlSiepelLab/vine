@@ -30,6 +30,8 @@ void    bs_copy(BSet *dst, const BSet *src);   /* same nbits */
 void    bs_free(BSet *bs);
 void    bs_zero(BSet *bs);
 int     bs_equals(const BSet *a, const BSet *b);
+int     bs_compare(const BSet *a, const BSet *b);
+int     bs_popcount(const BSet *bs);
 
 /* Bit operations */
 void bs_set_bit(BSet *bs, int idx);

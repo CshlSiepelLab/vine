@@ -23,6 +23,8 @@
 #include <phast/subst_mods.h>
 #include <phast/tree_model.h>
 #include <rf.h>
+#include <branch_score.h>
+#include <tree_parser.h>
 #include "evalTrees.help"
 
 static inline
@@ -42,7 +44,7 @@ int main(int argc, char *argv[]) {
   TreeModel *mod = NULL;
   double kappa = -1, ll;
   String *line = str_new(STR_VERY_LONG_LEN);
-  int opt_idx, lineno = 0, i, j, nleaves = 0, npairs = 0;
+  int opt_idx, lineno = 0, input_lineno = 0, i, j, nleaves = 0, npairs = 0;
   CovarData *data;
   int c;  /* getopt_long returns int; storing in char makes EOF (-1)
              alias to 255 on platforms where char is unsigned, so the
@@ -164,8 +166,9 @@ int main(int argc, char *argv[]) {
       
     /* this is mostly a dummy; only the msa or crispr mod is used */
     D = mat_new(5, 5);
-    data = nj_new_covar_data(CONST, D, 1, evalaln, crispr_mod, NULL, FALSE,
-                             1.0, 3, 1.0, FALSE, -1, FALSE, FALSE, FALSE, NULL, NULL, FALSE);
+    data = new_covar_data(CONST, D, 1, evalaln, crispr_mod, NULL, FALSE,
+                             1.0, 3, 1.0, FALSE, -1, FALSE, FALSE, FALSE,
+                             NULL, NULL, FALSE);
     lldists = lst_new_dbl(1000);
   }
   else if (topol_ref != NULL) {
@@ -185,20 +188,12 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Computing pairwise-distance stats...\n");
   
   while (str_readline(line, treefile) != EOF) {
-    str_double_trim(line);
-
-    if (line->length == 0)
+    input_lineno++;
+    tree = tr_parse_newick_line(line, treefname, input_lineno);
+    if (tree == NULL)
       continue;
 
     lineno++;
-
-    if (line->chars[0] != '(')
-      die("ERROR in line %d: Input does not look like a Newick-formatted tree.\n",
-          lineno);
-    if (line->chars[line->length-1] == ';')
-      line->chars[--line->length] = '\0';
-
-    tree = tr_new_from_string(line->chars);
 
     if (evalaln != NULL || is_crispr) {
       if (mod == NULL) { /* do this the first time through; need a tree to initialize */        
@@ -222,13 +217,13 @@ int main(int argc, char *argv[]) {
         }
       }
       else
-        nj_reset_tree_model(mod, tree);
+        reset_tree_model(mod, tree);
 
       if (evalaln != NULL) {
         /* have to force index rebuild because node ids can change */
         sfree(mod->msa_seq_idx);
         tm_build_seq_idx(mod, evalaln);
-        ll = nj_compute_log_likelihood(mod, data, NULL);
+        ll = compute_log_likelihood(mod, data, NULL);
       }
       else { /* crispr case */
         sfree(crispr_mod->mod->msa_seq_idx);
@@ -245,6 +240,7 @@ int main(int argc, char *argv[]) {
     else if (topol_ref != NULL) {
       double d = tr_robinson_foulds(tree, topol_ref);
       lst_push_dbl(rfdists, d);
+      tr_free(tree);
     }
 
     else if (bsd_ref != NULL) {
@@ -278,7 +274,7 @@ int main(int argc, char *argv[]) {
       }
       
       /* get distance matrix for all pairs of leaves for this tree */
-      D = nj_tree_to_distances(tree, names, nleaves);
+      D = tree_to_distances(tree, names, nleaves);
       /* add distances to corresponding lists */
       for (i = 0; i < nleaves; i++) {
         for (j = i+1; j < nleaves; j++) {
@@ -288,11 +284,14 @@ int main(int argc, char *argv[]) {
       }
       
       mat_free(D);
+      tr_free(tree);
     }
   }
 
   /* output results */
   fprintf(stderr, "Done processing %d trees.\n", lineno);
+  if (lineno == 0)
+    die("ERROR: no trees found in %s.\n", treefname);
    
   if (evalaln != NULL || is_crispr) {
     printf("Successfully processed %d trees from %s.\n", lineno, treefname);

@@ -31,6 +31,7 @@
 #include <migration.h>
 #include <multiDAG.h>
 #include <version.h>
+#include <vine.h>
 #include "vine.help"
 
 #define DEFAULT_NSAMPLES 100
@@ -41,10 +42,6 @@
 #define DEFAULT_KAPPA 4
 #define DEFAULT_RANK 3
 #define DEFAULT_MCMC_THIN 10
-
-/* default dimensionality is a linear function of log number of taxa */
-#define DEFAULT_DIM_INTERCEPT 3.25
-#define DEFAULT_DIM_SLOPE 0.92
 
 /* helper to write log file header with version and arguments */
 static inline void write_log_header(FILE *LOGF, int argc, char *argv[]) {
@@ -106,7 +103,7 @@ int main(int argc, char *argv[]) {
   subst_mod_type subst_mod = JC69;
   TreeModel *mod = NULL;
   double learnrate = DEFAULT_LEARNRATE,
-    negcurvature = 1.0, var_reg = 1.0, kld_upweight = 1.0;
+    negcurvature = 1.0, var_reg = 0.0, kld_upweight = 1.0;
   MarkovMatrix *rmat = NULL;
   multi_MVN *mmvn = NULL;
   TreeNode *init_tree = NULL;
@@ -522,7 +519,7 @@ int main(int argc, char *argv[]) {
     
   /* get a distance matrix */
   if (init_tree != NULL)
-    D = nj_tree_to_distances(init_tree, names, ntips);  
+    D = tree_to_distances(init_tree, names, ntips);
   else if (indistfile != NULL) {
     D = mat_new_from_file_square(indistfile);
     ntips = D->nrows;
@@ -536,7 +533,7 @@ int main(int argc, char *argv[]) {
     }
   }
   else if (msa != NULL)
-    D = nj_compute_JC_matr(msa);
+    D = compute_JC_matr(msa);
   else if (crispr_muts != NULL)
     D = cpr_compute_dist(crispr_muts);
   else
@@ -548,16 +545,16 @@ int main(int argc, char *argv[]) {
   
   /* at this point, names and ntips must be defined even if we don't have an alignment */
   /* We must also have a distance matrix now; make sure valid */
-  nj_test_D(D);  
+  test_D(D);
   
   /* set default dimensionality if not specified */
   if (dim == -1) {
     assert(DEFAULT_DIM_INTERCEPT >= 2);
-    dim = round(DEFAULT_DIM_INTERCEPT + DEFAULT_DIM_SLOPE * log((double)ntips));
+    dim = vine_default_dim(ntips);
     if (!silent) fprintf(stderr, "Setting dimensionality to default of %d based on %d taxa...\n", dim, ntips);
   }
   
-  covar_data = nj_new_covar_data(covar_param, D, dim, msa, crispr_mod, names,
+  covar_data = new_covar_data(covar_param, D, dim, msa, crispr_mod, names,
                                  natural_grad, kld_upweight, rank, var_reg,
                                  hyperbolic, negcurvature, ultrametric,
                                  radial_flow, planar_flow, tprior, migtable,
@@ -573,13 +570,13 @@ int main(int argc, char *argv[]) {
       die("ERROR: must use --out-dists with --dist-embedding\n");
 
     mmvn = mmvn_new(ntips, dim, covar_data->mvn_type);
-    nj_estimate_mmvn_from_distances(covar_data, mmvn);
+    estimate_mmvn_from_distances(covar_data, mmvn);
   }
 
   else {
     /* we'll need a starting tree for either variational inference
        or NJ-only */
-    tree = nj_inf(D, names, NULL, NULL, covar_data);
+    tree = infer_distance_tree(D, names, NULL, NULL, covar_data);
 
     if (nj_only == TRUE) { /* just print in this case */
       if (had_dups == TRUE) {
@@ -592,7 +589,7 @@ int main(int argc, char *argv[]) {
 
       if (embeddingfile != NULL) {  /* set up initial embedding for output below */
         mmvn = mmvn_new(ntips, dim, covar_data->mvn_type);
-        nj_estimate_mmvn_from_distances(covar_data, mmvn);
+        estimate_mmvn_from_distances(covar_data, mmvn);
       }
     }
 
@@ -631,7 +628,7 @@ int main(int argc, char *argv[]) {
           covar_data->gtr_params = vec_new(GTR_NPARAMS);
           covar_data->deriv_gtr = vec_new(GTR_NPARAMS);
           vec_set_random(covar_data->gtr_params, 1.0, 0.1);
-          nj_init_gtr_mapping(mod);
+          init_gtr_mapping(mod);
           tm_set_rate_matrix(mod, covar_data->gtr_params, 0);
         }
         else
@@ -652,7 +649,7 @@ int main(int argc, char *argv[]) {
         vec_scale(mmvn->mvn->mu, 0.1);
       }
       else 
-        nj_estimate_mmvn_from_distances(covar_data, mmvn); 
+        estimate_mmvn_from_distances(covar_data, mmvn);
 
       if (use_taylor && !silent)
         fprintf(stderr, "Using Taylor approximation for ELBO...\n");
@@ -671,7 +668,7 @@ int main(int argc, char *argv[]) {
 
       if (!silent) fprintf(stderr, "Starting variational inference...\n");
 
-      nj_variational_inf(mod, mmvn, batchsize, learnrate,
+      variational_inf(mod, mmvn, batchsize, learnrate,
                          niter_conv, min_iter, 
                          covar_data, logfile, silent, log_all);
 
@@ -690,12 +687,12 @@ int main(int argc, char *argv[]) {
         if (!silent)
           fprintf(stderr, "Refining samples by MCMC with thinning interval of %d...\n", mcmc_thin);
         covar_data->subsample = FALSE;  /* MCMC always needs exact likelihood */
-        trees = nj_var_sample_mcmc(nsamples, mcmc_thin, mmvn, covar_data, mod,
+        trees = var_sample_mcmc(nsamples, mcmc_thin, mmvn, covar_data, mod,
                                    logfile, silent);
       }
 
       else /* otherwise just sample directly from approx posterior */
-        trees = nj_var_sample(nsamples, mmvn, covar_data, names, NULL);
+        trees = var_sample(nsamples, mmvn, covar_data, names, NULL);
 
       /* expand all sampled trees; msa_seq_idx must be rebuilt per tree
          because caterpillar node IDs vary across trees (the global
@@ -759,7 +756,7 @@ int main(int argc, char *argv[]) {
         if (!silent) fprintf(stderr, "Writing posterior mean tree...\n");
         Vector *mu_full = vec_new(mmvn->d * mmvn->n);
         mmvn_save_mu(mmvn, mu_full);
-        TreeNode *t = nj_mean(mu_full, names, covar_data);
+        TreeNode *t = mean_tree(mu_full, names, covar_data);
         if (had_dups == TRUE)
           cpr_add_dup_leaves(t, crispr_mod->mut); /* add back in duplicate leaves if needed */
         tr_print(postmeanfile, t, TRUE);
@@ -771,7 +768,7 @@ int main(int argc, char *argv[]) {
   if (outdistfile != NULL) {
     if (dist_embedding == TRUE || nj_only == FALSE)
       /* in this case need to reset D */
-      nj_mmvn_to_distances(mmvn, covar_data);
+      mmvn_to_distances(mmvn, covar_data);
 
     mat_print(D, outdistfile);
   }
@@ -795,7 +792,7 @@ int main(int argc, char *argv[]) {
   if (mod != NULL)
     tm_free(mod);
   if (covar_data != NULL)
-    nj_free_covar_data(covar_data);
+    free_covar_data(covar_data);
   if (mmvn != NULL)
     mmvn_free(mmvn);
   if (logfile != NULL)

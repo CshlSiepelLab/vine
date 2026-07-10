@@ -87,7 +87,7 @@ TaylorData *tay_new(struct cvdat *data);
 
 void tay_free(TaylorData *td);
 
-double nj_elbo_taylor(TreeModel *mod, multi_MVN *mmvn, struct cvdat *data,
+double elbo_taylor(TreeModel *mod, multi_MVN *mmvn, struct cvdat *data,
                       Vector *grad, Vector *nuis_grad, double *lprior,
                       double *migll, double *ll_at_mean);
 
@@ -113,7 +113,7 @@ void tay_Sigmafun(Vector *out, Vector *v, void *userdata);
 void tay_SigmaGradfun(Vector *grad_sigma, Vector *p_lat, Vector *q_lat,
                       void *userdata);
 
-double nj_elbo_hybrid(TreeModel *mod, multi_MVN *mmvn, struct cvdat *data,
+double elbo_hybrid(TreeModel *mod, multi_MVN *mmvn, struct cvdat *data,
                       int nminibatch, Vector *grad, Vector *nuis_grad,
                       double *lprior, double *migll, double *ll_at_mean);
 

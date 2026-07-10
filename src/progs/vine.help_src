@@ -226,7 +226,7 @@ COVARIANCE:
        option can be used to alter the default penalty by a multiplicative
        factor. Use values > 1 to inflate the variance further or values
        between 0 and 1 to give it more latitude to shrink (tends to improve
-       the ELBO).  A value of zero will disable regularization.
+       the ELBO).  A value of zero will disable regularization. (default = 0)
 
 HYPERBOLIC GEOMETRY:
     --hyperbolic, -H

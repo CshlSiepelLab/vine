@@ -25,12 +25,12 @@
 
 /* MCMC refinement of variational samples */
 
-List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
+List *var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
                          CovarData *data, TreeModel *mod, FILE *logf,
                          unsigned int silent) {
 
   if (thin <= 0)
-    die("ERROR in nj_var_sample_mcmc: --thin must be >= 1 (got %d).\n",
+    die("ERROR in var_sample_mcmc: --thin must be >= 1 (got %d).\n",
         thin);
 
   int n = data->nseqs, dim = data->dim, fulld = n * dim;
@@ -103,19 +103,19 @@ List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
       vec_plus_eq(x, mu);
     
     /* convert x to y using normalizing flows if available */
-    nj_apply_normalizing_flows(y, x, data, &nf_logdet);
+    apply_normalizing_flows(y, x, data, &nf_logdet);
 
     /* convert to tree */
-    nj_points_to_distances(y, data);
-    tree = nj_inf(data->dist, data->names, NULL, NULL, data);
-    mod->tree = NULL; /* prevent nj_reset_tree_model from freeing the tree */
-    nj_reset_tree_model(mod, tree);
+    points_to_distances(y, data);
+    tree = infer_distance_tree(data->dist, data->names, NULL, NULL, data);
+    mod->tree = NULL; /* prevent reset_tree_model from freeing the tree */
+    reset_tree_model(mod, tree);
 
     /* calculate log likelihood */
     if (data->crispr_mod != NULL)
       lnl = cpr_compute_log_likelihood(data->crispr_mod, NULL);
     else
-      lnl = nj_compute_log_likelihood(mod, data, NULL);
+      lnl = compute_log_likelihood(mod, data, NULL);
     
     /* also get migration log likelihood if needed */
     if (data->crispr_mod != NULL && data->migtable != NULL) {
@@ -183,9 +183,9 @@ List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
           mmvn_map_std(mmvn, x);
         else
           vec_plus_eq(x, mu);
-        nj_apply_normalizing_flows(y, x, data, &nf_logdet);
-        nj_points_to_distances(y, data);
-        tree = nj_inf(data->dist, data->names, NULL, NULL, data);
+        apply_normalizing_flows(y, x, data, &nf_logdet);
+        points_to_distances(y, data);
+        tree = infer_distance_tree(data->dist, data->names, NULL, NULL, data);
         mod->tree = NULL; /* clear dangling ptr left by rejected proposed tree */
       }
       

@@ -17,18 +17,18 @@
 #include <covariance.h>
 
 
-int nj_get_num_nuisance_params(TreeModel *mod, CovarData *data);
+int get_num_nuisance_params(TreeModel *mod, CovarData *data);
 
-char *nj_get_nuisance_param_name(TreeModel *mod, CovarData *data, int idx);
+char *get_nuisance_param_name(TreeModel *mod, CovarData *data, int idx);
 
-void nj_update_nuis_grad(TreeModel *mod, CovarData *data, Vector *nuis_grad);
+void update_nuis_grad(TreeModel *mod, CovarData *data, Vector *nuis_grad);
 
-void nj_save_nuis_params(Vector *stored_vals, TreeModel *mod, CovarData *data);
+void save_nuis_params(Vector *stored_vals, TreeModel *mod, CovarData *data);
 
-void nj_update_nuis_params(Vector *stored_vals, TreeModel *mod, CovarData *data);
+void update_nuis_params(Vector *stored_vals, TreeModel *mod, CovarData *data);
 
-void nj_nuis_param_pluseq(TreeModel *mod, CovarData *data, int idx, double inc);
+void nuis_param_pluseq(TreeModel *mod, CovarData *data, int idx, double inc);
 
-double nj_nuis_param_get(TreeModel *mod, CovarData *data, int idx);
+double nuis_param_get(TreeModel *mod, CovarData *data, int idx);
 
 #endif
