@@ -18,7 +18,7 @@
 #include <nj.h>
 #include <geometry.h>
 #include <multi_mvn.h>
-#include <rf.h>
+#include <tree_splits.h>
 #include <vine.h>
 #include "kl.h"
 
@@ -38,13 +38,9 @@ void tr_split_kl(List *trees_est, List *trees_ref, double *mean_kl) {
   /* get the two sorted lists of splits and their counts */
   int nsc_e;  /* number of split counts in estimate */
   int nsc_r;  /* number of split counts in reference */
-  int n_e;    /* number of leaves in estimate */
-  int n_r;    /* number of leaves in reference */
-  SplitCount *sce = tr_collect_split_counts(trees_est, &nsc_e, &n_e);
-  SplitCount *scr = tr_collect_split_counts(trees_ref, &nsc_r, &n_r);
-
-  if (n_e != n_r)
-    die("ERROR in tr_split_kl: estimate and reference trees have different numbers of leaves.\n");
+  TreeSplitContext *ctx = tr_split_context_new(lst_get_ptr(trees_est, 0));
+  SplitCount *sce = tr_collect_split_counts(ctx, trees_est, &nsc_e);
+  SplitCount *scr = tr_collect_split_counts(ctx, trees_ref, &nsc_r);
 
   /* walk through the two sorted lists of splits to compare them */
   int i = 0, j = 0, nsplits = 0;
@@ -77,9 +73,9 @@ void tr_split_kl(List *trees_est, List *trees_ref, double *mean_kl) {
   /* compute the mean KL divergence per split */
   *mean_kl = (nsplits > 0) ? sum_kl / nsplits : 0.0;
 
-  for (int k = 0; k < nsc_e; k++) bs_free(sce[k].mask);
-  for (int k = 0; k < nsc_r; k++) bs_free(scr[k].mask);
-  sfree(sce); sfree(scr);
+  tr_split_counts_free(sce, nsc_e);
+  tr_split_counts_free(scr, nsc_r);
+  tr_split_context_free(ctx);
 }
 
 /* Turn one tree into a fixed-length vector of pairwise distances after
@@ -162,7 +158,7 @@ void tr_embed_kl(List *trees_est, List *trees_ref, int dim, double *mean_kl) {
   *mean_kl = 0.0;
   int S_est = lst_size(trees_est), S_ref = lst_size(trees_ref);
   if (S_est == 0 || S_ref == 0)
-    die("ERROR in tr_split_kl: at least one input tree list is empty.\n");
+    die("ERROR in tr_embed_kl: at least one input tree list is empty.\n");
 
   /* Get the sorted list of leaf names from the first tree */
   TreeNode *t0 = lst_get_ptr(trees_est, 0);
@@ -175,8 +171,18 @@ void tr_embed_kl(List *trees_est, List *trees_ref, int dim, double *mean_kl) {
   for (int i = 0; i < n; i++)
     names[i] = ((String*)lst_get_ptr(namelist, i))->chars;
 
-  /* Use vine's default dimensionality if not specified */
-  if (dim <= 0) dim = vine_default_dim(n);
+  /* Classical MDS has at most n - 1 nonconstant dimensions after double
+     centering.  Cap the automatic choice and reject an invalid explicit one
+     before indexing the eigensystem below. */
+  int max_dim = n - 1;
+  if (dim <= 0) {
+    dim = vine_default_dim(n);
+    if (dim > max_dim)
+      dim = max_dim;
+  }
+  else if (dim > max_dim)
+    die("ERROR in tr_embed_kl: embedding dimensionality %d exceeds the maximum of %d for %d taxa.\n",
+        dim, max_dim, n);
 
   /* Get the mean and sd for each pair in each tree list */
   double *mean_e, *sd_e, *mean_r, *sd_r;

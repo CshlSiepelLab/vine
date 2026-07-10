@@ -160,6 +160,9 @@ void estimate_mmvn_from_distances_euclidean(CovarData *data, multi_MVN *mmvn) {
   
   if (D->nrows != D->ncols || mmvn->d * mmvn->n != data->dim * n)
     die("ERROR in estimate_points_from_distances: bad dimensions\n");
+  if (data->dim > n - 1)
+    die("ERROR in estimate_mmvn_from_distances_euclidean: dimensionality %d exceeds the maximum of %d for %d points\n",
+        data->dim, n - 1, n);
 
   /* build matrix of squared distances; note that D is upper
      triangular but Dsq must be symmetric */

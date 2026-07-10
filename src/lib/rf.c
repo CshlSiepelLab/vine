@@ -8,487 +8,158 @@
  * See the LICENSE file in the project root for details.
  */
 
-/* calculation of robinson foulds distances */
+/* Robinson-Foulds distance and tree-sample entropy metrics */
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include <ctype.h>
-#include <assert.h>
-#include "phast/stacks.h"
-#include "phast/trees.h"
-#include "phast/misc.h"
-#include "phast/stringsplus.h"
-#include "phast/hashtable.h"
+#include <phast/misc.h>
+#include "tree_splits.h"
 #include "rf.h"
 
-/* dynamic array of split masks */
-typedef struct {
-  BSet **a; int size, cap;
-} MaskVec;
-
-static int bm_cmp_words(const void *pa, const void *pb) {
-  const BSet *a = *(BSet* const*)pa;
-  const BSet *b = *(BSet* const*)pb;
-  return bs_compare(a, b);
-}
-
-/* canonicalize split (make it the smaller side). Returns NEW mask on heap.
-   For balanced splits (sz == other, only possible when nbits is even)
-   tie-break by keeping the half that contains taxon 0 so the same
-   split always maps to the same mask regardless of traversal order. */
-static BSet *bm_canonical(const BSet *m, int nbits) {
-  int sz = bs_popcount(m);
-  int other = nbits - sz;
-  if (sz == 0 || other == 0) return NULL;            /* trivial */
-  if (sz == 1 || other == 1) return NULL;            /* leaf edge; ignore */
-
-  int keep_m;
-  if (sz < other) keep_m = 1;
-  else if (sz > other) keep_m = 0;
-  else /* balanced */ keep_m = (m->w[0] & 1ULL) ? 1 : 0;
-
-  if (keep_m) {
-    return bs_clone(m);
-  } else {
-    BSet *c = bs_clone(m);
-    bs_flip(c);
-    return c;
-  }
-}
-
-static void mv_init(MaskVec *mv, int cap) {
-  mv->cap = cap > 0 ? cap : 16; mv->size = 0;
-  mv->a = smalloc(sizeof(BSet*) * mv->cap);
-}
-static void mv_push(MaskVec *mv, BSet *m) {
-  if (m == NULL) return; /* trivial split filtered */
-  if (mv->size == mv->cap) {
-    mv->cap *= 2;
-    mv->a = srealloc(mv->a, sizeof(BSet*) * mv->cap);
-  }
-  mv->a[mv->size++] = m;
-}
-static void mv_free(MaskVec *mv) {
-  for (int i = 0; i < mv->size; ++i) bs_free(mv->a[i]);
-  sfree(mv->a); mv->a = NULL; mv->size = mv->cap = 0;
-}
-
-static inline int name_to_index(Hashtable *ht, const char *name) {
-  void *vp = hsh_get(ht, name);
-  if (vp == (void*)-1) return -1;
-  return ptr_to_int(vp);
-}
-
-/* DFS over TreeNode to collect edge splits */
-/* Returns heap mask for subtree of u. Parent is used to avoid back-edge in unrooted reps. */
-static BSet *dfs_collect_splits(TreeNode *u, TreeNode *parent,
-                                   Hashtable *name2idx, int n, int W,
-                                   MaskVec *splits) {
-  if (u->lchild == NULL && u->rchild == NULL) {
-    /* leaf */
-    int idx = name_to_index(name2idx, u->name);
-    if (idx < 0) die("Leaf '%s' not in name list.\n", u->name);
-    BSet *m = bs_new(n);
-    bs_set_bit(m, idx);
-    return m;
-  }
-
-  BSet *mask_u = bs_new(n);
-
-  /* left child */
-  if (u->lchild && u->lchild != parent) {
-    BSet *ml = dfs_collect_splits(u->lchild, u, name2idx, n, W, splits);
-    /* edge split defined by (u—lchild) => use ml as one side */
-    BSet *canL = bm_canonical(ml, n);
-    mv_push(splits, canL);
-    /* accumulate */
-    for (int i = 0; i < W; ++i) mask_u->w[i] |= ml->w[i];
-    bs_free(ml);
-  }
-  /* right child */
-  if (u->rchild && u->rchild != parent) {
-    BSet *mr = dfs_collect_splits(u->rchild, u, name2idx, n, W, splits);
-    BSet *canR = bm_canonical(mr, n);
-    mv_push(splits, canR);
-    for (int i = 0; i < W; ++i) mask_u->w[i] |= mr->w[i];
-    bs_free(mr);
-  }
-
-  /* If your TreeNode can have >2 children (multifurcating),
-     iterate a generic adjacency list here; the logic is the same:
-     for each child c!=parent, collect mc, push canonical(mc), OR into mask_u. */
-
-  return mask_u;
-}
-
-/* calculate the symmetric Robinson Foulds distance between two
-   trees. Considers topology only.  Leaf names must match exactly.
-   This is an O(n log n) implementation  */
 double tr_robinson_foulds(TreeNode *t1, TreeNode *t2) {
-  /* build sorted lists of leaf names */
-  List *names1 = tr_leaf_names(t1);
-  List *names2 = tr_leaf_names(t2);
-  lst_qsort_str(names1, ASCENDING);
-  lst_qsort_str(names2, ASCENDING);
-  if (str_list_equal(names1, names2) == FALSE)
-    die("ERROR in tr_robinson_foulds: trees do not have matching leaf names.\n");
-
-  int n = lst_size(names1);
-  if (n < 3) { lst_free_strings(names1); lst_free_strings(names2); return 0; }
-
-  /* build name2idx map from names1 */
-  Hashtable *name2idx = hsh_new(2 * lst_size(names1)); 
-  for (int i = 0; i < lst_size(names1); i++) {
-    String *s = lst_get_ptr(names1, i);
-    hsh_put_int(name2idx, s->chars, i);
+  TreeSplitContext *ctx = tr_split_context_new(t1);
+  if (tr_split_context_nleaves(ctx) < 3) {
+    tr_split_context_free(ctx);
+    return 0.0;
   }
-  
-  const int W = (n + 63) >> 6; /* words needed */
 
-  /* collect canonical splits from each tree */
-  MaskVec S1, S2;
-  mv_init(&S1, n); mv_init(&S2, n);
-
-  BSet *rootmask1 = dfs_collect_splits(t1, NULL, name2idx, n, W, &S1);
-  BSet *rootmask2 = dfs_collect_splits(t2, NULL, name2idx, n, W, &S2);
-  bs_free(rootmask1); bs_free(rootmask2);
-
-  /* sort both split multisets (lexicographic) */
-  qsort(S1.a, S1.size, sizeof(BSet*), bm_cmp_words);
-  qsort(S2.a, S2.size, sizeof(BSet*), bm_cmp_words);
-
-  /* count common splits (intersection) with two pointers */
+  TreeSplitVector *s1 = tr_collect_splits(ctx, t1, FALSE);
+  TreeSplitVector *s2 = tr_collect_splits(ctx, t2, FALSE);
   int i = 0, j = 0, common = 0;
-  while (i < S1.size && j < S2.size) {
-    int cmp = bm_cmp_words(&S1.a[i], &S2.a[j]);
-    if (cmp == 0) { common++; i++; j++; }
-    else if (cmp < 0) i++;
-    else j++;
-  }
-
-  /* symmetric RF distance = |S1| + |S2| - 2|common| */
-  int RF = (S1.size + S2.size) - 2*common;
-
-  /* cleanup */
-  mv_free(&S1); mv_free(&S2);
-  lst_free_strings(names2);
-  lst_free_strings(names1);
-  hsh_free(name2idx);
-
-  return RF;
-}
-
-/* ---- helpers for tr_tree_entropy ---------------------------------------- */
-
-/* Like bm_canonical but does NOT filter trivial (leaf) splits, so all 2n-3
-   edges of a bifurcating tree are included. */
-static BSet *bm_canonical_any(const BSet *m, int nbits) {
-  int sz = bs_popcount(m);
-  int other = nbits - sz;
-  if (sz == 0 || other == 0) return NULL;
-  if (sz <= other)
-    return bs_clone(m);
-  BSet *c = bs_clone(m);
-  bs_flip(c);
-  return c;
-}
-
-/* (canonical split, branch length) pair. */
-typedef struct { BSet *mask; double blen; } SplitBLen;
-
-/* qsort comparator for SplitBLen by mask. */
-static int sbl_cmp(const void *pa, const void *pb) {
-  return bm_cmp_words(&((const SplitBLen*)pa)->mask,
-                      &((const SplitBLen*)pb)->mask);
-}
-
-/* DFS that collects ALL edges (including leaf edges), writing (canonical
-   split, branch length) pairs into out[].  Returns the subtree BSet for
-   node u (caller must bs_free it).
-   is_root should be TRUE only for the initial (top-level) call.  When the
-   root has exactly two children -- the usual case for a Newick file
-   representing what is really an unrooted tree -- those two child edges
-   are the SAME true bipartition (each child's subtree is exactly the
-   complement of the other), so only one of them is recorded.  Without this,
-   a bifurcating-root tree yields 2n-2 edges instead of the correct 2n-3
-   for an unrooted binary tree, double-counting one split per tree. */
-static BSet *dfs_splits_blen(TreeNode *u, TreeNode *parent, int is_root,
-                                  Hashtable *name2idx, int n, int W,
-                                  SplitBLen *out, int *nout) {
-  if (u->lchild == NULL && u->rchild == NULL) {
-    int idx = name_to_index(name2idx, u->name);
-    if (idx < 0) die("Leaf '%s' not in name list.\n", u->name);
-    BSet *m = bs_new(n);
-    bs_set_bit(m, idx);
-    return m;
-  }
-  BSet *mask_u = bs_new(n);
-  TreeNode *ch[2] = {u->lchild, u->rchild};
-  int nchildren = (ch[0] && ch[0] != parent) + (ch[1] && ch[1] != parent);
-  int seen = 0;
-  for (int ci = 0; ci < 2; ci++) {
-    TreeNode *c = ch[ci];
-    if (!c || c == parent) continue;
-    BSet *mc = dfs_splits_blen(c, u, FALSE, name2idx, n, W, out, nout);
-    BSet *can = bm_canonical_any(mc, n);
-    int skip_dup_root_edge = (is_root && nchildren == 2 && seen == 1);
-    if (can && !skip_dup_root_edge) {
-      out[*nout].mask = can;
-      out[*nout].blen = c->dparent > 0.0 ? c->dparent : 1e-300;
-      (*nout)++;
+  while (i < s1->size && j < s2->size) {
+    int cmp = bs_compare(s1->splits[i].mask, s2->splits[j].mask);
+    if (cmp == 0) {
+      common++;
+      i++;
+      j++;
     }
-    else if (can) {
-      bs_free(can);
-    }
-    for (int i = 0; i < W; i++) mask_u->w[i] |= mc->w[i];
-    bs_free(mc);
-    seen++;
+    else if (cmp < 0)
+      i++;
+    else
+      j++;
   }
-  return mask_u;
+
+  int distance = s1->size + s2->size - 2 * common;
+  tr_split_vector_free(s1);
+  tr_split_vector_free(s2);
+  tr_split_context_free(ctx);
+  return distance;
 }
 
-/* Per-tree data: sorted (canonical split, branch length) array. */
-typedef struct { SplitBLen *sbl; int m; } TreeSplitData;
+typedef struct {
+  TreeSplitVector *vec;
+} TreeSplitData;
 
-/* Global state for qsort topology comparison (C89-style callback). */
+/* Global state for qsort topology comparison. */
 static TreeSplitData *g_tsd;
 
-static int cmp_tsd_idx(const void *pa, const void *pb) {
-  const TreeSplitData *a = &g_tsd[*(const int*)pa];
-  const TreeSplitData *b = &g_tsd[*(const int*)pb];
-  int m = a->m < b->m ? a->m : b->m;
-  for (int k = 0; k < m; k++) {
-    int c = bm_cmp_words(&a->sbl[k].mask, &b->sbl[k].mask);
-    if (c != 0) return c;
+static int compare_tree_indices(const void *pa, const void *pb) {
+  const TreeSplitVector *a = g_tsd[*(const int *)pa].vec;
+  const TreeSplitVector *b = g_tsd[*(const int *)pb].vec;
+  int size = a->size < b->size ? a->size : b->size;
+  for (int i = 0; i < size; i++) {
+    int cmp = bs_compare(a->splits[i].mask, b->splits[i].mask);
+    if (cmp != 0)
+      return cmp;
   }
-  return a->m - b->m;
+  return a->size - b->size;
 }
 
-static int tsd_same_topo(const TreeSplitData *a, const TreeSplitData *b) {
-  if (a->m != b->m) return 0;
-  for (int k = 0; k < a->m; k++)
-    if (bm_cmp_words(&a->sbl[k].mask, &b->sbl[k].mask) != 0) return 0;
-  return 1;
+static int same_topology(const TreeSplitVector *a, const TreeSplitVector *b) {
+  if (a->size != b->size)
+    return FALSE;
+  for (int i = 0; i < a->size; i++)
+    if (bs_compare(a->splits[i].mask, b->splits[i].mask) != 0)
+      return FALSE;
+  return TRUE;
 }
 
-/* ---- public function ----------------------------------------------------- */
+static double log_branch_length(double length) {
+  return log(length > 0.0 ? length : 1e-300);
+}
 
-/* Compute split entropy, topology entropy, and mean branch-length variance
- * for a collection of trees.
- *
- * H_split:  sum of Bernoulli entropies over all non-trivial splits.
- *
- * H_top:    Shannon entropy over distinct topologies, -Σ p(τ) log p(τ).
- *
- * mean_var: topology-frequency-weighted sum of sample variances of log
- *   branch lengths, summed over branches.  For topology τ with n_τ
- *   samples, the per-branch variance is σ²_τk for branch k.
- *   Topology groups with n_τ = 1 contribute zero.
- *
- * mean_var_per_branch: mean_var / m  (m = number of branches per tree).
- */
 void tr_tree_entropy(List *trees, double *H_split, double *H_top,
                      double *mean_var, double *mean_var_per_branch) {
-  int S = lst_size(trees);
-  *H_split             = 0.0;
-  *H_top               = 0.0;
-  *mean_var            = 0.0;
+  int ntrees = lst_size(trees);
+  *H_split = 0.0;
+  *H_top = 0.0;
+  *mean_var = 0.0;
   *mean_var_per_branch = 0.0;
-  if (S == 0) return;
+  if (ntrees == 0)
+    return;
 
-  TreeNode *t0 = lst_get_ptr(trees, 0);
-  List *names = tr_leaf_names(t0);
-  lst_qsort_str(names, ASCENDING);
-  int n = lst_size(names);
-
-  if (n < 3) {
-    lst_free_strings(names);
-    lst_free(names);
-    return;  /* all three remain 0 */
+  TreeSplitContext *ctx = tr_split_context_new(lst_get_ptr(trees, 0));
+  if (tr_split_context_nleaves(ctx) < 3) {
+    tr_split_context_free(ctx);
+    return;
   }
 
-  int W = (n + 63) >> 6;
-  int max_edges = 2 * n;  /* generous upper bound */
-
-  Hashtable *name2idx = hsh_new(2 * n);
-  for (int i = 0; i < n; i++) {
-    String *s = lst_get_ptr(names, i);
-    hsh_put_int(name2idx, s->chars, i);
+  /* Split entropy from posterior inclusion frequencies. */
+  int ncounts;
+  SplitCount *counts = tr_collect_split_counts(ctx, trees, &ncounts);
+  for (int i = 0; i < ncounts; i++) {
+    double p = (double)counts[i].count / ntrees;
+    if (p > 0.0 && p < 1.0)
+      *H_split += -p * log(p) - (1.0 - p) * log(1.0 - p);
   }
+  tr_split_counts_free(counts, ncounts);
 
-  /* ---- collect per-tree (split, blen) arrays ---- */
-  TreeSplitData *tsd = smalloc(S * sizeof(TreeSplitData));
-  MaskVec nontrivial;  /* flat pool of non-trivial splits for H_split */
-  mv_init(&nontrivial, S * (n - 3 > 0 ? n - 3 : 1));
+  /* Collect all edges for topology grouping and branch-length variance. */
+  TreeSplitData *tsd = smalloc(ntrees * sizeof(TreeSplitData));
+  for (int i = 0; i < ntrees; i++)
+    tsd[i].vec = tr_collect_splits(ctx, lst_get_ptr(trees, i), TRUE);
 
-  for (int s = 0; s < S; s++) {
-    TreeNode *t = lst_get_ptr(trees, s);
-    SplitBLen *sbl = smalloc(max_edges * sizeof(SplitBLen));
-    int nbl = 0;
-    BSet *root = dfs_splits_blen(t, NULL, TRUE, name2idx, n, W, sbl, &nbl);
-    bs_free(root);
-    qsort(sbl, nbl, sizeof(SplitBLen), sbl_cmp);
-    tsd[s].sbl = sbl;
-    tsd[s].m   = nbl;
-    /* gather non-trivial splits for H_split */
-    for (int k = 0; k < nbl; k++) {
-      int sz = bs_popcount(sbl[k].mask);
-      if (sz >= 2 && (n - sz) >= 2)
-        mv_push(&nontrivial, bs_clone(sbl[k].mask));
-    }
-  }
-
-  /* ---- H_split ---- */
-  qsort(nontrivial.a, nontrivial.size, sizeof(BSet*), bm_cmp_words);
-  {
-    int i = 0;
-    while (i < nontrivial.size) {
-      int j = i + 1;
-      while (j < nontrivial.size &&
-             bm_cmp_words(&nontrivial.a[i], &nontrivial.a[j]) == 0)
-        j++;
-      double p = (double)(j - i) / S;
-      if (p > 0.0 && p < 1.0)
-        *H_split += -p * log(p) - (1.0 - p) * log(1.0 - p);
-      i = j;
-    }
-  }
-  mv_free(&nontrivial);
-
-  /* ---- H_branch: group trees by topology, compute sample covariance ---- */
-  int *order = smalloc(S * sizeof(int));
-  for (int s = 0; s < S; s++) order[s] = s;
+  int *order = smalloc(ntrees * sizeof(int));
+  for (int i = 0; i < ntrees; i++)
+    order[i] = i;
   g_tsd = tsd;
-  qsort(order, S, sizeof(int), cmp_tsd_idx);
+  qsort(order, ntrees, sizeof(int), compare_tree_indices);
 
-  int gi = 0;
-  while (gi < S) {
-    int gj = gi + 1;
-    while (gj < S && tsd_same_topo(&tsd[order[gi]], &tsd[order[gj]]))
-      gj++;
-    int ntau = gj - gi;
-    int m    = tsd[order[gi]].m;
-    double p_tau = (double)ntau / S;
-    *H_top += -p_tau * log(p_tau);
+  int group_start = 0;
+  while (group_start < ntrees) {
+    int group_end = group_start + 1;
+    TreeSplitVector *first = tsd[order[group_start]].vec;
+    while (group_end < ntrees &&
+           same_topology(first, tsd[order[group_end]].vec))
+      group_end++;
 
-    if (ntau >= 2 && m >= 1) {
-      /* sample mean of log branch lengths */
-      double *mu = calloc(m, sizeof(double));
-      for (int si = gi; si < gj; si++) {
-        SplitBLen *sbl = tsd[order[si]].sbl;
-        for (int k = 0; k < m; k++)
-          mu[k] += log(sbl[k].blen);
+    int group_size = group_end - group_start;
+    int nbranches = first->size;
+    double topology_prob = (double)group_size / ntrees;
+    *H_top += -topology_prob * log(topology_prob);
+
+    if (group_size >= 2 && nbranches > 0) {
+      double *mean = calloc(nbranches, sizeof(double));
+      for (int i = group_start; i < group_end; i++) {
+        TreeSplitVector *vec = tsd[order[i]].vec;
+        for (int k = 0; k < nbranches; k++)
+          mean[k] += log_branch_length(vec->splits[k].blen);
       }
-      for (int k = 0; k < m; k++) mu[k] /= ntau;
+      for (int k = 0; k < nbranches; k++)
+        mean[k] /= group_size;
 
-      /* weighted sum of sample variances over branches */
-      double lv = 0.0;
-      for (int k = 0; k < m; k++) {
-        double var_k = 0.0;
-        for (int si = gi; si < gj; si++) {
-          double d = log(tsd[order[si]].sbl[k].blen) - mu[k];
-          var_k += d * d;
+      double variance_sum = 0.0;
+      for (int k = 0; k < nbranches; k++) {
+        double variance = 0.0;
+        for (int i = group_start; i < group_end; i++) {
+          TreeSplitVector *vec = tsd[order[i]].vec;
+          double diff = log_branch_length(vec->splits[k].blen) - mean[k];
+          variance += diff * diff;
         }
-        var_k /= (ntau - 1);
-        lv += var_k;
+        variance_sum += variance / (group_size - 1);
       }
-      *mean_var += p_tau * lv;
-      free(mu);
+      *mean_var += topology_prob * variance_sum;
+      free(mean);
     }
-    gi = gj;
+    group_start = group_end;
   }
-  /* per-branch: divide by number of branches (same for all trees) */
-  int m_all = tsd[order[0]].m;
-  *mean_var_per_branch = (m_all > 0) ? *mean_var / m_all : 0.0;
+
+  int nbranches = tsd[order[0]].vec->size;
+  *mean_var_per_branch = nbranches > 0 ? *mean_var / nbranches : 0.0;
+
   sfree(order);
-
-  /* ---- cleanup ---- */
-  for (int s = 0; s < S; s++) {
-    for (int k = 0; k < tsd[s].m; k++) bs_free(tsd[s].sbl[k].mask);
-    sfree(tsd[s].sbl);
-  }
+  for (int i = 0; i < ntrees; i++)
+    tr_split_vector_free(tsd[i].vec);
   sfree(tsd);
-  lst_free_strings(names);
-  lst_free(names);
-  hsh_free(name2idx);
-}
-
-/* Count unique non-trivial splits across a sample of trees.
- 
-    Uses the leaf names from the first tree to define a fixed, sorted leaf order,
-    then represents each split as a bitmask over that order. For every tree in
-    the sample, internal-edge splits are extracted, trivial splits are discarded
-    by requiring at least two leaves on each side, and the remaining split masks
-    are pooled across trees. The pooled masks are sorted and collapsed into a
-    newly allocated array of SplitCount records, where each record stores one
-    unique split mask and the number of trees/edges in which that split was
-    observed. */
-SplitCount *tr_collect_split_counts(List *trees, int *nsc_out, int *nleaves_out) {
-  *nsc_out = 0;
-  int S = lst_size(trees);
-
-  /* return if no trees */
-  if (S == 0) { if (nleaves_out) *nleaves_out = 0; return NULL; }
-
-  /* get the sorted leaf names from the first tree */
-  TreeNode *t0 = lst_get_ptr(trees, 0);
-  List *names = tr_leaf_names(t0);
-  lst_qsort_str(names, ASCENDING);
-  int n = lst_size(names);
-  if (nleaves_out) *nleaves_out = n;
-  if (n < 3) { lst_free_strings(names); lst_free(names); return NULL; }
-
-  /* initialize the hash table for leaf name to index mapping */
-  int W = (n + 63) >> 6;
-  int max_edges = 2 * n;
-  Hashtable *name2idx = hsh_new(2 * n);
-  for (int i = 0; i < n; i++) {
-    String *s = lst_get_ptr(names, i);
-    hsh_put_int(name2idx, s->chars, i);
-  }
-
-  /* iterate over trees and collect split masks */
-  MaskVec all;
-  mv_init(&all, S * (n - 3 > 0 ? n - 3 : 1));
-  for (int s = 0; s < S; s++) {
-    TreeNode *t = lst_get_ptr(trees, s);
-    SplitBLen *sbl = smalloc(max_edges * sizeof(SplitBLen));
-    int nbl = 0;
-
-    /* compute splits for this tree */
-    BSet *root = dfs_splits_blen(t, NULL, TRUE, name2idx, n, W, sbl, &nbl);
-    bs_free(root);
-
-    /* remove trivial splits with less than 2 leaves on either side */
-    for (int k = 0; k < nbl; k++) {
-      int sz = bs_popcount(sbl[k].mask);
-      if (sz >= 2 && (n - sz) >= 2)
-        mv_push(&all, bs_clone(sbl[k].mask));
-      bs_free(sbl[k].mask);
-    }
-    sfree(sbl);
-  }
-
-  /* sort so that identical splits are adjacent */
-  qsort(all.a, all.size, sizeof(BSet*), bm_cmp_words);
-
-  /* collapse into unique splits and count occurrences */
-  SplitCount *out = smalloc((all.size > 0 ? all.size : 1) * sizeof(SplitCount));
-  int nsc = 0, i = 0;
-  while (i < all.size) {
-    int j = i + 1;
-    while (j < all.size && bm_cmp_words(&all.a[i], &all.a[j]) == 0) j++;
-    out[nsc].mask = bs_clone(all.a[i]);
-    out[nsc].count = j - i;
-    nsc++;
-    i = j;
-  }
-  mv_free(&all);
-  lst_free_strings(names);
-  lst_free(names);
-  hsh_free(name2idx);
-
-  *nsc_out = nsc;
-  return out;
+  tr_split_context_free(ctx);
 }

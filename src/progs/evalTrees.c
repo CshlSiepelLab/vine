@@ -240,6 +240,7 @@ int main(int argc, char *argv[]) {
     else if (topol_ref != NULL) {
       double d = tr_robinson_foulds(tree, topol_ref);
       lst_push_dbl(rfdists, d);
+      tr_free(tree);
     }
 
     else if (bsd_ref != NULL) {
@@ -283,11 +284,14 @@ int main(int argc, char *argv[]) {
       }
       
       mat_free(D);
+      tr_free(tree);
     }
   }
 
   /* output results */
   fprintf(stderr, "Done processing %d trees.\n", lineno);
+  if (lineno == 0)
+    die("ERROR: no trees found in %s.\n", treefname);
    
   if (evalaln != NULL || is_crispr) {
     printf("Successfully processed %d trees from %s.\n", lineno, treefname);
