@@ -25,16 +25,21 @@ int main(int argc, char *argv[]) {
   double split_kl, embed_kl;
   int dim = -1;   /* -1 means "use vine's default formula" */
   int nthreads = 1;
+  int embed_dist_kl = FALSE;
 
   struct option long_opts[] = {
+    {"embed-dist-kl", 0, 0, 'e'},
     {"dim", 1, 0, 'd'},
     {"nthreads", 1, 0, 'n'},
     {"help", 0, 0, 'h'},
     {0, 0, 0, 0}
   };
 
-  while ((c = getopt_long(argc, argv, "d:n:h", long_opts, &opt_idx)) != -1) {
+  while ((c = getopt_long(argc, argv, "ed:n:h", long_opts, &opt_idx)) != -1) {
     switch (c) {
+    case 'e':
+      embed_dist_kl = TRUE;
+      break;
     case 'd':
       dim = atoi(optarg);
       if (dim < 1)
@@ -71,15 +76,18 @@ int main(int argc, char *argv[]) {
           lst_size(trees_est), lst_size(trees_ref));
   tr_split_kl(trees_est, trees_ref, &split_kl);
 
-  fprintf(stderr, "Computing embedding KL divergence...\n");
-  tr_embed_kl(trees_est, trees_ref, dim, &embed_kl);
+  if (embed_dist_kl) {
+    fprintf(stderr, "Computing embedding-distance KL divergence...\n");
+    tr_embed_kl(trees_est, trees_ref, dim, &embed_kl);
+  }
 
   printf("Successfully processed %d trees from %s and %d trees from %s.\n",
          lst_size(trees_est), est_fname, lst_size(trees_ref), ref_fname);
   printf("Mean KL divergences of %s (estimate) from %s (reference):\n",
          est_fname, ref_fname);
   printf("Mean_split_KL: %f\n", split_kl);
-  printf("Mean_embed_KL: %f\n", embed_kl);
+  if (embed_dist_kl)
+    printf("Mean_embed_KL: %f\n", embed_kl);
 
   return 0;
 }

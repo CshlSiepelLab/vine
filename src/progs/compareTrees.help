@@ -1,11 +1,12 @@
-char HELP[2567] = "\nPROGRAM: compareTrees\n\
+char HELP[2851] = "\nPROGRAM: compareTrees\n\
 \n\
-USAGE: compareTrees estimate.nwk reference.nwk > output.txt\n\
+USAGE: compareTrees [OPTIONS] estimate.nwk reference.nwk > output.txt\n\
 \n\
 DESCRIPTION: Compare two collections of phylogenetic trees representing\n\
 samples from two posterior (or other) distributions over tree space --\n\
 for example, samples from a variational approximation and from an MCMC\n\
-reference run.  Reports two KL divergence metrics.\n\
+reference run.  By default, reports the topology-based mean split KL\n\
+divergence.  Additional comparison metrics can be requested with options.\n\
 \n\
 (1) Mean split KL: the mean per-split Bernoulli KL divergence between the\n\
 two samples' posterior distributions over clade splits.  For each\n\
@@ -20,7 +21,7 @@ and remains well-behaved even when the two samples share few or no exact\n\
 topologies, unlike the full-topology KL divergence -sum p(tau) log\n\
 (p(tau)/q(tau)).\n\
 \n\
-(2) Mean embedding KL: each tree is independently embedded into a\n\
+(2) Mean embedding KL (enabled by --embed-dist-kl): each tree is independently embedded into a\n\
 low-dimensional Euclidean space via classical multidimensional scaling on\n\
 its cophenetic distances -- the same closed-form procedure vine itself\n\
 uses to initialize its variational posterior (see vine's\n\
@@ -35,6 +36,10 @@ Both input files must contain one Newick tree per line, sampled over the\n\
 same set of taxa.\n\
 \n\
 OPTIONS:\n\
+    --embed-dist-kl, -e\n\
+        Also compute the mean embedding-distance KL divergence.  This\n\
+        comparison is disabled by default.\n\
+\n\
     --dim, -d <n>\n\
         Embedding dimensionality used for the embedding KL divergence.\n\
         Defaults to the same formula vine uses when --dimensionality is\n\
