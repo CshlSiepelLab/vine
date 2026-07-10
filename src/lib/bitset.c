@@ -61,6 +61,23 @@ int bs_equals(const BSet *a, const BSet *b) {
   return 1;
 }
 
+/* Lexicographic comparison from the highest word to the lowest. */
+int bs_compare(const BSet *a, const BSet *b) {
+  assert(a->nbits == b->nbits);
+  for (int i = a->nwords - 1; i >= 0; --i) {
+    if (a->w[i] < b->w[i]) return -1;
+    if (a->w[i] > b->w[i]) return 1;
+  }
+  return 0;
+}
+
+int bs_popcount(const BSet *bs) {
+  int count = 0;
+  for (int i = 0; i < bs->nwords; ++i)
+    count += __builtin_popcountll(bs->w[i]);
+  return count;
+}
+
 void bs_set_bit(BSet *bs, int idx) {
   assert(idx >= 0 && idx < bs->nbits);
   bs->w[idx >> 6] |= (1ULL << (idx & 63));

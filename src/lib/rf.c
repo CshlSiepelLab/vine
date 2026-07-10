@@ -22,70 +22,23 @@
 #include "phast/hashtable.h"
 #include "rf.h"
 
-static inline int popcount64(uint64_t x) { return __builtin_popcountll(x); }
-
-/* allocate zeroed mask with W words */
-static BitMask *bm_new(int W) {
-  BitMask *m = smalloc(sizeof(BitMask));
-  m->W = W;
-  m->w = calloc(W, sizeof(uint64_t));
-  return m;
-}
-
-static void bm_free(BitMask *m) { if (!m) return; free(m->w); sfree(m); }
-
-/* set a single bit (0-based global bit index) */
-static inline void bm_set(BitMask *m, int bit) {
-  int wi = bit >> 6, bi = bit & 63;
-  m->w[wi] |= (uint64_t)1ULL << bi;
-}
-
-/* dst = ~src; then clear high unused bits above nbits */
-static inline void bm_not(BitMask *dst, const BitMask *src, int nbits) {
-  for (int i = 0; i < dst->W; ++i) dst->w[i] = ~src->w[i];
-  int rem = nbits & 63;
-  if (rem) {
-    uint64_t keep = (rem == 64) ? ~0ULL : ((1ULL << rem) - 1ULL);
-    dst->w[dst->W - 1] &= keep;
-  }
-}
-
-/* count set bits */
-static inline int bm_popcount(const BitMask *m) {
-  int s = 0; for (int i = 0; i < m->W; ++i) s += popcount64(m->w[i]); return s;
-}
-
-/* lexicographic compare (lowest word first is fine as long as consistent) */
-int tr_bitmask_cmp(const BitMask *a, const BitMask *b) {
-  /* compare from high word to low word for nice order */
-  for (int i = a->W - 1; i >= 0; --i) {
-    if (a->w[i] < b->w[i]) return -1;
-    if (a->w[i] > b->w[i]) return 1;
-  }
-  return 0;
-}
+/* dynamic array of split masks */
+typedef struct {
+  BSet **a; int size, cap;
+} MaskVec;
 
 static int bm_cmp_words(const void *pa, const void *pb) {
-  const BitMask *a = *(BitMask* const*)pa;
-  const BitMask *b = *(BitMask* const*)pb;
-  return tr_bitmask_cmp(a, b);
-}
-
-void tr_bitmask_free(BitMask *m) { bm_free(m); }
-
-/* deep copy */
-static BitMask *bm_clone(const BitMask *m) {
-  BitMask *c = bm_new(m->W);
-  memcpy(c->w, m->w, sizeof(uint64_t)*m->W);
-  return c;
+  const BSet *a = *(BSet* const*)pa;
+  const BSet *b = *(BSet* const*)pb;
+  return bs_compare(a, b);
 }
 
 /* canonicalize split (make it the smaller side). Returns NEW mask on heap.
    For balanced splits (sz == other, only possible when nbits is even)
    tie-break by keeping the half that contains taxon 0 so the same
    split always maps to the same mask regardless of traversal order. */
-static BitMask *bm_canonical(const BitMask *m, int nbits) {
-  int sz = bm_popcount(m);
+static BSet *bm_canonical(const BSet *m, int nbits) {
+  int sz = bs_popcount(m);
   int other = nbits - sz;
   if (sz == 0 || other == 0) return NULL;            /* trivial */
   if (sz == 1 || other == 1) return NULL;            /* leaf edge; ignore */
@@ -96,28 +49,28 @@ static BitMask *bm_canonical(const BitMask *m, int nbits) {
   else /* balanced */ keep_m = (m->w[0] & 1ULL) ? 1 : 0;
 
   if (keep_m) {
-    return bm_clone(m);
+    return bs_clone(m);
   } else {
-    BitMask *c = bm_new(m->W);
-    bm_not(c, m, nbits);
+    BSet *c = bs_clone(m);
+    bs_flip(c);
     return c;
   }
 }
 
 static void mv_init(MaskVec *mv, int cap) {
   mv->cap = cap > 0 ? cap : 16; mv->size = 0;
-  mv->a = smalloc(sizeof(BitMask*) * mv->cap);
+  mv->a = smalloc(sizeof(BSet*) * mv->cap);
 }
-static void mv_push(MaskVec *mv, BitMask *m) {
+static void mv_push(MaskVec *mv, BSet *m) {
   if (m == NULL) return; /* trivial split filtered */
   if (mv->size == mv->cap) {
     mv->cap *= 2;
-    mv->a = srealloc(mv->a, sizeof(BitMask*) * mv->cap);
+    mv->a = srealloc(mv->a, sizeof(BSet*) * mv->cap);
   }
   mv->a[mv->size++] = m;
 }
 static void mv_free(MaskVec *mv) {
-  for (int i = 0; i < mv->size; ++i) bm_free(mv->a[i]);
+  for (int i = 0; i < mv->size; ++i) bs_free(mv->a[i]);
   sfree(mv->a); mv->a = NULL; mv->size = mv->cap = 0;
 }
 
@@ -129,37 +82,37 @@ static inline int name_to_index(Hashtable *ht, const char *name) {
 
 /* DFS over TreeNode to collect edge splits */
 /* Returns heap mask for subtree of u. Parent is used to avoid back-edge in unrooted reps. */
-static BitMask *dfs_collect_splits(TreeNode *u, TreeNode *parent,
+static BSet *dfs_collect_splits(TreeNode *u, TreeNode *parent,
                                    Hashtable *name2idx, int n, int W,
                                    MaskVec *splits) {
   if (u->lchild == NULL && u->rchild == NULL) {
     /* leaf */
     int idx = name_to_index(name2idx, u->name);
     if (idx < 0) die("Leaf '%s' not in name list.\n", u->name);
-    BitMask *m = bm_new(W);
-    bm_set(m, idx);
+    BSet *m = bs_new(n);
+    bs_set_bit(m, idx);
     return m;
   }
 
-  BitMask *mask_u = bm_new(W);
+  BSet *mask_u = bs_new(n);
 
   /* left child */
   if (u->lchild && u->lchild != parent) {
-    BitMask *ml = dfs_collect_splits(u->lchild, u, name2idx, n, W, splits);
+    BSet *ml = dfs_collect_splits(u->lchild, u, name2idx, n, W, splits);
     /* edge split defined by (u—lchild) => use ml as one side */
-    BitMask *canL = bm_canonical(ml, n);
+    BSet *canL = bm_canonical(ml, n);
     mv_push(splits, canL);
     /* accumulate */
     for (int i = 0; i < W; ++i) mask_u->w[i] |= ml->w[i];
-    bm_free(ml);
+    bs_free(ml);
   }
   /* right child */
   if (u->rchild && u->rchild != parent) {
-    BitMask *mr = dfs_collect_splits(u->rchild, u, name2idx, n, W, splits);
-    BitMask *canR = bm_canonical(mr, n);
+    BSet *mr = dfs_collect_splits(u->rchild, u, name2idx, n, W, splits);
+    BSet *canR = bm_canonical(mr, n);
     mv_push(splits, canR);
     for (int i = 0; i < W; ++i) mask_u->w[i] |= mr->w[i];
-    bm_free(mr);
+    bs_free(mr);
   }
 
   /* If your TreeNode can have >2 children (multifurcating),
@@ -197,13 +150,13 @@ double tr_robinson_foulds(TreeNode *t1, TreeNode *t2) {
   MaskVec S1, S2;
   mv_init(&S1, n); mv_init(&S2, n);
 
-  BitMask *rootmask1 = dfs_collect_splits(t1, NULL, name2idx, n, W, &S1);
-  BitMask *rootmask2 = dfs_collect_splits(t2, NULL, name2idx, n, W, &S2);
-  bm_free(rootmask1); bm_free(rootmask2);
+  BSet *rootmask1 = dfs_collect_splits(t1, NULL, name2idx, n, W, &S1);
+  BSet *rootmask2 = dfs_collect_splits(t2, NULL, name2idx, n, W, &S2);
+  bs_free(rootmask1); bs_free(rootmask2);
 
   /* sort both split multisets (lexicographic) */
-  qsort(S1.a, S1.size, sizeof(BitMask*), bm_cmp_words);
-  qsort(S2.a, S2.size, sizeof(BitMask*), bm_cmp_words);
+  qsort(S1.a, S1.size, sizeof(BSet*), bm_cmp_words);
+  qsort(S2.a, S2.size, sizeof(BSet*), bm_cmp_words);
 
   /* count common splits (intersection) with two pointers */
   int i = 0, j = 0, common = 0;
@@ -230,19 +183,19 @@ double tr_robinson_foulds(TreeNode *t1, TreeNode *t2) {
 
 /* Like bm_canonical but does NOT filter trivial (leaf) splits, so all 2n-3
    edges of a bifurcating tree are included. */
-static BitMask *bm_canonical_any(const BitMask *m, int nbits) {
-  int sz = bm_popcount(m);
+static BSet *bm_canonical_any(const BSet *m, int nbits) {
+  int sz = bs_popcount(m);
   int other = nbits - sz;
   if (sz == 0 || other == 0) return NULL;
   if (sz <= other)
-    return bm_clone(m);
-  BitMask *c = bm_new(m->W);
-  bm_not(c, m, nbits);
+    return bs_clone(m);
+  BSet *c = bs_clone(m);
+  bs_flip(c);
   return c;
 }
 
 /* (canonical split, branch length) pair. */
-typedef struct { BitMask *mask; double blen; } SplitBLen;
+typedef struct { BSet *mask; double blen; } SplitBLen;
 
 /* qsort comparator for SplitBLen by mask. */
 static int sbl_cmp(const void *pa, const void *pb) {
@@ -251,8 +204,8 @@ static int sbl_cmp(const void *pa, const void *pb) {
 }
 
 /* DFS that collects ALL edges (including leaf edges), writing (canonical
-   split, branch length) pairs into out[].  Returns the subtree BitMask for
-   node u (caller must bm_free it).
+   split, branch length) pairs into out[].  Returns the subtree BSet for
+   node u (caller must bs_free it).
    is_root should be TRUE only for the initial (top-level) call.  When the
    root has exactly two children -- the usual case for a Newick file
    representing what is really an unrooted tree -- those two child edges
@@ -260,25 +213,25 @@ static int sbl_cmp(const void *pa, const void *pb) {
    complement of the other), so only one of them is recorded.  Without this,
    a bifurcating-root tree yields 2n-2 edges instead of the correct 2n-3
    for an unrooted binary tree, double-counting one split per tree. */
-static BitMask *dfs_splits_blen(TreeNode *u, TreeNode *parent, int is_root,
+static BSet *dfs_splits_blen(TreeNode *u, TreeNode *parent, int is_root,
                                   Hashtable *name2idx, int n, int W,
                                   SplitBLen *out, int *nout) {
   if (u->lchild == NULL && u->rchild == NULL) {
     int idx = name_to_index(name2idx, u->name);
     if (idx < 0) die("Leaf '%s' not in name list.\n", u->name);
-    BitMask *m = bm_new(W);
-    bm_set(m, idx);
+    BSet *m = bs_new(n);
+    bs_set_bit(m, idx);
     return m;
   }
-  BitMask *mask_u = bm_new(W);
+  BSet *mask_u = bs_new(n);
   TreeNode *ch[2] = {u->lchild, u->rchild};
   int nchildren = (ch[0] && ch[0] != parent) + (ch[1] && ch[1] != parent);
   int seen = 0;
   for (int ci = 0; ci < 2; ci++) {
     TreeNode *c = ch[ci];
     if (!c || c == parent) continue;
-    BitMask *mc = dfs_splits_blen(c, u, FALSE, name2idx, n, W, out, nout);
-    BitMask *can = bm_canonical_any(mc, n);
+    BSet *mc = dfs_splits_blen(c, u, FALSE, name2idx, n, W, out, nout);
+    BSet *can = bm_canonical_any(mc, n);
     int skip_dup_root_edge = (is_root && nchildren == 2 && seen == 1);
     if (can && !skip_dup_root_edge) {
       out[*nout].mask = can;
@@ -286,10 +239,10 @@ static BitMask *dfs_splits_blen(TreeNode *u, TreeNode *parent, int is_root,
       (*nout)++;
     }
     else if (can) {
-      bm_free(can);
+      bs_free(can);
     }
     for (int i = 0; i < W; i++) mask_u->w[i] |= mc->w[i];
-    bm_free(mc);
+    bs_free(mc);
     seen++;
   }
   return mask_u;
@@ -373,21 +326,21 @@ void tr_tree_entropy(List *trees, double *H_split, double *H_top,
     TreeNode *t = lst_get_ptr(trees, s);
     SplitBLen *sbl = smalloc(max_edges * sizeof(SplitBLen));
     int nbl = 0;
-    BitMask *root = dfs_splits_blen(t, NULL, TRUE, name2idx, n, W, sbl, &nbl);
-    bm_free(root);
+    BSet *root = dfs_splits_blen(t, NULL, TRUE, name2idx, n, W, sbl, &nbl);
+    bs_free(root);
     qsort(sbl, nbl, sizeof(SplitBLen), sbl_cmp);
     tsd[s].sbl = sbl;
     tsd[s].m   = nbl;
     /* gather non-trivial splits for H_split */
     for (int k = 0; k < nbl; k++) {
-      int sz = bm_popcount(sbl[k].mask);
+      int sz = bs_popcount(sbl[k].mask);
       if (sz >= 2 && (n - sz) >= 2)
-        mv_push(&nontrivial, bm_clone(sbl[k].mask));
+        mv_push(&nontrivial, bs_clone(sbl[k].mask));
     }
   }
 
   /* ---- H_split ---- */
-  qsort(nontrivial.a, nontrivial.size, sizeof(BitMask*), bm_cmp_words);
+  qsort(nontrivial.a, nontrivial.size, sizeof(BSet*), bm_cmp_words);
   {
     int i = 0;
     while (i < nontrivial.size) {
@@ -452,7 +405,7 @@ void tr_tree_entropy(List *trees, double *H_split, double *H_top,
 
   /* ---- cleanup ---- */
   for (int s = 0; s < S; s++) {
-    for (int k = 0; k < tsd[s].m; k++) bm_free(tsd[s].sbl[k].mask);
+    for (int k = 0; k < tsd[s].m; k++) bs_free(tsd[s].sbl[k].mask);
     sfree(tsd[s].sbl);
   }
   sfree(tsd);
@@ -504,21 +457,21 @@ SplitCount *tr_collect_split_counts(List *trees, int *nsc_out, int *nleaves_out)
     int nbl = 0;
 
     /* compute splits for this tree */
-    BitMask *root = dfs_splits_blen(t, NULL, TRUE, name2idx, n, W, sbl, &nbl);
-    bm_free(root);
+    BSet *root = dfs_splits_blen(t, NULL, TRUE, name2idx, n, W, sbl, &nbl);
+    bs_free(root);
 
     /* remove trivial splits with less than 2 leaves on either side */
     for (int k = 0; k < nbl; k++) {
-      int sz = bm_popcount(sbl[k].mask);
+      int sz = bs_popcount(sbl[k].mask);
       if (sz >= 2 && (n - sz) >= 2)
-        mv_push(&all, bm_clone(sbl[k].mask));
-      bm_free(sbl[k].mask);
+        mv_push(&all, bs_clone(sbl[k].mask));
+      bs_free(sbl[k].mask);
     }
     sfree(sbl);
   }
 
   /* sort so that identical splits are adjacent */
-  qsort(all.a, all.size, sizeof(BitMask*), bm_cmp_words);
+  qsort(all.a, all.size, sizeof(BSet*), bm_cmp_words);
 
   /* collapse into unique splits and count occurrences */
   SplitCount *out = smalloc((all.size > 0 ? all.size : 1) * sizeof(SplitCount));
@@ -526,7 +479,7 @@ SplitCount *tr_collect_split_counts(List *trees, int *nsc_out, int *nleaves_out)
   while (i < all.size) {
     int j = i + 1;
     while (j < all.size && bm_cmp_words(&all.a[i], &all.a[j]) == 0) j++;
-    out[nsc].mask = bm_clone(all.a[i]);
+    out[nsc].mask = bs_clone(all.a[i]);
     out[nsc].count = j - i;
     nsc++;
     i = j;
@@ -539,4 +492,3 @@ SplitCount *tr_collect_split_counts(List *trees, int *nsc_out, int *nleaves_out)
   *nsc_out = nsc;
   return out;
 }
-

@@ -54,7 +54,7 @@ void tr_split_kl(List *trees_est, List *trees_ref, double *mean_kl) {
     int cmp;
     if (i >= nsc_e) cmp = 1;
     else if (j >= nsc_r) cmp = -1;
-    else cmp = tr_bitmask_cmp(sce[i].mask, scr[j].mask);
+    else cmp = bs_compare(sce[i].mask, scr[j].mask);
 
     /* if the split exists in only one sample then the other becomes zero*/
     int c_e = (cmp <= 0) ? sce[i].count : 0;
@@ -77,8 +77,8 @@ void tr_split_kl(List *trees_est, List *trees_ref, double *mean_kl) {
   /* compute the mean KL divergence per split */
   *mean_kl = (nsplits > 0) ? sum_kl / nsplits : 0.0;
 
-  for (int k = 0; k < nsc_e; k++) tr_bitmask_free(sce[k].mask);
-  for (int k = 0; k < nsc_r; k++) tr_bitmask_free(scr[k].mask);
+  for (int k = 0; k < nsc_e; k++) bs_free(sce[k].mask);
+  for (int k = 0; k < nsc_r; k++) bs_free(scr[k].mask);
   sfree(sce); sfree(scr);
 }
 
