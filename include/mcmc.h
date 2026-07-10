@@ -23,7 +23,7 @@
 #define TARGET_ACCEPT_RATE 0.3
 #define MIN_S 0.001
 
-List *nj_var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
+List *var_sample_mcmc(int nsamples, int thin, multi_MVN *mmvn,
                          CovarData *data, TreeModel *mod, FILE *logf,
                          unsigned int silent);
 

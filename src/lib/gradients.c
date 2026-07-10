@@ -36,15 +36,15 @@ static double check_flow_pipeline_L(Vector *x_local, TreeModel *mod,
                                     CovarData *data) {
   Vector *y = vec_new(x_local->size);
   double logdet = 0;
-  nj_apply_normalizing_flows(y, x_local, data, &logdet);
-  nj_points_to_distances(y, data);
-  TreeNode *tree = nj_inf(data->dist, data->names, NULL, NULL, data);
-  nj_reset_tree_model(mod, tree);
+  apply_normalizing_flows(y, x_local, data, &logdet);
+  points_to_distances(y, data);
+  TreeNode *tree = infer_distance_tree(data->dist, data->names, NULL, NULL, data);
+  reset_tree_model(mod, tree);
   double ll;
   if (data->crispr_mod != NULL)
     ll = cpr_compute_log_likelihood(data->crispr_mod, NULL);
   else
-    ll = nj_compute_log_likelihood(mod, data, NULL);
+    ll = compute_log_likelihood(mod, data, NULL);
   if (data->migtable != NULL &&
       !(data->crispr_mod != NULL && data->crispr_mod->mig_warmup))
     ll += mig_compute_log_likelihood(mod, data->migtable, data->crispr_mod,
@@ -59,7 +59,7 @@ static double check_flow_pipeline_L(Vector *x_local, TreeModel *mod,
    of current model, which is computed as a by-product.  Set
    points_std == NULL to avoid setting variance gradients (makes sense
    with Taylor approx) */
-double nj_compute_model_grad(TreeModel *mod, multi_MVN *mmvn, Vector *points,
+double compute_model_grad(TreeModel *mod, multi_MVN *mmvn, Vector *points,
                              Vector *points_std, Vector *grad, CovarData *data,
                              double *nf_logdet,
                              double *migll, double *lprior) {
@@ -71,15 +71,15 @@ double nj_compute_model_grad(TreeModel *mod, multi_MVN *mmvn, Vector *points,
   Vector *dL_dx = vec_new(dim);
 
   if (grad->size != dim + data->params->size)
-    die("ERROR in nj_compute_model_grad: bad gradient dimension.\n");
+    die("ERROR in compute_model_grad: bad gradient dimension.\n");
   
   if (data->type == DIST && data->Lapl_pinv_evals == NULL)
-    die("ERROR in nj_compute_model_grad: Laplacian pseudoinverse and eigendecomposition required in DIST case.\n");
+    die("ERROR in compute_model_grad: Laplacian pseudoinverse and eigendecomposition required in DIST case.\n");
   else if (data->type == LOWR && data->R == NULL)
-    die("ERROR in nj_compute_model_grad: low-rank matrix R required in LOWR case.\n");
+    die("ERROR in compute_model_grad: low-rank matrix R required in LOWR case.\n");
   
   /* obtain gradient with respect to points, dL/dx */
-  ll_base = nj_dL_dx_smartest(points, dL_dx, mod, data, nf_logdet, migll,
+  ll_base = dL_dx_smartest(points, dL_dx, mod, data, nf_logdet, migll,
                               lprior);
 
   if (!isfinite(ll_base)) /* can happen with crispr model; force calling code to deal with it */
@@ -111,7 +111,7 @@ double nj_compute_model_grad(TreeModel *mod, multi_MVN *mmvn, Vector *points,
           /* in the DIAG case, the partial derivative wrt the
              corresponding variance parameter can be computed directly
              based on a single point and coordinate */
-          vec_set(grad, (i+n)*d + k, 0.5 * vec_get(dL_dx, pidx) * (porig - mmvn_get_mu_el(mmvn, pidx))); 
+          vec_set(grad, (i+n)*d + k, 0.5 * vec_get(dL_dx, pidx) * (porig - mmvn_get_mu_el(mmvn, pidx)));
       }
     }
   }
@@ -144,11 +144,11 @@ double nj_compute_model_grad(TreeModel *mod, multi_MVN *mmvn, Vector *points,
   return ll_base;
 }  
 
-/* version of nj_compute_model_grad that calculates all derivatives
+/* version of compute_model_grad that calculates all derivatives
    numerically, to check correctness of analytical calculations.  The
    check knows nothing about the details of the parameterization; it
    just uses a brute force numerical calculation */
-double nj_compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn, 
+double compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn,
                                    Vector *points, Vector *points_std,
                                    Vector *grad, CovarData *data) {
   int n = data->msa->nseqs; /* number of taxa */
@@ -163,14 +163,14 @@ double nj_compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn,
   Matrix *D = data->dist;
   
   if (grad->size != dim + data->params->size)
-    die("ERROR in nj_compute_model_grad_check: bad gradient dimension.\n");
+    die("ERROR in compute_model_grad_check: bad gradient dimension.\n");
   
   /* set up tree model and get baseline log likelihood */
-  nj_points_to_distances(points, data);    
-  tree = nj_inf(D, data->names, NULL, NULL, data);
+  points_to_distances(points, data);
+  tree = infer_distance_tree(D, data->names, NULL, NULL, data);
   orig_tree = tr_create_copy(tree);   /* restore at the end */
-  nj_reset_tree_model(mod, tree);
-  ll_base = nj_compute_log_likelihood(mod, data, NULL);
+  reset_tree_model(mod, tree);
+  ll_base = compute_log_likelihood(mod, data, NULL);
 
   if (!isfinite(ll_base)) /* can happen with crispr model; force
                              calling code to deal with it */
@@ -185,10 +185,10 @@ double nj_compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn,
     porig = vec_get(points, i);
     vec_set(points, i, porig + DERIV_EPS);
 
-    nj_points_to_distances(points, data); 
-    tree = nj_inf(D, data->names, NULL, NULL, data);
-    nj_reset_tree_model(mod, tree);      
-    ll = nj_compute_log_likelihood(mod, data, NULL);
+    points_to_distances(points, data);
+    tree = infer_distance_tree(D, data->names, NULL, NULL, data);
+    reset_tree_model(mod, tree);
+    ll = compute_log_likelihood(mod, data, NULL);
 
     if (!isfinite(ll)) /* can happen with crispr model; force
                           calling code to deal with it */
@@ -216,7 +216,7 @@ double nj_compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn,
   for (i = 0; i < sigmapar->size; i++) {
     double dL_dp = 0, origp = vec_get(sigmapar, i);    
     vec_set(sigmapar, i, origp + DERIV_EPS);
-    nj_update_covariance(mmvn, data);
+    update_covariance(mmvn, data);
     vec_copy(points_tweak, points_std);
     mmvn_map_std(mmvn, points_tweak);
     vec_minus_eq(points_tweak, points);
@@ -232,9 +232,9 @@ double nj_compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn,
     vec_set(sigmapar, i, origp); /* restore orig */
   }
   
-  nj_update_covariance(mmvn, data); /* make sure to leave it in original state */
+  update_covariance(mmvn, data); /* make sure to leave it in original state */
 
-  nj_reset_tree_model(mod, orig_tree);
+  reset_tree_model(mod, orig_tree);
   vec_free(points_tweak);
   vec_free(dL_dx);
   return ll_base;
@@ -242,7 +242,7 @@ double nj_compute_model_grad_check(TreeModel *mod, multi_MVN *mmvn,
 
 /* rescale gradients by approximate inverse Fisher information for approx
    natural gradient scale */
-void nj_rescale_grad(Vector *grad, Vector *rsgrad, multi_MVN *mmvn, CovarData *data) {
+void rescale_grad(Vector *grad, Vector *rsgrad, multi_MVN *mmvn, CovarData *data) {
   int i, j, fulld = mmvn->n * mmvn->d;
   for (i = 0; i < grad->size; i++) {
     double g = vec_get(grad, i);
@@ -299,7 +299,7 @@ void nj_rescale_grad(Vector *grad, Vector *rsgrad, multi_MVN *mmvn, CovarData *d
 }
 
 /* Compute penalty for variance and its gradient  */
-void nj_compute_variance_penalty(Vector *grad, multi_MVN *mmvn,
+void compute_variance_penalty(Vector *grad, multi_MVN *mmvn,
                                CovarData *data) {  
   int i, j, n = mmvn->n, d = mmvn->d;
   int start_idx = n*d;  /* starting index for variance parameters */
@@ -373,7 +373,7 @@ void nj_compute_variance_penalty(Vector *grad, multi_MVN *mmvn,
 /* compute the gradient of the log likelihood with respect to the
    individual points by a very simple, fully numerical method.
    Returns log likelihood of model as by product. */
-double nj_dL_dx_dumb(Vector *x, Vector *dL_dx, TreeModel *mod, 
+double dL_dx_dumb(Vector *x, Vector *dL_dx, TreeModel *mod,
                      CovarData *data) {
   double ll, ll_base, xorig, deriv;
   int i, k;
@@ -385,11 +385,11 @@ double nj_dL_dx_dumb(Vector *x, Vector *dL_dx, TreeModel *mod,
   /* this version not set up for crispr data */
          
   /* set up tree model and get baseline log likelihood */
-  nj_points_to_distances(x, data);    
-  tree = nj_inf(data->dist, data->msa->names, NULL, NULL, data);
+  points_to_distances(x, data);
+  tree = infer_distance_tree(data->dist, data->msa->names, NULL, NULL, data);
   orig_tree = tr_create_copy(tree);   /* restore at the end */
-  nj_reset_tree_model(mod, tree);
-  ll_base = nj_compute_log_likelihood(mod, data, NULL);
+  reset_tree_model(mod, tree);
+  ll_base = compute_log_likelihood(mod, data, NULL);
 
   /* Now perturb each point and propagate perturbation through distance
      calculation, neighbor-joining reconstruction, and likelihood
@@ -401,10 +401,10 @@ double nj_dL_dx_dumb(Vector *x, Vector *dL_dx, TreeModel *mod,
       xorig = vec_get(x, idx);
       vec_set(x, idx, xorig + DERIV_EPS);
 
-      nj_points_to_distances(x, data); 
-      tree = nj_inf(data->dist, data->msa->names, NULL, NULL, data);
-      nj_reset_tree_model(mod, tree);      
-      ll = nj_compute_log_likelihood(mod, data, NULL);
+      points_to_distances(x, data);
+      tree = infer_distance_tree(data->dist, data->msa->names, NULL, NULL, data);
+      reset_tree_model(mod, tree);
+      ll = compute_log_likelihood(mod, data, NULL);
       
       deriv = (ll - ll_base) / DERIV_EPS; 
 
@@ -412,14 +412,14 @@ double nj_dL_dx_dumb(Vector *x, Vector *dL_dx, TreeModel *mod,
       vec_set(x, idx, xorig); /* restore orig */
     }
   }
-  nj_reset_tree_model(mod, orig_tree);
+  reset_tree_model(mod, orig_tree);
   return ll_base;
 }
 
 /* compute the gradient of the log likelihood with respect to the
    individual branch lengths.  This version uses numerical methods
    (mostly useful for testing analytical version) */
-double nj_dL_dt_num(Vector *dL_dt, TreeModel *mod, CovarData *data) {
+double dL_dt_num(Vector *dL_dt, TreeModel *mod, CovarData *data) {
   int nodeidx;
   double ll, ll_base;
   List *traversal;
@@ -427,7 +427,7 @@ double nj_dL_dt_num(Vector *dL_dt, TreeModel *mod, CovarData *data) {
   if (data->crispr_mod != NULL)
     ll_base = cpr_compute_log_likelihood(data->crispr_mod, NULL);
   else
-    ll_base = nj_compute_log_likelihood(mod, data, NULL);
+    ll_base = compute_log_likelihood(mod, data, NULL);
 
   /* perturb each branch and recompute likelihood */
   traversal = mod->tree->nodes;
@@ -446,7 +446,7 @@ double nj_dL_dt_num(Vector *dL_dt, TreeModel *mod, CovarData *data) {
     if (data->crispr_mod != NULL)
       ll = cpr_compute_log_likelihood(data->crispr_mod, NULL);
     else
-      ll = nj_compute_log_likelihood(mod, data, NULL);
+      ll = compute_log_likelihood(mod, data, NULL);
 
     if (!isfinite(ll)) /* can happen with crispr; force calling
                           code to deal with it */
@@ -461,7 +461,7 @@ double nj_dL_dt_num(Vector *dL_dt, TreeModel *mod, CovarData *data) {
 /* compute the Jacobian matrix for 2n-3 branch lengths wrt n-choose-2
    pairwise distances.  This version uses numerical methods and is
    intended for validation of the analytical version */
-void nj_dt_dD_num(Matrix *dt_dD, Matrix *D, TreeModel *mod, CovarData *data) {
+void dt_dD_num(Matrix *dt_dD, Matrix *D, TreeModel *mod, CovarData *data) {
   TreeNode *tree, *orign, *node;
   int i, j, n = data->nseqs, nodeidx;
   List *trav_tree, *trav_orig;
@@ -473,7 +473,7 @@ void nj_dt_dD_num(Matrix *dt_dD, Matrix *D, TreeModel *mod, CovarData *data) {
     for (j = i+1; j < n; j++) {
       double orig_d = mat_get(D, i, j);
       mat_set(D, i, j, orig_d + DERIV_EPS);
-      tree = nj_inf(D, data->names, NULL, NULL, data);
+      tree = infer_distance_tree(D, data->names, NULL, NULL, data);
 
       /* compare the trees, branch by branch */
       /* we will assume the same topology although that will
@@ -503,7 +503,7 @@ void nj_dt_dD_num(Matrix *dt_dD, Matrix *D, TreeModel *mod, CovarData *data) {
    individual points by the chain rule and using analytical methods
    for each component.  Fastest but most complicated and error-prone
    version. */
-double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
+double dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
                          CovarData *data, double *nf_logdet, double *migll,
                          double *lprior) {
   int n = data->nseqs, nbranches = 2*n-2,  /* have to work with the rooted tree here */
@@ -528,12 +528,12 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   if (lprior != NULL) *lprior = 0.0;
   
   /* convert x to y using normalizing flows if available */
-  nj_apply_normalizing_flows(y, x, data, nf_logdet);
+  apply_normalizing_flows(y, x, data, nf_logdet);
   
    /* set up baseline objects */
-  nj_points_to_distances(y, data);
-  tree = nj_inf(data->dist, data->names, NULL, nb, data);
-  nj_reset_tree_model(mod, tree);
+  points_to_distances(y, data);
+  tree = infer_distance_tree(data->dist, data->names, NULL, nb, data);
+  reset_tree_model(mod, tree);
 
   /* M2 latent relaxed clock: rescale dparent to bl_eff = rate*tau before the
      Felsenstein likelihood (restored, and dL_dt converted back to the time
@@ -550,7 +550,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   if (data->crispr_mod != NULL)
     ll_base = cpr_compute_log_likelihood(data->crispr_mod, dL_dt);
   else
-    ll_base = nj_compute_log_likelihood(mod, data, dL_dt);
+    ll_base = compute_log_likelihood(mod, data, dL_dt);
 
   if (!isfinite(ll_base)) {
     /* can happen with crispr (degenerate trees); release any
@@ -652,7 +652,7 @@ double nj_dL_dx_smartest(Vector *x, Vector *dL_dx, TreeModel *mod,
   /* fold tree-prior gradient (per branch) into dL_dt so it flows
      through the same Jacobian chain as the LL gradient.  The prior
      also writes to its own nuisance grads (nodetimes_grad,
-     relclock_sig_grad), which are read out via nj_update_nuis_grad. */
+     relclock_sig_grad), which are read out via update_nuis_grad. */
   if (data->treeprior != NULL) {
     double lp = tp_compute_log_prior(mod, data, priorbranchgrad);
     vec_plus_eq(dL_dt, priorbranchgrad);
@@ -1115,7 +1115,7 @@ void nj_dL_dD_from_neighbors(const Neighbors *nb, Vector *dL_dt,
    populate the provided vector dr_dalpha.  Calculation is done by
    finite differences using DiscreteGamma function from PHAST
    (inherited from PAML).  */
-void nj_dr_dalpha_gamma(Vector *dr_dalpha, const TreeModel *mod) {
+void dr_dalpha_gamma(Vector *dr_dalpha, const TreeModel *mod) {
   int ncats = mod->nratecats;
   const double alpha_floor = 1.0e-6;   /* choose your floor */
 

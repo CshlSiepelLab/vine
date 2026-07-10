@@ -35,7 +35,7 @@
    Adam algorithm.  Takes initial tree model and alignment and
    distance matrix, dimensionality of Euclidean space to work in.
    Note: alters distance matrix */
-void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
+void variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
                         double learnrate, int nbatches_conv, int min_nbatches,
                         CovarData *data, FILE *logf,
                         unsigned int silent, unsigned int log_all) {
@@ -55,12 +55,12 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
   /* for nuisance parameters; these are parameters that are optimized
      by stochastic gradient descent but are not fully sampled via the
      variational distribution */
-  int n_nuisance_params = nj_get_num_nuisance_params(mod, data);
+  int n_nuisance_params = get_num_nuisance_params(mod, data);
   Vector *ave_nuis_grad = NULL, *m_nuis = NULL, *v_nuis = NULL,
     *m_nuis_prev = NULL, *v_nuis_prev = NULL, *best_nuis_params = NULL,
     *center = NULL;
   if (mmvn->d * mmvn->n != dim * n)
-    die("ERROR in nj_variational_inf: bad dimensions\n");
+    die("ERROR in variational_inf: bad dimensions\n");
 
   graddim = fulld + data->params->size;
   kldgrad = vec_new(graddim);
@@ -115,7 +115,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
         fprintf(logf, "sigma.%d\t", j);
     }
     for (j = 0; j < n_nuisance_params; j++)
-      fprintf(logf, "%s\t", nj_get_nuisance_param_name(mod, data, j));
+      fprintf(logf, "%s\t", get_nuisance_param_name(mod, data, j));
     fprintf(logf, "\n");
   }
 
@@ -189,7 +189,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
       }
     
       if (data->type == LOWR) 
-        nj_set_kld_grad_LOWR(kldgrad, mmvn);
+        set_kld_grad_LOWR(kldgrad, mmvn);
     }
     else { /* with explicit tree prior, we need the entropy of the MVN instead */
       kld = -0.5 * (fulld * (1.0 + log(2 * M_PI)) + logdet);
@@ -211,12 +211,12 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
         vec_set(kldgrad, j, gj);
       }
       if (data->type == LOWR) 
-        nj_set_entropy_grad_LOWR(kldgrad, mmvn);
+        set_entropy_grad_LOWR(kldgrad, mmvn);
     }
 
     /* can also pre-compute variance penalty */
     vec_zero(sparsitygrad);
-    nj_compute_variance_penalty(sparsitygrad, mmvn, data);
+    compute_variance_penalty(sparsitygrad, mmvn, data);
     penalty = data->var_pen;
 
     vec_scale(kldgrad, data->kld_upweight/(data->pointscale*data->pointscale));
@@ -267,9 +267,9 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
     }
 
     if (data->taylor != NULL) {
-      avell = nj_elbo_hybrid(mod, mmvn, data, nminibatch, avegrad,
+      avell = elbo_hybrid(mod, mmvn, data, nminibatch, avegrad,
                              ave_nuis_grad, &ave_lprior, &avemigll, &ll_at_mean);
-      /* avell = nj_elbo_taylor(mod, mmvn, data, avegrad, ave_nuis_grad, */
+      /* avell = elbo_taylor(mod, mmvn, data, avegrad, ave_nuis_grad, */
       /*                        &ave_lprior, &avemigll, &ll_at_mean); */
       if ((data->crispr_mod != NULL && data->crispr_mod->zero_likl == TRUE) ||
           !isfinite(avell)) {
@@ -283,7 +283,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
     
     if (data->taylor == NULL) {
       ll_at_mean = 0;  /* not available in MC path */
-      avell = nj_elbo_montecarlo(mod, mmvn, data, nminibatch, avegrad,
+      avell = elbo_montecarlo(mod, mmvn, data, nminibatch, avegrad,
                                  ave_nuis_grad, &ave_lprior, &avemigll);
     }
     
@@ -327,13 +327,13 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
       mmvn_save_mu(mmvn, best_mu);
       vec_copy(best_sigmapar, sigmapar);
       if (n_nuisance_params > 0)
-        nj_save_nuis_params(best_nuis_params, mod, data);
+        save_nuis_params(best_nuis_params, mod, data);
     }
 
     /* rescale gradient by approximate inverse Fisher information to
        put on similar scales; seems to help with optimization */
     if (data->natural_grad == TRUE)
-      nj_rescale_grad(avegrad, rescaledgrad, mmvn, data);
+      rescale_grad(avegrad, rescaledgrad, mmvn, data);
     else
       vec_copy(rescaledgrad, avegrad);
     /* we won't do this with nuisance params */
@@ -367,7 +367,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
                 vec_get(sigmapar, j - fulld) +
                     sd->lr * mhatj / (sqrt(vhatj) + ADAM_EPS));
     }
-    nj_update_covariance(mmvn, data);
+    update_covariance(mmvn, data);
     
     vec_copy(m_prev, m);
     vec_copy(v_prev, v);
@@ -379,7 +379,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
       vec_set(v_nuis, j, ADAM_BETA2 * vec_get(v_nuis_prev, j) + (1.0 - ADAM_BETA2) * pow(g,2));
       mhatj_nuis = vec_get(m_nuis, j) / (1.0 - pow(ADAM_BETA1, t));
       vhatj_nuis = vec_get(v_nuis, j) / (1.0 - pow(ADAM_BETA2, t));
-      nj_nuis_param_pluseq(mod, data, j, sd->lr * 0.3 * mhatj_nuis / (sqrt(vhatj_nuis) + ADAM_EPS));
+      nuis_param_pluseq(mod, data, j, sd->lr * 0.3 * mhatj_nuis / (sqrt(vhatj_nuis) + ADAM_EPS));
       /* factor of 0.3 above to slow learning of nuisance params */
     }
     if (n_nuisance_params > 0) {
@@ -418,7 +418,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
           fprintf(logf, "%f\t", vec_get(sigmapar, j));
       }
       for (j = 0; j < n_nuisance_params; j++)
-        fprintf(logf, "%f\t", nj_nuis_param_get(mod, data, j));
+        fprintf(logf, "%f\t", nuis_param_get(mod, data, j));
 
       fprintf(logf, "\n");
     }
@@ -440,9 +440,9 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
 
   mmvn_set_mu(mmvn, best_mu);
   vec_copy(sigmapar, best_sigmapar);
-  nj_update_covariance(mmvn, data);
+  update_covariance(mmvn, data);
   if (n_nuisance_params > 0)
-    nj_update_nuis_params(best_nuis_params, mod, data);
+    update_nuis_params(best_nuis_params, mod, data);
 
   /* if using Taylor approximation, run one final MC pass at the restored
      best parameters to get an unbiased estimate of E[lnL] for reporting.
@@ -451,7 +451,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
   double final_mc_ll = 0;
   if (data->taylor != NULL && logf != NULL) {
     double dummy_lprior = 0, dummy_migll = 0;
-    final_mc_ll = nj_elbo_montecarlo(mod, mmvn, data, nminibatch, avegrad,
+    final_mc_ll = elbo_montecarlo(mod, mmvn, data, nminibatch, avegrad,
                                      ave_nuis_grad, &dummy_lprior, &dummy_migll);
   }
 
@@ -469,8 +469,8 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
     if (data->migtable != NULL)
       fprintf(logf, ", MIGLL: %.2f", bestmigll);
     for (j = 0; j < n_nuisance_params; j++) /* print these also if available */
-      fprintf(logf, ", %s: %.4f", nj_get_nuisance_param_name(mod, data, j),
-        nj_nuis_param_get(mod, data, j));
+      fprintf(logf, ", %s: %.4f", get_nuisance_param_name(mod, data, j),
+        nuis_param_get(mod, data, j));
     fprintf(logf, "\n");
   }
 
@@ -492,7 +492,7 @@ void nj_variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
    over a minibatch of size nminibatch.  Returns the expected log
    likelihood.  The last four parameters are updated (avegrad,
    ave_nuis_grad, ave_lprior, and avemigll) */ 
-double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
+double elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
                           int nminibatch, Vector *avegrad, Vector *ave_nuis_grad,
                           double *ave_lprior, double *avemigll) {
   Vector *grad = vec_new(avegrad->size), *nuis_grad = NULL, *points, *points_std;
@@ -519,12 +519,12 @@ double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
     lprior = 0;
     vec_zero(grad);
 
-    nj_sample_points(mmvn, points, points_std);
-    /* Prior contribution to grad is routed inside nj_compute_model_grad
+    sample_points(mmvn, points, points_std);
+    /* Prior contribution to grad is routed inside compute_model_grad
        via dL_dt -> Jacobian -> dL_dx; the prior's nuisance grads
        (relclock_sig_grad, nodetimes_grad) are then picked up below by
-       nj_update_nuis_grad. */
-    ll = nj_compute_model_grad(mod, mmvn, points, points_std, grad, data,
+       update_nuis_grad. */
+    ll = compute_model_grad(mod, mmvn, points, points_std, grad, data,
                                NULL, &migll, &lprior);
     assert(isfinite(ll));
 
@@ -535,7 +535,7 @@ double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
 
     if (ave_nuis_grad != NULL) {
       vec_zero(nuis_grad);
-      nj_update_nuis_grad(mod, data, nuis_grad);
+      update_nuis_grad(mod, data, nuis_grad);
       vec_plus_eq(ave_nuis_grad, nuis_grad);
     }
   }
@@ -566,7 +566,7 @@ double nj_elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
 /* sample a list of trees from the approximate posterior distribution
    and return as a new list.  If logdens is non-null, return
    corresponding vector of log densities for the samples */
-List *nj_var_sample(int nsamples, multi_MVN *mmvn, CovarData *data, char** names,
+List *var_sample(int nsamples, multi_MVN *mmvn, CovarData *data, char** names,
                     Vector *logdens) {
   List *retval = lst_new_ptr(nsamples);
   int i;
@@ -574,14 +574,14 @@ List *nj_var_sample(int nsamples, multi_MVN *mmvn, CovarData *data, char** names
   Vector *points_x = vec_new(mmvn->d * mmvn->n), *points_y = vec_new(mmvn->d * mmvn->n);
   
   for (i = 0; i < nsamples; i++) {
-    nj_sample_points(mmvn, points_x, NULL);
+    sample_points(mmvn, points_x, NULL);
     
     if (logdens != NULL) 
       vec_set(logdens, i, mmvn_log_dens(mmvn, points_x));
      
-    nj_apply_normalizing_flows(points_y, points_x, data, NULL);
-    nj_points_to_distances(points_y, data);
-    tree = nj_inf(data->dist, names, NULL, NULL, data);
+    apply_normalizing_flows(points_y, points_x, data, NULL);
+    points_to_distances(points_y, data);
+    tree = infer_distance_tree(data->dist, names, NULL, NULL, data);
     lst_push_ptr(retval, tree);
   }
   
@@ -591,14 +591,14 @@ List *nj_var_sample(int nsamples, multi_MVN *mmvn, CovarData *data, char** names
 }
 
 /* return a single tree representing the approximate posterior mean */
-TreeNode *nj_mean(Vector *mu, char **names, CovarData *data) {
+TreeNode *mean_tree(Vector *mu, char **names, CovarData *data) {
   TreeNode *tree;
   
   if (data->nseqs * data->dim != mu->size)
-    die("ERROR in nj_mean: bad dimensions\n");
+    die("ERROR in mean_tree: bad dimensions\n");
 
-  nj_points_to_distances(mu, data);  
-  tree = nj_inf(data->dist, names, NULL, NULL, data);
+  points_to_distances(mu, data);
+  tree = infer_distance_tree(data->dist, names, NULL, NULL, data);
   
   return(tree);
 }
@@ -608,7 +608,7 @@ TreeNode *nj_mean(Vector *mu, char **names, CovarData *data) {
    non-NULL, it will be used to store the baseline standard normal
    variate for use in downstream calculations in variational
    inference. Antithetic sampling is only used in this case */
-void nj_sample_points(multi_MVN *mmvn, Vector *points, Vector *points_std) {
+void sample_points(multi_MVN *mmvn, Vector *points, Vector *points_std) {
   static int i = 0;
   static Vector *cachedpoints = NULL, *cachedstd = NULL;  
       
@@ -644,7 +644,7 @@ void nj_sample_points(multi_MVN *mmvn, Vector *points, Vector *points_std) {
 /* given points_x, apply normalizing flows to compute points_y as y =
    f(x).  Optionally populates *logdet with total log determinate of
    Jacobian (if non-NULL) */
-void nj_apply_normalizing_flows(Vector *points_y, Vector *points_x,
+void apply_normalizing_flows(Vector *points_y, Vector *points_x,
                                 CovarData *data, double *logdet) {
   double ldet = 0;
   assert(points_x->size == points_y->size);
@@ -675,7 +675,7 @@ void nj_apply_normalizing_flows(Vector *points_y, Vector *points_x,
 
 /* compute partial derivatives of KLD wrt variance parameters in LOWR
    case */
-void nj_set_kld_grad_LOWR(Vector *kldgrad, multi_MVN *mmvn) {
+void set_kld_grad_LOWR(Vector *kldgrad, multi_MVN *mmvn) {
   int i, j;
   int offset = mmvn->d * mmvn->n;
   Matrix *Rgrad = mat_new(mmvn->mvn->lowR->nrows, mmvn->mvn->lowR->ncols);
@@ -696,7 +696,7 @@ void nj_set_kld_grad_LOWR(Vector *kldgrad, multi_MVN *mmvn) {
 
 /* compute partial derivatives of entropy H[q(x)] wrt LOWR variance
    parameters: Sigma_0 = I + R R^T, Sigma = I_d ⊗ Sigma_0. */
-void nj_set_entropy_grad_LOWR(Vector *entgrad, multi_MVN *mmvn) {
+void set_entropy_grad_LOWR(Vector *entgrad, multi_MVN *mmvn) {
   int i, j;
   int offset = mmvn->d * mmvn->n;
   Matrix *Rgrad = mat_new(mmvn->mvn->lowR->nrows, mmvn->mvn->lowR->ncols);

@@ -394,7 +394,7 @@ static inline double cpr_get_silent_grad(const CprGradParams *gp, int i, int j,
 
 /* Compute and return the log likelihood of a tree model with respect
    to a CRISPR mutation table.  This function is derived from
-   nj_compute_log_likelihood but is customized for the irreversible
+   compute_log_likelihood but is customized for the irreversible
    CRISPR mutation model of Seidel and Stadler (Proc. R. Soc. B
    289:20221844, 2022). If branchgrad is non-null, it will be
    populated with the gradient of the log likelihood with respect to

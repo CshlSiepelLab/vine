@@ -90,9 +90,9 @@ static Vector *embed_tree_pairwise_dists(TreeNode *tree, char **names, int n, in
   /* MDS to get the Eublidean embedding from the pairwise distances */
   CovarData *data = new_covar_data(CONST, D, dim, NULL, NULL, names,
                                     FALSE, 1.0, 3, 1.0, FALSE, 1.0, FALSE,
-                                    FALSE, FALSE, 1, NULL, NULL, FALSE);
+                                    FALSE, FALSE, NULL, NULL, FALSE);
   multi_MVN *mmvn = mmvn_new(n, dim, MVN_DIAG);
-  estimate_mmvn_from_distances(data, mmvn, 0);
+  estimate_mmvn_from_distances(data, mmvn);
 
   /* Get pairwise distances from the embedding coordinates */
   Vector *mu = mmvn->mvn->mu;

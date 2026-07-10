@@ -41,7 +41,7 @@
 
 /* fully reset a tree model for use in likelihood calculations with a
    new tree */
-void nj_reset_tree_model(TreeModel *mod, TreeNode *newtree) {
+void reset_tree_model(TreeModel *mod, TreeNode *newtree) {
   if (mod->tree != NULL)
     tr_free(mod->tree);
 
@@ -64,7 +64,7 @@ void nj_reset_tree_model(TreeModel *mod, TreeNode *newtree) {
    setup, postprocessing, and multithreading (see below).  The 'range'
    parameter can be used to specify a subset of tuple indices in a
    multithreading setting (set NULL to ignore). */
-double nj_ll_core(TreeModel *mod, CovarData *data, NJDerivs *derivs,
+double ll_core(TreeModel *mod, CovarData *data, NJDerivs *derivs,
                 NJGradCache *gcache, List *range) {
 
   int i, j, k, nodeidx, rcat, tupleidx;
@@ -121,13 +121,13 @@ double nj_ll_core(TreeModel *mod, CovarData *data, NJDerivs *derivs,
   Vector *dr_dalpha = NULL;
   if (derivs != NULL && data->dgamma_cats > 1) {
     dr_dalpha = vec_new(mod->nratecats);
-    nj_dr_dalpha_gamma(dr_dalpha, mod);
+    dr_dalpha_gamma(dr_dalpha, mod);
   }
 
   /* set up active range of tuples for this thread */
   int t0 = 0, t1 = msa->ss->ntuples;
   if (range != NULL) {
-    if (lst_size(range) != 2) die("nj_ll_core: range must have size 2");
+    if (lst_size(range) != 2) die("ll_core: range must have size 2");
     t0 = lst_get_int(range, 0);
     t1 = lst_get_int(range, 1);
     if (t0 < 0) t0 = 0;
@@ -448,13 +448,13 @@ double nj_ll_core(TreeModel *mod, CovarData *data, NJDerivs *derivs,
 
 /* Build index of leaf ids to sequence indices based on a name
    list. */
-int *nj_build_seq_idx(List *leaves, char **names) {
+int *build_seq_idx(List *leaves, char **names) {
   int i;  
   int *retval = smalloc(lst_size(leaves)*2 * sizeof(int));
   for (i = 0; i < lst_size(leaves)*2; i++) retval[i] = -1;
   for (i = 0; i < lst_size(leaves); i++) {
     TreeNode *n = lst_get_ptr(leaves, i);
-    retval[n->id] = nj_get_seq_idx(names, n->name, lst_size(leaves));
+    retval[n->id] = get_seq_idx(names, n->name, lst_size(leaves));
     if (retval[n->id] < 0)
       die("ERROR: leaf '%s' not found in name list.\n", n->name);
   }
@@ -462,7 +462,7 @@ int *nj_build_seq_idx(List *leaves, char **names) {
 }
 
 /* Return index of given sequence name or -1 if not found. */
-int nj_get_seq_idx(char **names, char *name, int n) {
+int get_seq_idx(char **names, char *name, int n) {
   int i, retval = -1;
   for (i = 0; retval < 0 && i < n; i++) 
     if (!strcmp(name, names[i]))
@@ -474,7 +474,7 @@ int nj_get_seq_idx(char **names, char *name, int n) {
    up lists that allow each rate matrix parameter to be mapped to the
    rows and columns in which it appears; this is a simplified version
    of tm_init_rmp */
-void nj_init_gtr_mapping(TreeModel *tm) {
+void init_gtr_mapping(TreeModel *tm) {
   tm->rate_matrix_param_row = (List**)smalloc(GTR_NPARAMS * sizeof(List*));
   tm->rate_matrix_param_col = (List**)smalloc(GTR_NPARAMS * sizeof(List*));
   for (int i = 0; i < GTR_NPARAMS; i++) {
@@ -487,21 +487,21 @@ void nj_init_gtr_mapping(TreeModel *tm) {
 
 /* The main likelihood function (same interface as previously) is now a wrapper
    that handles setup, subsampling, and multithreading.  The actual likelihood
-   calculation is done in nj_ll_core, which is called by
+   calculation is done in ll_core, which is called by
    each thread separately. */
-double nj_compute_log_likelihood(TreeModel *mod, CovarData *data,
+double compute_log_likelihood(TreeModel *mod, CovarData *data,
                                  Vector *branchgrad) {
   double ll;
 
   /* ---- basic sanity checks  ---- */
  if (data->msa->ss->tuple_size != 1)
-    die("ERROR nj_compute_log_likelihood: need tuple size 1, got %i\n",
+    die("ERROR compute_log_likelihood: need tuple size 1, got %i\n",
         data->msa->ss->tuple_size);
   if (mod->order != 0)
-    die("ERROR nj_compute_log_likelihood: got mod->order of %i, expected 0\n",
+    die("ERROR compute_log_likelihood: got mod->order of %i, expected 0\n",
         mod->order);
   if (!mod->allow_gaps)
-    die("ERROR nj_compute_log_likelihood: need mod->allow_gaps to be TRUE\n");
+    die("ERROR compute_log_likelihood: need mod->allow_gaps to be TRUE\n");
     
   /* ---- one-time model setup (not thread-safe if repeated) ---- */
   tm_set_subst_matrices(mod);
@@ -618,11 +618,11 @@ double nj_compute_log_likelihood(TreeModel *mod, CovarData *data,
   /* ---- sequential path ---- */
   if (data->nthreads == 1) 
     /* legacy behavior, but wrapper-controlled */
-    ll = nj_ll_parallel(mod, data, branchgrad, 1, &gcache);
+    ll = ll_parallel(mod, data, branchgrad, 1, &gcache);
 
   /* ---- parallel path ---- */
   else
-    ll = nj_ll_parallel(mod, data, branchgrad, data->nthreads, &gcache);
+    ll = ll_parallel(mod, data, branchgrad, data->nthreads, &gcache);
 
   if (data->subsample == FALSE) {
     sfree(tuplecounts);  /* view wrapper */
@@ -665,7 +665,7 @@ double nj_compute_log_likelihood(TreeModel *mod, CovarData *data,
   return ll;
 }
 
-double nj_ll_parallel(TreeModel *mod, CovarData *data, Vector *branchgrad,
+double ll_parallel(TreeModel *mod, CovarData *data, Vector *branchgrad,
                       int nthreads_requested, NJGradCache *gcache) {
 
   int ntuples = data->msa->ss->ntuples;
@@ -706,7 +706,7 @@ double nj_ll_parallel(TreeModel *mod, CovarData *data, Vector *branchgrad,
     lst_push_int(range, start);
     lst_push_int(range, end);
 
-    thread_ll[tid] = nj_ll_core(mod, data, (branchgrad ? thread_derivs[tid] : NULL),
+    thread_ll[tid] = ll_core(mod, data, (branchgrad ? thread_derivs[tid] : NULL),
                gcache, range);
     
     lst_free(range);
