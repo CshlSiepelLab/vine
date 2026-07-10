@@ -1,0 +1,55 @@
+char HELP[2851] = "\nPROGRAM: compareTrees\n\
+\n\
+USAGE: compareTrees [OPTIONS] estimate.nwk reference.nwk > output.txt\n\
+\n\
+DESCRIPTION: Compare two collections of phylogenetic trees representing\n\
+samples from two posterior (or other) distributions over tree space --\n\
+for example, samples from a variational approximation and from an MCMC\n\
+reference run.  By default, reports the topology-based mean split KL\n\
+divergence.  Additional comparison metrics can be requested with options.\n\
+\n\
+(1) Mean split KL: the mean per-split Bernoulli KL divergence between the\n\
+two samples' posterior distributions over clade splits.  For each\n\
+non-trivial clade split observed in either estimate.nwk or reference.nwk,\n\
+treats inclusion of the split as a Bernoulli variable with posterior\n\
+inclusion probability estimated from the corresponding sample, and\n\
+computes KL(p_est(s) || p_ref(s)).  The reported value is the average over\n\
+the union of splits observed in either sample (Laplace-smoothed so no\n\
+split has probability exactly 0 or 1).  This approximates the KL\n\
+divergence between the two posterior distributions over tree topology,\n\
+and remains well-behaved even when the two samples share few or no exact\n\
+topologies, unlike the full-topology KL divergence -sum p(tau) log\n\
+(p(tau)/q(tau)).\n\
+\n\
+(2) Mean embedding KL (enabled by --embed-dist-kl): each tree is independently embedded into a\n\
+low-dimensional Euclidean space via classical multidimensional scaling on\n\
+its cophenetic distances -- the same closed-form procedure vine itself\n\
+uses to initialize its variational posterior (see vine's\n\
+--dist-embedding option).  Pairwise Euclidean distances between the\n\
+embedded leaves are computed for each tree (these are invariant to the\n\
+arbitrary rotation/reflection/translation of each independent embedding,\n\
+so no alignment across trees is needed).  A Gaussian(mean, sd) is fit to\n\
+each leaf pair's embedded distance across the sample, and the reported\n\
+value is the mean Gaussian KL divergence over all leaf pairs.\n\
+\n\
+Both input files must contain one Newick tree per line, sampled over the\n\
+same set of taxa.\n\
+\n\
+OPTIONS:\n\
+    --embed-dist-kl, -e\n\
+        Also compute the mean embedding-distance KL divergence.  This\n\
+        comparison is disabled by default.\n\
+\n\
+    --dim, -d <n>\n\
+        Embedding dimensionality used for the embedding KL divergence.\n\
+        Defaults to the same formula vine uses when --dimensionality is\n\
+        not specified (based on the number of taxa).\n\
+\n\
+    --nthreads, -n <n>\n\
+        Number of threads used by OpenBLAS for the eigendecompositions\n\
+        underlying the embedding KL divergence.  Defaults to 1, matching\n\
+        vine's own default.\n\
+\n\
+    --help, -h\n\
+        Print this help message and exit.\n\
+";
