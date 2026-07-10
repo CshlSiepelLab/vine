@@ -31,6 +31,7 @@
 #include <migration.h>
 #include <multiDAG.h>
 #include <version.h>
+#include <vine.h>
 #include "vine.help"
 
 #define DEFAULT_NSAMPLES 100
@@ -41,10 +42,6 @@
 #define DEFAULT_KAPPA 4
 #define DEFAULT_RANK 3
 #define DEFAULT_MCMC_THIN 10
-
-/* default dimensionality is a linear function of log number of taxa */
-#define DEFAULT_DIM_INTERCEPT 3.25
-#define DEFAULT_DIM_SLOPE 0.92
 
 /* helper to write log file header with version and arguments */
 static inline void write_log_header(FILE *LOGF, int argc, char *argv[]) {
@@ -553,7 +550,7 @@ int main(int argc, char *argv[]) {
   /* set default dimensionality if not specified */
   if (dim == -1) {
     assert(DEFAULT_DIM_INTERCEPT >= 2);
-    dim = round(DEFAULT_DIM_INTERCEPT + DEFAULT_DIM_SLOPE * log((double)ntips));
+    dim = vine_default_dim(ntips);
     if (!silent) fprintf(stderr, "Setting dimensionality to default of %d based on %d taxa...\n", dim, ntips);
   }
   
