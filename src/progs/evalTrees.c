@@ -24,6 +24,7 @@
 #include <phast/tree_model.h>
 #include <rf.h>
 #include <branch_score.h>
+#include <tree_parser.h>
 #include "evalTrees.help"
 
 static inline
@@ -43,7 +44,7 @@ int main(int argc, char *argv[]) {
   TreeModel *mod = NULL;
   double kappa = -1, ll;
   String *line = str_new(STR_VERY_LONG_LEN);
-  int opt_idx, lineno = 0, i, j, nleaves = 0, npairs = 0;
+  int opt_idx, lineno = 0, input_lineno = 0, i, j, nleaves = 0, npairs = 0;
   CovarData *data;
   int c;  /* getopt_long returns int; storing in char makes EOF (-1)
              alias to 255 on platforms where char is unsigned, so the
@@ -187,20 +188,12 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Computing pairwise-distance stats...\n");
   
   while (str_readline(line, treefile) != EOF) {
-    str_double_trim(line);
-
-    if (line->length == 0)
+    input_lineno++;
+    tree = tr_parse_newick_line(line, treefname, input_lineno);
+    if (tree == NULL)
       continue;
 
     lineno++;
-
-    if (line->chars[0] != '(')
-      die("ERROR in line %d: Input does not look like a Newick-formatted tree.\n",
-          lineno);
-    if (line->chars[line->length-1] == ';')
-      line->chars[--line->length] = '\0';
-
-    tree = tr_new_from_string(line->chars);
 
     if (evalaln != NULL || is_crispr) {
       if (mod == NULL) { /* do this the first time through; need a tree to initialize */        

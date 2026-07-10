@@ -15,6 +15,13 @@
 #define TREE_PARSER_H
 
 #include <phast/lists.h>       /* List */
+#include <phast/stringsplus.h> /* String */
+#include <phast/trees.h>       /* TreeNode */
+
+/* Parse one line containing a Newick tree.  Leading/trailing whitespace and
+ * an optional trailing semicolon are removed in place.  Empty lines return
+ * NULL. */
+TreeNode *tr_parse_newick_line(String *line, const char *fname, int lineno);
 
 /* Read a file of one Newick tree per line (e.g. a posterior sample) into
  * a List of TreeNode*. */
