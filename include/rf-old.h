@@ -31,6 +31,23 @@ typedef struct {
 
 double tr_robinson_foulds(TreeNode *t1, TreeNode *t2);
 
+/* Branch-score (Kuhner-Felsenstein) distance between two trees, computed on
+ * the unrooted split -> branch-length vectors, including terminal (leaf)
+ * edges.  Leaf sets must match. */
+double tr_branch_score(TreeNode *t1, TreeNode *t2);
+
+/* Branch-score distance between the posterior-MEAN split-length vector of a
+ * collection of trees and a reference tree.  For each split the mean length is
+ * the sum of that split's length over all trees containing it, divided by the
+ * total number of trees (absent = length 0) -- the L2-optimal point estimate
+ * that minimizes expected BSD.  For a single-tree collection this equals
+ * tr_branch_score(tree, ref).  Isolates branch-length accuracy from posterior
+ * dispersion. */
+double tr_branch_score_pointest(List *trees, TreeNode *ref);
+
+/* Total branch length of a tree (sum of all edge lengths; rooting-invariant). */
+double tr_tree_length(TreeNode *t);
+
 /* Compute split entropy, topology entropy, and mean branch-length variance
  * for a collection of trees (each element a TreeNode*).
  * H_split:            sum of Bernoulli entropies over non-trivial splits.
@@ -40,23 +57,5 @@ double tr_robinson_foulds(TreeNode *t1, TreeNode *t2);
  * mean_var_per_branch: mean_var / m  (m = number of branches per tree). */
 void tr_tree_entropy(List *trees, double *H_split, double *H_top,
                      double *mean_var, double *mean_var_per_branch);
-
-/* lexicographic comparison of two canonical splits (see BitMask above) */
-int tr_bitmask_cmp(const BitMask *a, const BitMask *b);
-
-/* free a BitMask returned by tr_collect_split_counts */
-void tr_bitmask_free(BitMask *m);
-
-/* (canonical split, occurrence count) pair, as returned by
- * tr_collect_split_counts. */
-typedef struct { BitMask *mask; int count; } SplitCount;
-
-/* Collect unique non-trivial splits and their occurrence counts across a
- * set of trees.  Returns a newly allocated array sorted by mask, with
- * *nsc_out set to its length.  *nleaves_out (if non-NULL) is set to the
- * number of leaves.  Returns NULL (with *nsc_out == 0) if trees is empty
- * or has fewer than 3 leaves.  Caller frees each element's mask via
- * tr_bitmask_free, then frees the returned array itself. */
-SplitCount *tr_collect_split_counts(List *trees, int *nsc_out, int *nleaves_out);
 
 #endif

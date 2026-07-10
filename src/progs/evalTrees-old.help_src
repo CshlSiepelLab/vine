@@ -12,7 +12,8 @@ alignment represents held-out data matching the data used to fit the model,
 the results can be interpreted as log pointwise predictive densities
 (LPPDs), a measure of model fit that can meaningfully be compared across
 different inference methods (e.g., Bayesian and ML).  Can also evaluate the
-variability of topologies using --topology.
+variability of topologies using --topology, or the branch-length accuracy of
+the trees relative to a reference tree using --branch-score.
 
 OPTIONS:
     --help, -h
@@ -40,6 +41,18 @@ OPTIONS:
         Instead of pairwise distances between taxa, consider the
         distribution of topological distances of all sampled trees
         from a given reference tree topology.
+
+    --branch-score, -b <reference.nwk>
+        Evaluate the branch-score (Kuhner-Felsenstein) distance of the
+        sampled trees to a given reference tree.  Unlike --topology, the
+        lengths of all edges (including terminal edges) contribute, so this
+        measures branch-length as well as topological agreement.  Reports the
+        distribution of per-sample distances (as for --topology) followed by
+        two additional lines: "Point (posterior-mean-tree) BSD", the distance
+        between the reference and the posterior-mean split-length vector -- a
+        point estimate of branch-length accuracy that is insensitive to
+        posterior dispersion; and "Reference tree length", the total branch
+        length of the reference (useful for normalization).
 
     --entropy, -e
         Compute uncertainty measures for the tree distribution.  Reports

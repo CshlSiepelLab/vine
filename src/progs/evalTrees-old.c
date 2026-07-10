@@ -51,10 +51,11 @@ int main(int argc, char *argv[]) {
   MarkovMatrix *rmat;
   msa_format_type format;
   TreeNode *topol_ref = NULL;
+  TreeNode *bsd_ref = NULL;
   MSA *evalaln = NULL;
   double mean, stdev, median, min, max, min_95CI, max_95CI, q25, q75;
-  char *topolfname = NULL, *msafname = NULL, *treefname = NULL;
-  List *rfdists = NULL, *lldists;
+  char *topolfname = NULL, *msafname = NULL, *treefname = NULL, *bsdref_fname = NULL;
+  List *rfdists = NULL, *lldists, *bsddists = NULL;
   char **names = NULL;
   Matrix *D = NULL;
   List **Dij_list = NULL;
@@ -73,11 +74,12 @@ int main(int argc, char *argv[]) {
     {"tree-model", 1, 0, 'm'},
     {"model-fit", 1, 0, 'f'},
     {"topology", 1, 0, 't'},
+    {"branch-score", 1, 0, 'b'},
     {"help", 0, 0, 'h'},
     {0, 0, 0, 0}
   };
 
-  while ((c = getopt_long(argc, argv, "ef:k:m:t:ch",
+  while ((c = getopt_long(argc, argv, "b:ef:k:m:t:ch",
                           long_opts, &opt_idx)) != -1) {
     switch (c) {
     case 'k':
@@ -95,6 +97,10 @@ int main(int argc, char *argv[]) {
     case 't':
       topolfname = optarg;
       topol_ref = tr_new_from_file(phast_fopen(topolfname, "r"));
+      break;
+    case 'b':
+      bsdref_fname = optarg;
+      bsd_ref = tr_new_from_file(phast_fopen(bsdref_fname, "r"));
       break;
     case 'c':
       is_crispr = TRUE;
@@ -127,6 +133,9 @@ int main(int argc, char *argv[]) {
   if (do_entropy && (topol_ref != NULL || msafname != NULL || is_crispr))
     die("Option --entropy cannot be combined with --topology, --model-fit, or --crispr.\n");
 
+  if (bsd_ref != NULL && (topol_ref != NULL || msafname != NULL || is_crispr || do_entropy))
+    die("Option --branch-score cannot be combined with --topology, --model-fit, --crispr, or --entropy.\n");
+
   if (evalaln == NULL && (mod != NULL || kappa > 0))
     die("Options --tree-model and --hky-kappa require --model-fit.\n");
   
@@ -155,14 +164,18 @@ int main(int argc, char *argv[]) {
       
     /* this is mostly a dummy; only the msa or crispr mod is used */
     D = mat_new(5, 5);
-    data = new_covar_data(CONST, D, 1, evalaln, crispr_mod, NULL, FALSE,
-                             1.0, 3, 1.0, FALSE, -1, FALSE, FALSE, FALSE, 1,
-                             NULL, NULL, FALSE);
+    data = nj_new_covar_data(CONST, D, 1, evalaln, crispr_mod, NULL, FALSE,
+                             1.0, 3, 1.0, FALSE, -1, FALSE, FALSE, FALSE, NULL, NULL, FALSE);
     lldists = lst_new_dbl(1000);
   }
   else if (topol_ref != NULL) {
     rfdists = lst_new_dbl(1000);
     fprintf(stderr, "Evaluating RF distance to %s...\n", topolfname);
+  }
+  else if (bsd_ref != NULL) {
+    bsddists = lst_new_dbl(1000);
+    trees_all = lst_new_ptr(1000);   /* retained for the point (mean-tree) BSD */
+    fprintf(stderr, "Evaluating branch-score distance to %s...\n", bsdref_fname);
   }
   else if (do_entropy) {
     trees_all = lst_new_ptr(1000);
@@ -209,13 +222,13 @@ int main(int argc, char *argv[]) {
         }
       }
       else
-        reset_tree_model(mod, tree);
+        nj_reset_tree_model(mod, tree);
 
       if (evalaln != NULL) {
         /* have to force index rebuild because node ids can change */
         sfree(mod->msa_seq_idx);
         tm_build_seq_idx(mod, evalaln);
-        ll = compute_log_likelihood(mod, data, NULL);
+        ll = nj_compute_log_likelihood(mod, data, NULL);
       }
       else { /* crispr case */
         sfree(crispr_mod->mod->msa_seq_idx);
@@ -232,6 +245,12 @@ int main(int argc, char *argv[]) {
     else if (topol_ref != NULL) {
       double d = tr_robinson_foulds(tree, topol_ref);
       lst_push_dbl(rfdists, d);
+    }
+
+    else if (bsd_ref != NULL) {
+      double d = tr_branch_score(tree, bsd_ref);
+      lst_push_dbl(bsddists, d);
+      lst_push_ptr(trees_all, tree);   /* retain for point (mean-tree) BSD */
     }
 
     else if (do_entropy) {
@@ -259,7 +278,7 @@ int main(int argc, char *argv[]) {
       }
       
       /* get distance matrix for all pairs of leaves for this tree */
-      D = tree_to_distances(tree, names, nleaves);
+      D = nj_tree_to_distances(tree, names, nleaves);
       /* add distances to corresponding lists */
       for (i = 0; i < nleaves; i++) {
         for (j = i+1; j < nleaves; j++) {
@@ -292,6 +311,17 @@ int main(int argc, char *argv[]) {
     printf("Robinson Foulds distances against %s:\n", topolfname);
     print_stats(stdout, mean, stdev, median, min, max, min_95CI,
                 max_95CI, q25, q75);
+  }
+  else if (bsd_ref != NULL) {
+    printf("Successfully processed %d trees from %s.\n", lineno, treefname);
+    lst_dbl_stats(bsddists, &mean, &stdev, &median, &min, &max,
+                  &min_95CI, &max_95CI, &q25, &q75);
+    printf("Branch-score distances against %s:\n", bsdref_fname);
+    print_stats(stdout, mean, stdev, median, min, max, min_95CI,
+                max_95CI, q25, q75);
+    printf("Point (posterior-mean-tree) BSD: %f\n",
+           tr_branch_score_pointest(trees_all, bsd_ref));
+    printf("Reference tree length: %f\n", tr_tree_length(bsd_ref));
   }
   else if (do_entropy) {
     double H_split, H_top, mean_var, mean_var_per_branch;
