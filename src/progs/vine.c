@@ -103,7 +103,7 @@ int main(int argc, char *argv[]) {
   subst_mod_type subst_mod = JC69;
   TreeModel *mod = NULL;
   double learnrate = DEFAULT_LEARNRATE,
-    negcurvature = 1.0, var_reg = 1.0, kld_upweight = 1.0;
+    negcurvature = 1.0, var_reg = 0.0, kld_upweight = 1.0;
   MarkovMatrix *rmat = NULL;
   multi_MVN *mmvn = NULL;
   TreeNode *init_tree = NULL;

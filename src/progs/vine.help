@@ -1,4 +1,4 @@
-char HELP[15462] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
+char HELP[15476] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
 \n\
 USAGE: vine [OPTIONS] alignment.fa > trees.nwk\n\
 \n\
@@ -226,7 +226,7 @@ COVARIANCE:\n\
        option can be used to alter the default penalty by a multiplicative\n\
        factor. Use values > 1 to inflate the variance further or values\n\
        between 0 and 1 to give it more latitude to shrink (tends to improve\n\
-       the ELBO).  A value of zero will disable regularization.\n\
+       the ELBO).  A value of zero will disable regularization. (default = 0)\n\
 \n\
 HYPERBOLIC GEOMETRY:\n\
     --hyperbolic, -H\n\
