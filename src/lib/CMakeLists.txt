@@ -5,6 +5,7 @@ add_library(vine_core STATIC
     adam_scheduler.c
     backprop.c
     bitset.c
+    branch_score.c
     covariance.c
     crispr.c
     geometry.c

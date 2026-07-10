@@ -8,28 +8,13 @@
  * See the LICENSE file in the project root for details.
  */
 
-/* calculation of Robinson Foulds distances */
+/* calculation of branch-score distances */
 
-#ifndef RF_H
-#define RF_H
+#ifndef BRANCH_SCORE_H
+#define BRANCH_SCORE_H
 
-#include <stdio.h>
-#include <stdint.h>            /* uint64_t */
 #include <phast/lists.h>       /* List */
 #include <phast/trees.h>       /* TreeNode */
-
-/* bitset for up to many thousands of leaves */
-typedef struct {
-  int W;            /* number of 64-bit words */
-  uint64_t *w;      /* words */
-} BitMask;
-
-/* dynamic array of BitMask* */
-typedef struct {
-  BitMask **a; int size, cap;
-} MaskVec;
-
-double tr_robinson_foulds(TreeNode *t1, TreeNode *t2);
 
 /* Branch-score (Kuhner-Felsenstein) distance between two trees, computed on
  * the unrooted split -> branch-length vectors, including terminal (leaf)
@@ -47,15 +32,5 @@ double tr_branch_score_pointest(List *trees, TreeNode *ref);
 
 /* Total branch length of a tree (sum of all edge lengths; rooting-invariant). */
 double tr_tree_length(TreeNode *t);
-
-/* Compute split entropy, topology entropy, and mean branch-length variance
- * for a collection of trees (each element a TreeNode*).
- * H_split:            sum of Bernoulli entropies over non-trivial splits.
- * H_top:              Shannon entropy over distinct topologies.
- * mean_var:           topology-weighted sum of sample variances of log
- *                     branch lengths, summed over all branches.
- * mean_var_per_branch: mean_var / m  (m = number of branches per tree). */
-void tr_tree_entropy(List *trees, double *H_split, double *H_top,
-                     double *mean_var, double *mean_var_per_branch);
 
 #endif
