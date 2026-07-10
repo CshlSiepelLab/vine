@@ -78,6 +78,90 @@ void tr_split_kl(List *trees_est, List *trees_ref, double *mean_kl) {
   tr_split_context_free(ctx);
 }
 
+/* Accumulate the sample mean and sample standard deviation of each raw
+   pairwise leaf distance across a tree sample. */
+static void pairwise_dist_stats(List *trees, char **names, int n,
+                                double **mean_out, double **sd_out) {
+  int nsamples = lst_size(trees);
+  int npairs = n * (n - 1) / 2;
+  double *sum = calloc(npairs, sizeof(double));
+  double *sumsq = calloc(npairs, sizeof(double));
+
+  for (int s = 0; s < nsamples; s++) {
+    Matrix *D = tree_to_distances(lst_get_ptr(trees, s), names, n);
+    int idx = 0;
+    for (int i = 0; i < n; i++) {
+      for (int j = i + 1; j < n; j++) {
+        double value = mat_get(D, i, j);
+        sum[idx] += value;
+        sumsq[idx] += value * value;
+        idx++;
+      }
+    }
+    mat_free(D);
+  }
+
+  double *mean = smalloc(npairs * sizeof(double));
+  double *sd = smalloc(npairs * sizeof(double));
+  for (int k = 0; k < npairs; k++) {
+    mean[k] = sum[k] / nsamples;
+    if (nsamples == 1 || sumsq[k] == 0.0)
+      sd[k] = 0.0;
+    else {
+      double variance = (double)nsamples / (nsamples - 1) *
+        (sumsq[k] / nsamples - mean[k] * mean[k]);
+      sd[k] = sqrt(variance > 0.0 ? variance : 0.0);
+    }
+  }
+  free(sum);
+  free(sumsq);
+  *mean_out = mean;
+  *sd_out = sd;
+}
+
+void tr_pairwise_dist_kl(List *trees_est, List *trees_ref, double *mean_kl) {
+  *mean_kl = 0.0;
+  if (lst_size(trees_est) == 0 || lst_size(trees_ref) == 0)
+    die("ERROR in tr_pairwise_dist_kl: at least one input tree list is empty.\n");
+
+  List *namelist = tr_leaf_names(lst_get_ptr(trees_est, 0));
+  lst_qsort_str(namelist, ASCENDING);
+  int n = lst_size(namelist);
+  if (n < 2)
+    die("ERROR in tr_pairwise_dist_kl: trees must contain at least two taxa.\n");
+
+  char **names = smalloc(n * sizeof(char *));
+  for (int i = 0; i < n; i++)
+    names[i] = ((String *)lst_get_ptr(namelist, i))->chars;
+
+  double *mean_e, *sd_e, *mean_r, *sd_r;
+  pairwise_dist_stats(trees_est, names, n, &mean_e, &sd_e);
+  pairwise_dist_stats(trees_ref, names, n, &mean_r, &sd_r);
+
+  int npairs = n * (n - 1) / 2;
+  int nvalid = 0;
+  double sum_kl = 0.0;
+  for (int k = 0; k < npairs; k++) {
+    if (!isfinite(mean_e[k]) || !isfinite(sd_e[k]) ||
+        !isfinite(mean_r[k]) || !isfinite(sd_r[k]) ||
+        sd_e[k] <= 0.0 || sd_r[k] <= 0.0)
+      continue;
+    double mean_diff = mean_e[k] - mean_r[k];
+    sum_kl += log(sd_r[k] / sd_e[k]) +
+      (sd_e[k] * sd_e[k] + mean_diff * mean_diff) /
+      (2.0 * sd_r[k] * sd_r[k]) - 0.5;
+    nvalid++;
+  }
+  if (nvalid == 0)
+    die("ERROR in tr_pairwise_dist_kl: no leaf pairs have nonzero variance in both samples.\n");
+  *mean_kl = sum_kl / nvalid;
+
+  free(mean_e); free(sd_e); free(mean_r); free(sd_r);
+  sfree(names);
+  lst_free_strings(namelist);
+  lst_free(namelist);
+}
+
 /* Turn one tree into a fixed-length vector of pairwise distances after
     Euclidean embedding. */
 static Vector *embed_tree_pairwise_dists(TreeNode *tree, char **names, int n, int dim) {

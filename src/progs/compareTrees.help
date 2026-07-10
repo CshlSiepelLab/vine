@@ -1,4 +1,4 @@
-char HELP[2851] = "\nPROGRAM: compareTrees\n\
+char HELP[3340] = "\nPROGRAM: compareTrees\n\
 \n\
 USAGE: compareTrees [OPTIONS] estimate.nwk reference.nwk > output.txt\n\
 \n\
@@ -21,7 +21,12 @@ and remains well-behaved even when the two samples share few or no exact\n\
 topologies, unlike the full-topology KL divergence -sum p(tau) log\n\
 (p(tau)/q(tau)).\n\
 \n\
-(2) Mean embedding KL (enabled by --embed-dist-kl): each tree is independently embedded into a\n\
+(2) Mean pairwise-distance KL (enabled by --pairwise-dist-kl): for each\n\
+leaf pair, a Gaussian(mean, sd) is fit to its raw tree distance across each\n\
+sample.  The reported value is the mean Gaussian KL divergence over leaf\n\
+pairs with nonzero variance in both samples.\n\
+\n\
+(3) Mean embedding KL (enabled by --embed-dist-kl): each tree is independently embedded into a\n\
 low-dimensional Euclidean space via classical multidimensional scaling on\n\
 its cophenetic distances -- the same closed-form procedure vine itself\n\
 uses to initialize its variational posterior (see vine's\n\
@@ -36,6 +41,11 @@ Both input files must contain one Newick tree per line, sampled over the\n\
 same set of taxa.\n\
 \n\
 OPTIONS:\n\
+    --pairwise-dist-kl, -p\n\
+        Also compute the mean Gaussian KL divergence between the raw\n\
+        pairwise leaf-distance distributions.  This comparison is disabled\n\
+        by default.\n\
+\n\
     --embed-dist-kl, -e\n\
         Also compute the mean embedding-distance KL divergence.  This\n\
         comparison is disabled by default.\n\

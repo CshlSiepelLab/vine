@@ -21,7 +21,12 @@ and remains well-behaved even when the two samples share few or no exact
 topologies, unlike the full-topology KL divergence -sum p(tau) log
 (p(tau)/q(tau)).
 
-(2) Mean embedding KL (enabled by --embed-dist-kl): each tree is independently embedded into a
+(2) Mean pairwise-distance KL (enabled by --pairwise-dist-kl): for each
+leaf pair, a Gaussian(mean, sd) is fit to its raw tree distance across each
+sample.  The reported value is the mean Gaussian KL divergence over leaf
+pairs with nonzero variance in both samples.
+
+(3) Mean embedding KL (enabled by --embed-dist-kl): each tree is independently embedded into a
 low-dimensional Euclidean space via classical multidimensional scaling on
 its cophenetic distances -- the same closed-form procedure vine itself
 uses to initialize its variational posterior (see vine's
@@ -36,6 +41,11 @@ Both input files must contain one Newick tree per line, sampled over the
 same set of taxa.
 
 OPTIONS:
+    --pairwise-dist-kl, -p
+        Also compute the mean Gaussian KL divergence between the raw
+        pairwise leaf-distance distributions.  This comparison is disabled
+        by default.
+
     --embed-dist-kl, -e
         Also compute the mean embedding-distance KL divergence.  This
         comparison is disabled by default.

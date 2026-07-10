@@ -24,6 +24,12 @@
 void tr_split_kl(List *trees_est, List *trees_ref, double *mean_kl);
 
 /* Mean Gaussian KL divergence between the estimate and reference samples'
+ * raw pairwise leaf-distance distributions.  For each leaf pair, a Gaussian
+ * is fit using the sample mean and sample standard deviation across trees.
+ * Pairs with zero variance in either sample are omitted. */
+void tr_pairwise_dist_kl(List *trees_est, List *trees_ref, double *mean_kl);
+
+/* Mean Gaussian KL divergence between the estimate and reference samples'
  * embedded pairwise-distance distributions.  Each tree is independently
  * embedded into a dim-dimensional Euclidean space via classical
  * multidimensional scaling on its cophenetic distances (the same
