@@ -257,6 +257,9 @@ CELL-STATE MODELING:
        string indicating its tissue or other cell state (comma
        delimited file with two columns per line).
 
+    --migration-rate-prior, -I
+       Adds an exponential(1) prior on each migration rate.
+
     --primary, -1 <state>
        Consider designated state to be "primary" and force it to be
        the state at the root of the tree.  If the specified state is

@@ -1,4 +1,4 @@
-char HELP[15476] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
+char HELP[15577] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
 \n\
 USAGE: vine [OPTIONS] alignment.fa > trees.nwk\n\
 \n\
@@ -256,6 +256,9 @@ CELL-STATE MODELING:\n\
        labels as the mutation matrix, each followed by a single\n\
        string indicating its tissue or other cell state (comma\n\
        delimited file with two columns per line).\n\
+\n\
+    --migration-rate-prior, -I\n\
+       Adds an exponential(1) prior on each migration rate.\n\
 \n\
     --primary, -1 <state>\n\
        Consider designated state to be \"primary\" and force it to be\n\

@@ -88,7 +88,7 @@ int main(int argc, char *argv[]) {
                natural_grad = FALSE, is_crispr = FALSE,
                ultrametric = FALSE, radial_flow = FALSE, planar_flow = FALSE,
                use_taylor = TRUE, had_dups = FALSE, silent = FALSE,
-               log_all = FALSE;
+               log_all = FALSE, migration_rate_prior = FALSE;
   MSA *msa = NULL;
   enum covar_type covar_param = CONST;
   char *alphabet = "ACGT";
@@ -162,6 +162,7 @@ int main(int argc, char *argv[]) {
     {"treeprior", 1, 0, 'P'},
     {"relclock", 0, 0, 'L'},
     {"migration", 1, 0, 'G'},
+    {"migration-rate-prior", 0, 0, 'I'},
     {"primary", 1, 0, '1'},
     {"dgamma", 1, 0, 'K'},
     {"montecarlo", 0, 0, 'y'},
@@ -184,7 +185,7 @@ int main(int argc, char *argv[]) {
          option".
      Keep this string in lockstep with long_opts. */
   while ((c = getopt_long(argc, argv,
-                          "01:ab:B:c:Cd:D:eE:FgG:hHi:j:JkK:l:Lm:M:n:No:O:p:P:q:Q:r:Rs:S:t:T:U:v:V:w:W:xXyY:Z",
+                          "01:ab:B:c:Cd:D:eE:FgG:hHi:Ij:JkK:l:Lm:M:n:No:O:p:P:q:Q:r:Rs:S:t:T:U:v:V:w:W:xXyY:Z",
                           long_opts, &opt_idx)) != -1) {
     switch (c) {
     case 'b':
@@ -236,6 +237,9 @@ int main(int argc, char *argv[]) {
       break;
     case 'G':
       migtable = mig_read_table(phast_fopen(optarg, "r"));
+      break;
+    case 'I':
+      migration_rate_prior = TRUE;
       break;
     case 'J':
       mcmc = TRUE;
@@ -431,6 +435,9 @@ int main(int argc, char *argv[]) {
 
   if (migtable != NULL && is_crispr == FALSE)
       die("--migration requires -i CRISPR\n");
+
+  if (migtable != NULL)
+    migtable->migration_rate_prior = migration_rate_prior;
 
   if (graphsfile != NULL && migtable == NULL)
       die("--sample-graphs requires --migration\n");

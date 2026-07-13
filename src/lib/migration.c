@@ -40,6 +40,7 @@ MigTable *mig_new() {
   M->rate_matrix_param_row = NULL;
   M->rate_matrix_param_col = NULL;
   M->primary_state = -1;
+  M->migration_rate_prior = FALSE;
   return M;
 }
 
@@ -1391,4 +1392,3 @@ void mig_grad_REV_dr(MigTable *mg, List *dP_dr_lst, double t) {
   sfree(dq); sfree(tmpmat); sfree(sinv_dq_s); sfree(f);
   lst_free(erows); lst_free(ecols); lst_free(distinct_rows);
 }
-
