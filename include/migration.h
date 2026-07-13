@@ -44,10 +44,12 @@ typedef struct mgtab {
   List **rate_matrix_param_col; /* for each free param, list of col
                                    indices it affects */
   int primary_state; /* index of primary state, or -1 if none */
-  unsigned int migration_rate_prior;
+  unsigned int use_rate_prior;
 } MigTable;
 
 MigTable *mig_new();
+
+double mig_compute_log_exponential_rate_prior(MigTable *M);
 
 void mig_free(MigTable *M);
 

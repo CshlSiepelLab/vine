@@ -88,7 +88,7 @@ int main(int argc, char *argv[]) {
                natural_grad = FALSE, is_crispr = FALSE,
                ultrametric = FALSE, radial_flow = FALSE, planar_flow = FALSE,
                use_taylor = TRUE, had_dups = FALSE, silent = FALSE,
-               log_all = FALSE, migration_rate_prior = FALSE;
+               log_all = FALSE, use_rate_prior = FALSE;
   MSA *msa = NULL;
   enum covar_type covar_param = CONST;
   char *alphabet = "ACGT";
@@ -239,7 +239,7 @@ int main(int argc, char *argv[]) {
       migtable = mig_read_table(phast_fopen(optarg, "r"));
       break;
     case 'I':
-      migration_rate_prior = TRUE;
+      use_rate_prior = TRUE;
       break;
     case 'J':
       mcmc = TRUE;
@@ -437,7 +437,7 @@ int main(int argc, char *argv[]) {
       die("--migration requires -i CRISPR\n");
 
   if (migtable != NULL)
-    migtable->migration_rate_prior = migration_rate_prior;
+    migtable->use_rate_prior = use_rate_prior;
 
   if (graphsfile != NULL && migtable == NULL)
       die("--sample-graphs requires --migration\n");

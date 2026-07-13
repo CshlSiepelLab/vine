@@ -40,8 +40,19 @@ MigTable *mig_new() {
   M->rate_matrix_param_row = NULL;
   M->rate_matrix_param_col = NULL;
   M->primary_state = -1;
-  M->migration_rate_prior = FALSE;
+  M->use_rate_prior = FALSE;
   return M;
+}
+
+/* Sums exponential(1) prior for each rate parameters */
+double mig_compute_log_exponential_rate_prior(MigTable *M) {
+  double logprior = 0;
+
+  if (M->use_rate_prior)
+    for (int i = 0; i < M->gtr_params->size; i++)
+      logprior -= vec_get(M->gtr_params, i);
+
+  return logprior;
 }
 
 void mig_free(MigTable *M) {
