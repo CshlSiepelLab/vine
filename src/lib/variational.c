@@ -25,6 +25,7 @@
 #include <nuisance.h>
 #include <likelihoods.h>
 #include <hutchinson.h>
+#include <migration.h>
 #include <version.h>
 
 /* number of warmup iterations to run with migration model disabled;
@@ -49,7 +50,8 @@ void variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
     bestkld = -INFTY, bestmigll = -INFTY,
     running_tot = 0, last_running_tot = -INFTY, trace, logdet, penalty = 0,
     bestpenalty = 0, ave_lprior, best_lprior = -INFTY, subsamp_rescale = 1.0,
-    ll_at_mean = 0, bestll_at_mean = -INFTY;
+    ll_at_mean = 0, bestll_at_mean = -INFTY, mig_rate_lprior = 0,
+    best_mig_rate_lprior = -INFTY;
   TaylorData *taylor_stash = NULL;
 
   /* for nuisance parameters; these are parameters that are optimized
@@ -101,7 +103,7 @@ void variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
     if (data->crispr_mod == NULL)
       fprintf(logf, "subsamp\treuse\tgradnorm\tclip\t");
     if (data->migtable != NULL)
-      fprintf(logf, "mig_ll\t");
+      fprintf(logf, "mig_ll\tmig_prior\t");
     if (log_all) {
       for (j = 0; j < fulld; j++)
         fprintf(logf, "mu.%d\t", j);
@@ -306,8 +308,11 @@ void variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
     vec_plus_eq(avegrad, kldgrad);
     vec_plus_eq(avegrad, sparsitygrad);
 
+    mig_rate_lprior = data->migtable != NULL ?
+      mig_compute_log_exponential_rate_prior(data->migtable) : 0;
+
     /* store parameters if best yet */
-    elb = avell + ave_lprior - kld - penalty + avemigll;
+    elb = avell + ave_lprior - kld - penalty + avemigll + mig_rate_lprior;
 
     /* don't select best during migration warmup: migration is excluded from
      * the ELBO then, making warmup ELBOs artificially high and incomparable
@@ -323,6 +328,7 @@ void variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
       bestkld = kld;  
       bestpenalty = penalty;
       bestmigll = avemigll;
+      best_mig_rate_lprior = mig_rate_lprior;
       bestt = t;
       mmvn_save_mu(mmvn, best_mu);
       vec_copy(best_sigmapar, sigmapar);
@@ -404,8 +410,8 @@ void variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
       if (data->crispr_mod == NULL)
         fprintf(logf, "%d\t%d\t%f\t%d\t", data->subsampsize,
                 data->reuse_subsamp, sm->grad_norm, clipped);
-      if (data->migtable != NULL) 
-        fprintf(logf, "%f\t", avemigll); 
+      if (data->migtable != NULL)
+        fprintf(logf, "%f\t%f\t", avemigll, mig_rate_lprior);
       if (log_all) {
         mmvn_print(mmvn, logf, TRUE, FALSE);
         if (data->type == LOWR || data->type == DIAG) {
@@ -467,7 +473,8 @@ void variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
       /* for MC mode: lnL at the mean embedding (no separate MC pass needed) */
       fprintf(logf, ", LNL_mu: %.2f", bestll_at_mean);
     if (data->migtable != NULL)
-      fprintf(logf, ", MIGLL: %.2f", bestmigll);
+      fprintf(logf, ", MIGLL: %.2f, MIGPRIOR: %.2f", bestmigll,
+              best_mig_rate_lprior);
     for (j = 0; j < n_nuisance_params; j++) /* print these also if available */
       fprintf(logf, ", %s: %.4f", get_nuisance_param_name(mod, data, j),
         nuis_param_get(mod, data, j));
