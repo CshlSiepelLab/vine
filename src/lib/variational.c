@@ -239,7 +239,11 @@ void variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
       /* report the actual (full) size; otherwise subsampsize/reuse_subsamp
          retain stale values from the last subsampling step and the log
          misleadingly shows subsampling still active */
-      data->subsampsize = data->msa->length;
+      /* CRISPR input has no MSA (data->msa is NULL), and these fields are not
+         logged in CRISPR mode.  Only update the full alignment size when an
+         MSA is present. */
+      if (data->msa != NULL)
+        data->subsampsize = data->msa->length;
       data->reuse_subsamp = FALSE;
       subsamp_rescale = 1.0;
     }
