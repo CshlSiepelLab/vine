@@ -10,6 +10,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h>
 #include <getopt.h>
 #include <time.h>
 #include <sys/utsname.h>
@@ -88,7 +89,7 @@ int main(int argc, char *argv[]) {
                natural_grad = FALSE, is_crispr = FALSE,
                ultrametric = FALSE, radial_flow = FALSE, planar_flow = FALSE,
                use_taylor = TRUE, had_dups = FALSE, silent = FALSE,
-               log_all = FALSE, use_rate_prior = FALSE;
+               log_all = FALSE;
   MSA *msa = NULL;
   enum covar_type covar_param = CONST;
   char *alphabet = "ACGT";
@@ -102,7 +103,7 @@ int main(int argc, char *argv[]) {
   List *namestr, *trees;
   subst_mod_type subst_mod = JC69;
   TreeModel *mod = NULL;
-  double learnrate = DEFAULT_LEARNRATE,
+  double learnrate = DEFAULT_LEARNRATE, migration_rate_prior_mean = 1.0,
     negcurvature = 1.0, var_reg = 0.0, kld_upweight = 1.0;
   MarkovMatrix *rmat = NULL;
   multi_MVN *mmvn = NULL;
@@ -162,7 +163,7 @@ int main(int argc, char *argv[]) {
     {"treeprior", 1, 0, 'P'},
     {"relclock", 0, 0, 'L'},
     {"migration", 1, 0, 'G'},
-    {"migration-rate-prior", 0, 0, 'I'},
+    {"migration-rate-prior", 1, 0, 'I'},
     {"primary", 1, 0, '1'},
     {"dgamma", 1, 0, 'K'},
     {"montecarlo", 0, 0, 'y'},
@@ -185,7 +186,7 @@ int main(int argc, char *argv[]) {
          option".
      Keep this string in lockstep with long_opts. */
   while ((c = getopt_long(argc, argv,
-                          "01:ab:B:c:Cd:D:eE:FgG:hHi:Ij:JkK:l:Lm:M:n:No:O:p:P:q:Q:r:Rs:S:t:T:U:v:V:w:W:xXyY:Z",
+                          "01:ab:B:c:Cd:D:eE:FgG:hHi:I:j:JkK:l:Lm:M:n:No:O:p:P:q:Q:r:Rs:S:t:T:U:v:V:w:W:xXyY:Z",
                           long_opts, &opt_idx)) != -1) {
     switch (c) {
     case 'b':
@@ -239,7 +240,13 @@ int main(int argc, char *argv[]) {
       migtable = mig_read_table(phast_fopen(optarg, "r"));
       break;
     case 'I':
-      use_rate_prior = TRUE;
+      {
+        char *endptr;
+        migration_rate_prior_mean = strtod(optarg, &endptr);
+        if (endptr == optarg || *endptr != '\0' ||
+            !isfinite(migration_rate_prior_mean) || migration_rate_prior_mean < 0)
+          die("ERROR: --migration-rate-prior must be nonnegative\n");
+      }
       break;
     case 'J':
       mcmc = TRUE;
@@ -437,7 +444,7 @@ int main(int argc, char *argv[]) {
       die("--migration requires -i CRISPR\n");
 
   if (migtable != NULL)
-    migtable->use_rate_prior = use_rate_prior;
+    migtable->rate_prior_mean = migration_rate_prior_mean;
 
   if (graphsfile != NULL && migtable == NULL)
       die("--sample-graphs requires --migration\n");

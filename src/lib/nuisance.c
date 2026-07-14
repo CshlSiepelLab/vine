@@ -219,9 +219,8 @@ void update_nuis_grad(TreeModel *mod, CovarData *data, Vector *nuis_grad) {
     double mig_scale = (data->crispr_mod != NULL && data->crispr_mod->mig_warmup) ? 0.0 : 1.0;
     for (i = 0; i < data->migtable->deriv_gtr->size; i++) {
       double mig_grad = vec_get(data->migtable->deriv_gtr, i);
-      if (data->migtable->use_rate_prior)
-        /* exponential(1) prior has derivative -1 */
-        mig_grad -= 1.0;
+      if (data->migtable->rate_prior_mean > 0)
+        mig_grad -= 1.0 / data->migtable->rate_prior_mean;
       vec_set(nuis_grad, idx++, mig_scale * mig_grad);
     }
   }
