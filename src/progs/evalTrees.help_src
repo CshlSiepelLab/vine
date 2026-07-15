@@ -64,12 +64,13 @@ OPTIONS:
         mean of sample variances of log branch lengths, averaged over
         branches.
 
-    --rf-matrix, -r
+    --rf-matrix, -r <file.tsv>
         Print an upper-triangular, tab-separated matrix of Robinson-Foulds
-        distances between all input trees. Rows and columns are labeled by
-        input order.
+        distances between all input trees to the specified file. Rows and
+        columns are labeled by input order.
 
-    --rf-mds, -M
+    --rf-mds, -M <file.tsv>
         Compute classical multidimensional scaling of the Robinson-Foulds
         distances between input trees and print the unscaled two-dimensional
-        coordinates as a tab-separated table.
+        coordinates to the specified tab-separated file. Can be used together
+        with --rf-matrix to produce both outputs in one run.
