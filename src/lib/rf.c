@@ -56,7 +56,7 @@ Matrix *tr_robinson_foulds_matrix(List *trees) {
       double d = tr_robinson_foulds(lst_get_ptr(trees, i),
                                     lst_get_ptr(trees, j));
       mat_set(matrix, i, j, d);
-      mat_set(matrix, j, i, d);
+      mat_set(matrix, j, i, 0.0);
     }
   }
   return matrix;

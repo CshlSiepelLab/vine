@@ -65,5 +65,6 @@ OPTIONS:
         branches.
 
     --rf-matrix, -r
-        Print a tab-separated matrix of Robinson-Foulds distances between
-        all input trees. Rows and columns are labeled by input order.
+        Print an upper-triangular, tab-separated matrix of Robinson-Foulds
+        distances between all input trees. Rows and columns are labeled by
+        input order.

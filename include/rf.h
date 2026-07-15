@@ -20,7 +20,7 @@
 
 double tr_robinson_foulds(TreeNode *t1, TreeNode *t2);
 
-/* Compute and write a symmetric pairwise RF distance matrix. */
+/* Compute and write an upper-triangular pairwise RF distance matrix. */
 Matrix *tr_robinson_foulds_matrix(List *trees);
 void tr_write_robinson_foulds_matrix(Matrix *matrix, FILE *F);
 

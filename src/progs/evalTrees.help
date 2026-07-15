@@ -1,4 +1,4 @@
-char HELP[3679] = "\nPROGRAM: evalTrees\n\
+char HELP[3709] = "\nPROGRAM: evalTrees\n\
 \n\
 USAGE: evalTrees trees.nwk > summary.txt\n\
 \n\
@@ -65,6 +65,7 @@ OPTIONS:\n\
         branches.\n\
 \n\
     --rf-matrix, -r\n\
-        Print a tab-separated matrix of Robinson-Foulds distances between\n\
-        all input trees. Rows and columns are labeled by input order.\n\
+        Print an upper-triangular, tab-separated matrix of Robinson-Foulds\n\
+        distances between all input trees. Rows and columns are labeled by\n\
+        input order.\n\
 ";
