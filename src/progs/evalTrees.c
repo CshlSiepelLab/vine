@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <getopt.h>
+#include <openblas/cblas.h>
 #include <phast/misc.h>
 #include <nj.h>
 #include <likelihoods.h>
@@ -41,6 +42,8 @@ void print_stats(FILE *F, double mean, double stdev, double median,
 }
 
 int main(int argc, char *argv[]) {
+  openblas_set_num_threads(1);
+
   TreeNode *tree;
   TreeModel *mod = NULL;
   double kappa = -1, ll;
