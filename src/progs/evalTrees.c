@@ -317,7 +317,7 @@ int main(int argc, char *argv[]) {
   }
 
   /* output results */
-  fprintf(stderr, "Done processing %d trees.\n", lineno);
+  // fprintf(stderr, "Done processing %d trees.\n", lineno);
   if (lineno == 0)
     die("ERROR: no trees found in %s.\n", treefname);
    
