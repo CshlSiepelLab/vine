@@ -58,25 +58,25 @@ Matrix *tr_robinson_foulds_matrix(List *trees, unsigned int log_progress) {
     return matrix;
 
   TreeSplitContext *ctx = tr_split_context_new(lst_get_ptr(trees, 0));
+  TreeSplitVector **splits = smalloc(ntrees * sizeof(TreeSplitVector *));
+  for (int i = 0; i < ntrees; i++)
+    splits[i] = tr_collect_splits(ctx, lst_get_ptr(trees, i), FALSE);
 
   for (int i = 0; i < ntrees; i++) {
     mat_set(matrix, i, i, 0.0);
-    TreeSplitVector *reference_splits =
-      tr_collect_splits(ctx, lst_get_ptr(trees, i), FALSE);
     for (int j = i + 1; j < ntrees; j++) {
-      TreeSplitVector *comparison_splits =
-        tr_collect_splits(ctx, lst_get_ptr(trees, j), FALSE);
-      double d = tr_robinson_foulds_splits(reference_splits,
-                                           comparison_splits);
-      tr_split_vector_free(comparison_splits);
+      double d = tr_robinson_foulds_splits(splits[i], splits[j]);
       mat_set(matrix, i, j, d);
       mat_set(matrix, j, i, 0.0);
     }
-    tr_split_vector_free(reference_splits);
+    /* By symmetry, splits[i] is not needed after its upper-triangle row. */
+    tr_split_vector_free(splits[i]);
+    splits[i] = NULL;
     if (log_progress && (i + 1) % 100 == 0)
       fprintf(stderr, "Computed RF distances for %d of %d trees...\n",
               i + 1, ntrees);
   }
+  sfree(splits);
   tr_split_context_free(ctx);
   return matrix;
 }
