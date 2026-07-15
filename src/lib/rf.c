@@ -61,6 +61,8 @@ Matrix *tr_robinson_foulds_matrix(List *trees, unsigned int log_progress) {
   TreeSplitVector **splits = smalloc(ntrees * sizeof(TreeSplitVector *));
   for (int i = 0; i < ntrees; i++)
     splits[i] = tr_collect_splits(ctx, lst_get_ptr(trees, i), FALSE);
+  if (log_progress)
+    fprintf(stderr, "Done collecting splits.\n");
 
   for (int i = 0; i < ntrees; i++) {
     mat_set(matrix, i, i, 0.0);
@@ -73,7 +75,7 @@ Matrix *tr_robinson_foulds_matrix(List *trees, unsigned int log_progress) {
     tr_split_vector_free(splits[i]);
     splits[i] = NULL;
     if (log_progress && (i + 1) % 100 == 0)
-      fprintf(stderr, "Computed RF distances for %d of %d trees...\n",
+      fprintf(stderr, "Completed %d / %d trees...\n",
               i + 1, ntrees);
   }
   sfree(splits);
