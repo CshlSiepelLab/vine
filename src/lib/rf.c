@@ -16,15 +16,8 @@
 #include "tree_splits.h"
 #include "rf.h"
 
-double tr_robinson_foulds(TreeNode *t1, TreeNode *t2) {
-  TreeSplitContext *ctx = tr_split_context_new(t1);
-  if (tr_split_context_nleaves(ctx) < 3) {
-    tr_split_context_free(ctx);
-    return 0.0;
-  }
-
-  TreeSplitVector *s1 = tr_collect_splits(ctx, t1, FALSE);
-  TreeSplitVector *s2 = tr_collect_splits(ctx, t2, FALSE);
+double tr_robinson_foulds_splits(const TreeSplitVector *s1,
+                                 const TreeSplitVector *s2) {
   int i = 0, j = 0, common = 0;
   while (i < s1->size && j < s2->size) {
     int cmp = bs_compare(s1->splits[i].mask, s2->splits[j].mask);
@@ -39,7 +32,19 @@ double tr_robinson_foulds(TreeNode *t1, TreeNode *t2) {
       j++;
   }
 
-  int distance = s1->size + s2->size - 2 * common;
+  return s1->size + s2->size - 2 * common;
+}
+
+double tr_robinson_foulds(TreeNode *t1, TreeNode *t2) {
+  TreeSplitContext *ctx = tr_split_context_new(t1);
+  if (tr_split_context_nleaves(ctx) < 3) {
+    tr_split_context_free(ctx);
+    return 0.0;
+  }
+
+  TreeSplitVector *s1 = tr_collect_splits(ctx, t1, FALSE);
+  TreeSplitVector *s2 = tr_collect_splits(ctx, t2, FALSE);
+  double distance = tr_robinson_foulds_splits(s1, s2);
   tr_split_vector_free(s1);
   tr_split_vector_free(s2);
   tr_split_context_free(ctx);
@@ -49,19 +54,30 @@ double tr_robinson_foulds(TreeNode *t1, TreeNode *t2) {
 Matrix *tr_robinson_foulds_matrix(List *trees, unsigned int log_progress) {
   int ntrees = lst_size(trees);
   Matrix *matrix = mat_new(ntrees, ntrees);
+  if (ntrees == 0)
+    return matrix;
+
+  TreeSplitContext *ctx = tr_split_context_new(lst_get_ptr(trees, 0));
 
   for (int i = 0; i < ntrees; i++) {
     mat_set(matrix, i, i, 0.0);
+    TreeSplitVector *reference_splits =
+      tr_collect_splits(ctx, lst_get_ptr(trees, i), FALSE);
     for (int j = i + 1; j < ntrees; j++) {
-      double d = tr_robinson_foulds(lst_get_ptr(trees, i),
-                                    lst_get_ptr(trees, j));
+      TreeSplitVector *comparison_splits =
+        tr_collect_splits(ctx, lst_get_ptr(trees, j), FALSE);
+      double d = tr_robinson_foulds_splits(reference_splits,
+                                           comparison_splits);
+      tr_split_vector_free(comparison_splits);
       mat_set(matrix, i, j, d);
       mat_set(matrix, j, i, 0.0);
     }
+    tr_split_vector_free(reference_splits);
     if (log_progress && (i + 1) % 100 == 0)
       fprintf(stderr, "Computed RF distances for %d of %d trees...\n",
               i + 1, ntrees);
   }
+  tr_split_context_free(ctx);
   return matrix;
 }
 
