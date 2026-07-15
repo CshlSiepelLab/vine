@@ -46,7 +46,7 @@ double tr_robinson_foulds(TreeNode *t1, TreeNode *t2) {
   return distance;
 }
 
-Matrix *tr_robinson_foulds_matrix(List *trees) {
+Matrix *tr_robinson_foulds_matrix(List *trees, unsigned int log_progress) {
   int ntrees = lst_size(trees);
   Matrix *matrix = mat_new(ntrees, ntrees);
 
@@ -58,6 +58,9 @@ Matrix *tr_robinson_foulds_matrix(List *trees) {
       mat_set(matrix, i, j, d);
       mat_set(matrix, j, i, 0.0);
     }
+    if (log_progress && (i + 1) % 100 == 0)
+      fprintf(stderr, "Computed RF distances for %d of %d trees...\n",
+              i + 1, ntrees);
   }
   return matrix;
 }

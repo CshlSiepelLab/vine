@@ -20,8 +20,9 @@
 
 double tr_robinson_foulds(TreeNode *t1, TreeNode *t2);
 
-/* Compute and write an upper-triangular pairwise RF distance matrix. */
-Matrix *tr_robinson_foulds_matrix(List *trees);
+/* Compute and write an upper-triangular pairwise RF distance matrix.
+   If log_progress is true, report progress to stderr every 100 rows. */
+Matrix *tr_robinson_foulds_matrix(List *trees, unsigned int log_progress);
 void tr_write_robinson_foulds_matrix(Matrix *matrix, FILE *F);
 
 /* Compute split entropy, topology entropy, and mean branch-length variance

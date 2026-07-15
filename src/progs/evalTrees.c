@@ -358,7 +358,7 @@ int main(int argc, char *argv[]) {
     printf("Mean branch-length variance: %f\n", mean_var_per_branch);
   }
   else if (do_rf_matrix || do_rf_mds) {
-    D = tr_robinson_foulds_matrix(trees_all);
+    D = tr_robinson_foulds_matrix(trees_all, TRUE);
 
     if (do_rf_matrix)
       tr_write_robinson_foulds_matrix(D, rf_matrix_outfile);
