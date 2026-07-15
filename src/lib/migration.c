@@ -40,7 +40,20 @@ MigTable *mig_new() {
   M->rate_matrix_param_row = NULL;
   M->rate_matrix_param_col = NULL;
   M->primary_state = -1;
+  M->rate_prior_mean = 1.0;
   return M;
+}
+
+/* Sum exponential priors for the rate parameters; mean 0 disables the prior. */
+double mig_compute_log_exponential_rate_prior(MigTable *M) {
+  double logprior = 0;
+
+  if (M->rate_prior_mean > 0)
+    for (int i = 0; i < M->gtr_params->size; i++)
+      logprior -= vec_get(M->gtr_params, i) / M->rate_prior_mean +
+                  log(M->rate_prior_mean);
+
+  return logprior;
 }
 
 void mig_free(MigTable *M) {
@@ -1391,4 +1404,3 @@ void mig_grad_REV_dr(MigTable *mg, List *dP_dr_lst, double t) {
   sfree(dq); sfree(tmpmat); sfree(sinv_dq_s); sfree(f);
   lst_free(erows); lst_free(ecols); lst_free(distinct_rows);
 }
-
