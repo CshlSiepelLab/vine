@@ -1,4 +1,4 @@
-char HELP[3502] = "\nPROGRAM: evalTrees\n\
+char HELP[3679] = "\nPROGRAM: evalTrees\n\
 \n\
 USAGE: evalTrees trees.nwk > summary.txt\n\
 \n\
@@ -63,4 +63,8 @@ OPTIONS:\n\
         branch-length variance per branch\": topology-frequency-weighted\n\
         mean of sample variances of log branch lengths, averaged over\n\
         branches.\n\
+\n\
+    --rf-matrix, -r\n\
+        Print a tab-separated matrix of Robinson-Foulds distances between\n\
+        all input trees. Rows and columns are labeled by input order.\n\
 ";

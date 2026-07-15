@@ -15,9 +15,14 @@
 
 #include <stdio.h>
 #include <phast/lists.h>       /* List */
+#include <phast/matrix.h>      /* Matrix */
 #include <phast/trees.h>       /* TreeNode */
 
 double tr_robinson_foulds(TreeNode *t1, TreeNode *t2);
+
+/* Compute and write a symmetric pairwise RF distance matrix. */
+Matrix *tr_robinson_foulds_matrix(List *trees);
+void tr_write_robinson_foulds_matrix(Matrix *matrix, FILE *F);
 
 /* Compute split entropy, topology entropy, and mean branch-length variance
  * for a collection of trees (each element a TreeNode*).

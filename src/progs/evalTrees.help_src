@@ -63,3 +63,7 @@ OPTIONS:
         branch-length variance per branch": topology-frequency-weighted
         mean of sample variances of log branch lengths, averaged over
         branches.
+
+    --rf-matrix, -r
+        Print a tab-separated matrix of Robinson-Foulds distances between
+        all input trees. Rows and columns are labeled by input order.

@@ -63,6 +63,7 @@ int main(int argc, char *argv[]) {
   List **Dij_list = NULL;
   int is_crispr = FALSE;
   int do_entropy = FALSE;
+  int do_rf_matrix = FALSE;
   List *trees_all = NULL;
   CrisprMutTable *crispr_muts = NULL;
   CrisprMutModel *crispr_mod = NULL;
@@ -73,6 +74,7 @@ int main(int argc, char *argv[]) {
     {"hky-kappa", 1, 0, 'k'},
     {"crispr", 0, 0, 'c'},
     {"entropy", 0, 0, 'e'},
+    {"rf-matrix", 0, 0, 'r'},
     {"tree-model", 1, 0, 'm'},
     {"model-fit", 1, 0, 'f'},
     {"topology", 1, 0, 't'},
@@ -81,7 +83,7 @@ int main(int argc, char *argv[]) {
     {0, 0, 0, 0}
   };
 
-  while ((c = getopt_long(argc, argv, "b:ef:k:m:t:ch",
+  while ((c = getopt_long(argc, argv, "b:ef:k:m:t:chr",
                           long_opts, &opt_idx)) != -1) {
     switch (c) {
     case 'k':
@@ -110,6 +112,9 @@ int main(int argc, char *argv[]) {
     case 'e':
       do_entropy = TRUE;
       break;
+    case 'r':
+      do_rf_matrix = TRUE;
+      break;
     case 'h':
       printf("%s", HELP); 
       exit(0);
@@ -134,6 +139,10 @@ int main(int argc, char *argv[]) {
   
   if (do_entropy && (topol_ref != NULL || msafname != NULL || is_crispr))
     die("Option --entropy cannot be combined with --topology, --model-fit, or --crispr.\n");
+
+  if (do_rf_matrix && (topol_ref != NULL || msafname != NULL || is_crispr ||
+                       bsd_ref != NULL || do_entropy))
+    die("Option --rf-matrix cannot be combined with other evaluation modes.\n");
 
   if (bsd_ref != NULL && (topol_ref != NULL || msafname != NULL || is_crispr || do_entropy))
     die("Option --branch-score cannot be combined with --topology, --model-fit, --crispr, or --entropy.\n");
@@ -183,6 +192,10 @@ int main(int argc, char *argv[]) {
   else if (do_entropy) {
     trees_all = lst_new_ptr(1000);
     fprintf(stderr, "Computing split entropy...\n");
+  }
+  else if (do_rf_matrix) {
+    trees_all = lst_new_ptr(1000);
+    fprintf(stderr, "Computing pairwise RF distance matrix...\n");
   }
   else
     fprintf(stderr, "Computing pairwise-distance stats...\n");
@@ -249,7 +262,7 @@ int main(int argc, char *argv[]) {
       lst_push_ptr(trees_all, tree);   /* retain for point (mean-tree) BSD */
     }
 
-    else if (do_entropy) {
+    else if (do_entropy || do_rf_matrix) {
       lst_push_ptr(trees_all, tree);
     }
 
@@ -328,6 +341,11 @@ int main(int argc, char *argv[]) {
     printf("Split entropy: %f\n", H_split);
     printf("Topology entropy: %f\n", H_top);
     printf("Mean branch-length variance: %f\n", mean_var_per_branch);
+  }
+  else if (do_rf_matrix) {
+    D = tr_robinson_foulds_matrix(trees_all);
+    tr_write_robinson_foulds_matrix(D, stdout);
+    mat_free(D);
   }
   else {
     printf("#leaf1\tleaf2\tmean\tstd\tmed\tmin\tmax\tlow95CI\thigh95CI\tlow50CI\thigh50CI\n");

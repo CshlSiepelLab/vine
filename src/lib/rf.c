@@ -46,6 +46,38 @@ double tr_robinson_foulds(TreeNode *t1, TreeNode *t2) {
   return distance;
 }
 
+Matrix *tr_robinson_foulds_matrix(List *trees) {
+  int ntrees = lst_size(trees);
+  Matrix *matrix = mat_new(ntrees, ntrees);
+
+  for (int i = 0; i < ntrees; i++) {
+    mat_set(matrix, i, i, 0.0);
+    for (int j = i + 1; j < ntrees; j++) {
+      double d = tr_robinson_foulds(lst_get_ptr(trees, i),
+                                    lst_get_ptr(trees, j));
+      mat_set(matrix, i, j, d);
+      mat_set(matrix, j, i, d);
+    }
+  }
+  return matrix;
+}
+
+void tr_write_robinson_foulds_matrix(Matrix *matrix, FILE *F) {
+  if (matrix->nrows != matrix->ncols)
+    die("ERROR: Robinson-Foulds distance matrix must be square.\n");
+
+  fprintf(F, "tree");
+  for (int i = 0; i < matrix->ncols; i++)
+    fprintf(F, "\ttree%d", i + 1);
+  fprintf(F, "\n");
+  for (int i = 0; i < matrix->nrows; i++) {
+    fprintf(F, "tree%d", i + 1);
+    for (int j = 0; j < matrix->ncols; j++)
+      fprintf(F, "\t%.0f", mat_get(matrix, i, j));
+    fprintf(F, "\n");
+  }
+}
+
 typedef struct {
   TreeSplitVector *vec;
 } TreeSplitData;
