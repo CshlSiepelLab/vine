@@ -1,4 +1,4 @@
-char HELP[3709] = "\nPROGRAM: evalTrees\n\
+char HELP[3939] = "\nPROGRAM: evalTrees\n\
 \n\
 USAGE: evalTrees trees.nwk > summary.txt\n\
 \n\
@@ -68,4 +68,9 @@ OPTIONS:\n\
         Print an upper-triangular, tab-separated matrix of Robinson-Foulds\n\
         distances between all input trees. Rows and columns are labeled by\n\
         input order.\n\
+\n\
+    --rf-mds, -M\n\
+        Compute classical multidimensional scaling of the Robinson-Foulds\n\
+        distances between input trees and print the unscaled two-dimensional\n\
+        coordinates as a tab-separated table.\n\
 ";

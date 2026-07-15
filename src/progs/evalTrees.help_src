@@ -68,3 +68,8 @@ OPTIONS:
         Print an upper-triangular, tab-separated matrix of Robinson-Foulds
         distances between all input trees. Rows and columns are labeled by
         input order.
+
+    --rf-mds, -M
+        Compute classical multidimensional scaling of the Robinson-Foulds
+        distances between input trees and print the unscaled two-dimensional
+        coordinates as a tab-separated table.
