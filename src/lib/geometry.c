@@ -148,21 +148,18 @@ void estimate_mmvn_from_distances(CovarData *data, multi_MVN *mmvn) {
     estimate_mmvn_from_distances_euclidean(data, mmvn);
 }
 
-/* generate an approximate multivariate normal distribution from a distance matrix, for
-   use in initializing the variational inference algorithm. Uses multidimensional scaling  */
-void estimate_mmvn_from_distances_euclidean(CovarData *data, multi_MVN *mmvn) {
-  Matrix *D = data->dist;
+Matrix *classical_mds(Matrix *D, int dim) {
   int n = D->nrows;
   Matrix *Dsq, *G, *revec_real;
   Vector *eval_real;
+  Matrix *points;
   int i, j, d;
-  Vector *mu_full = vec_new(data->dim * n);
-  
-  if (D->nrows != D->ncols || mmvn->d * mmvn->n != data->dim * n)
-    die("ERROR in estimate_points_from_distances: bad dimensions\n");
-  if (data->dim > n - 1)
-    die("ERROR in estimate_mmvn_from_distances_euclidean: dimensionality %d exceeds the maximum of %d for %d points\n",
-        data->dim, n - 1, n);
+
+  if (D->nrows != D->ncols)
+    die("ERROR in classical_mds: distance matrix must be square\n");
+  if (dim > n - 1)
+    die("ERROR in classical_mds: dimensionality %d exceeds the maximum of %d for %d points\n",
+        dim, n - 1, n);
 
   /* build matrix of squared distances; note that D is upper
      triangular but Dsq must be symmetric */
@@ -184,32 +181,54 @@ void estimate_mmvn_from_distances_euclidean(CovarData *data, multi_MVN *mmvn) {
   eval_real = vec_new(n); vec_zero(eval_real);
   revec_real = mat_new(n, n); mat_zero(revec_real);
   if (mat_diagonalize_sym(G, eval_real, revec_real) != 0)
-    die("ERROR in estimate_mmvn_from_distances_euclidean: diagonalization failed.\n");
+    die("ERROR in classical_mds: diagonalization failed.\n");
   
-  /* create a vector of points based on the first 'dim' eigenvalues */
-  for (d = 0; d < data->dim; d++) {
+  /* create points based on the first 'dim' eigenvalues */
+  points = mat_new(n, dim);
+  for (d = 0; d < dim; d++) {
     double eval = vec_get(eval_real, n-1-d);
     if (eval < 0) eval = 0;
     double sqeval = sqrt(eval);
     /* product of evalsqrt and corresponding column of revec will define
        the dth component of each point */    
-    for (i = 0; i < n; i++) {
-      vec_set(mu_full, i*data->dim + d,
-              sqeval * mat_get(revec_real, i, n-1-d));
-    }
+    for (i = 0; i < n; i++)
+      mat_set(points, i, d, sqeval * mat_get(revec_real, i, n-1-d));
   }
-  
+
+  mat_free(Dsq);
+  mat_free(G);
+  vec_free(eval_real);
+  mat_free(revec_real);
+  return points;
+}
+
+/* generate an approximate multivariate normal distribution from a distance matrix, for
+   use in initializing the variational inference algorithm. Uses multidimensional scaling  */
+void estimate_mmvn_from_distances_euclidean(CovarData *data, multi_MVN *mmvn) {
+  Matrix *D = data->dist;
+  int n = D->nrows;
+  Vector *mu_full = vec_new(data->dim * n);
+  Matrix *points;
+
+  if (D->nrows != D->ncols || mmvn->d * mmvn->n != data->dim * n)
+    die("ERROR in estimate_points_from_distances: bad dimensions\n");
+  if (data->dim > n - 1)
+    die("ERROR in estimate_mmvn_from_distances_euclidean: dimensionality %d exceeds the maximum of %d for %d points\n",
+        data->dim, n - 1, n);
+
+  points = classical_mds(D, data->dim);
+  for (int i = 0; i < n; i++)
+    for (int d = 0; d < data->dim; d++)
+      vec_set(mu_full, i*data->dim + d, mat_get(points, i, d));
+  mat_free(points);
+
   /* rescale */
   vec_scale(mu_full, data->pointscale);
   mmvn_set_mu(mmvn, mu_full);
 
   /* covariance parameters should already be initialized */
   update_covariance(mmvn, data);
-  
-  mat_free(Dsq);
-  mat_free(G);
-  vec_free(eval_real);
-  mat_free(revec_real);
+
   vec_free(mu_full);
 }
 

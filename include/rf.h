@@ -15,9 +15,19 @@
 
 #include <stdio.h>
 #include <phast/lists.h>       /* List */
+#include <phast/matrix.h>      /* Matrix */
 #include <phast/trees.h>       /* TreeNode */
+#include "tree_splits.h"       /* TreeSplitVector */
 
+/* Compute RF distance from two sorted vectors of non-trivial splits. */
+double tr_robinson_foulds_splits(const TreeSplitVector *s1,
+                                 const TreeSplitVector *s2);
 double tr_robinson_foulds(TreeNode *t1, TreeNode *t2);
+
+/* Compute and write an upper-triangular pairwise RF distance matrix.
+   If log_progress is true, report progress to stderr every 100 rows. */
+Matrix *tr_robinson_foulds_matrix(List *trees, unsigned int log_progress);
+void tr_write_robinson_foulds_matrix(Matrix *matrix, FILE *F);
 
 /* Compute split entropy, topology entropy, and mean branch-length variance
  * for a collection of trees (each element a TreeNode*).

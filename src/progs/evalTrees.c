@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <getopt.h>
+#include <openblas/cblas.h>
 #include <phast/misc.h>
 #include <nj.h>
 #include <likelihoods.h>
@@ -24,6 +25,7 @@
 #include <phast/tree_model.h>
 #include <rf.h>
 #include <branch_score.h>
+#include <geometry.h>
 #include <tree_parser.h>
 #include "evalTrees.help"
 
@@ -40,6 +42,8 @@ void print_stats(FILE *F, double mean, double stdev, double median,
 }
 
 int main(int argc, char *argv[]) {
+  openblas_set_num_threads(1);
+
   TreeNode *tree;
   TreeModel *mod = NULL;
   double kappa = -1, ll;
@@ -49,7 +53,8 @@ int main(int argc, char *argv[]) {
   int c;  /* getopt_long returns int; storing in char makes EOF (-1)
              alias to 255 on platforms where char is unsigned, so the
              option loop never terminates. */
-  FILE *treefile, *msafile = NULL;
+  FILE *treefile, *msafile = NULL, *rf_matrix_outfile = NULL,
+    *rf_mds_outfile = NULL;
   MarkovMatrix *rmat;
   msa_format_type format;
   TreeNode *topol_ref = NULL;
@@ -57,12 +62,15 @@ int main(int argc, char *argv[]) {
   MSA *evalaln = NULL;
   double mean, stdev, median, min, max, min_95CI, max_95CI, q25, q75;
   char *topolfname = NULL, *msafname = NULL, *treefname = NULL, *bsdref_fname = NULL;
+  char *rf_matrix_outfname = NULL, *rf_mds_outfname = NULL;
   List *rfdists = NULL, *lldists, *bsddists = NULL;
   char **names = NULL;
   Matrix *D = NULL;
   List **Dij_list = NULL;
   int is_crispr = FALSE;
   int do_entropy = FALSE;
+  int do_rf_matrix = FALSE;
+  int do_rf_mds = FALSE;
   List *trees_all = NULL;
   CrisprMutTable *crispr_muts = NULL;
   CrisprMutModel *crispr_mod = NULL;
@@ -73,6 +81,8 @@ int main(int argc, char *argv[]) {
     {"hky-kappa", 1, 0, 'k'},
     {"crispr", 0, 0, 'c'},
     {"entropy", 0, 0, 'e'},
+    {"rf-matrix", 1, 0, 'r'},
+    {"rf-mds", 1, 0, 'M'},
     {"tree-model", 1, 0, 'm'},
     {"model-fit", 1, 0, 'f'},
     {"topology", 1, 0, 't'},
@@ -81,7 +91,7 @@ int main(int argc, char *argv[]) {
     {0, 0, 0, 0}
   };
 
-  while ((c = getopt_long(argc, argv, "b:ef:k:m:t:ch",
+  while ((c = getopt_long(argc, argv, "b:ef:k:m:t:chr:M:",
                           long_opts, &opt_idx)) != -1) {
     switch (c) {
     case 'k':
@@ -110,6 +120,14 @@ int main(int argc, char *argv[]) {
     case 'e':
       do_entropy = TRUE;
       break;
+    case 'r':
+      do_rf_matrix = TRUE;
+      rf_matrix_outfname = optarg;
+      break;
+    case 'M':
+      do_rf_mds = TRUE;
+      rf_mds_outfname = optarg;
+      break;
     case 'h':
       printf("%s", HELP); 
       exit(0);
@@ -134,6 +152,11 @@ int main(int argc, char *argv[]) {
   
   if (do_entropy && (topol_ref != NULL || msafname != NULL || is_crispr))
     die("Option --entropy cannot be combined with --topology, --model-fit, or --crispr.\n");
+
+  if ((do_rf_matrix || do_rf_mds) &&
+      (topol_ref != NULL || msafname != NULL || is_crispr ||
+       bsd_ref != NULL || do_entropy))
+    die("Options --rf-matrix and --rf-mds cannot be combined with other evaluation modes.\n");
 
   if (bsd_ref != NULL && (topol_ref != NULL || msafname != NULL || is_crispr || do_entropy))
     die("Option --branch-score cannot be combined with --topology, --model-fit, --crispr, or --entropy.\n");
@@ -183,6 +206,14 @@ int main(int argc, char *argv[]) {
   else if (do_entropy) {
     trees_all = lst_new_ptr(1000);
     fprintf(stderr, "Computing split entropy...\n");
+  }
+  else if (do_rf_matrix || do_rf_mds) {
+    trees_all = lst_new_ptr(1000);
+    if (do_rf_matrix)
+      rf_matrix_outfile = phast_fopen(rf_matrix_outfname, "w");
+    if (do_rf_mds)
+      rf_mds_outfile = phast_fopen(rf_mds_outfname, "w");
+    fprintf(stderr, "Computing pairwise RF distances...\n");
   }
   else
     fprintf(stderr, "Computing pairwise-distance stats...\n");
@@ -249,7 +280,7 @@ int main(int argc, char *argv[]) {
       lst_push_ptr(trees_all, tree);   /* retain for point (mean-tree) BSD */
     }
 
-    else if (do_entropy) {
+    else if (do_entropy || do_rf_matrix || do_rf_mds) {
       lst_push_ptr(trees_all, tree);
     }
 
@@ -289,7 +320,7 @@ int main(int argc, char *argv[]) {
   }
 
   /* output results */
-  fprintf(stderr, "Done processing %d trees.\n", lineno);
+  // fprintf(stderr, "Done processing %d trees.\n", lineno);
   if (lineno == 0)
     die("ERROR: no trees found in %s.\n", treefname);
    
@@ -328,6 +359,30 @@ int main(int argc, char *argv[]) {
     printf("Split entropy: %f\n", H_split);
     printf("Topology entropy: %f\n", H_top);
     printf("Mean branch-length variance: %f\n", mean_var_per_branch);
+  }
+  else if (do_rf_matrix || do_rf_mds) {
+    D = tr_robinson_foulds_matrix(trees_all, TRUE);
+
+    if (do_rf_matrix)
+      tr_write_robinson_foulds_matrix(D, rf_matrix_outfile);
+
+    if (do_rf_mds) {
+      Matrix *points;
+      if (lineno < 3)
+        die("ERROR: --rf-mds requires at least three trees.\n");
+      points = classical_mds(D, 2);
+      fprintf(rf_mds_outfile, "tree\tx\ty\n");
+      for (i = 0; i < lineno; i++)
+        fprintf(rf_mds_outfile, "tree%d\t%.6f\t%.6f\n", i + 1,
+                mat_get(points, i, 0), mat_get(points, i, 1));
+      mat_free(points);
+    }
+
+    mat_free(D);
+    if (rf_matrix_outfile != NULL)
+      fclose(rf_matrix_outfile);
+    if (rf_mds_outfile != NULL)
+      fclose(rf_mds_outfile);
   }
   else {
     printf("#leaf1\tleaf2\tmean\tstd\tmed\tmin\tmax\tlow95CI\thigh95CI\tlow50CI\thigh50CI\n");

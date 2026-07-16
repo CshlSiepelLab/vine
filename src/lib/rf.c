@@ -16,15 +16,8 @@
 #include "tree_splits.h"
 #include "rf.h"
 
-double tr_robinson_foulds(TreeNode *t1, TreeNode *t2) {
-  TreeSplitContext *ctx = tr_split_context_new(t1);
-  if (tr_split_context_nleaves(ctx) < 3) {
-    tr_split_context_free(ctx);
-    return 0.0;
-  }
-
-  TreeSplitVector *s1 = tr_collect_splits(ctx, t1, FALSE);
-  TreeSplitVector *s2 = tr_collect_splits(ctx, t2, FALSE);
+double tr_robinson_foulds_splits(const TreeSplitVector *s1,
+                                 const TreeSplitVector *s2) {
   int i = 0, j = 0, common = 0;
   while (i < s1->size && j < s2->size) {
     int cmp = bs_compare(s1->splits[i].mask, s2->splits[j].mask);
@@ -39,11 +32,71 @@ double tr_robinson_foulds(TreeNode *t1, TreeNode *t2) {
       j++;
   }
 
-  int distance = s1->size + s2->size - 2 * common;
+  return s1->size + s2->size - 2 * common;
+}
+
+double tr_robinson_foulds(TreeNode *t1, TreeNode *t2) {
+  TreeSplitContext *ctx = tr_split_context_new(t1);
+  if (tr_split_context_nleaves(ctx) < 3) {
+    tr_split_context_free(ctx);
+    return 0.0;
+  }
+
+  TreeSplitVector *s1 = tr_collect_splits(ctx, t1, FALSE);
+  TreeSplitVector *s2 = tr_collect_splits(ctx, t2, FALSE);
+  double distance = tr_robinson_foulds_splits(s1, s2);
   tr_split_vector_free(s1);
   tr_split_vector_free(s2);
   tr_split_context_free(ctx);
   return distance;
+}
+
+Matrix *tr_robinson_foulds_matrix(List *trees, unsigned int log_progress) {
+  int ntrees = lst_size(trees);
+  Matrix *matrix = mat_new(ntrees, ntrees);
+  if (ntrees == 0)
+    return matrix;
+
+  TreeSplitContext *ctx = tr_split_context_new(lst_get_ptr(trees, 0));
+  TreeSplitVector **splits = smalloc(ntrees * sizeof(TreeSplitVector *));
+  for (int i = 0; i < ntrees; i++)
+    splits[i] = tr_collect_splits(ctx, lst_get_ptr(trees, i), FALSE);
+  if (log_progress)
+    fprintf(stderr, "Done collecting splits.\n");
+
+  for (int i = 0; i < ntrees; i++) {
+    mat_set(matrix, i, i, 0.0);
+    for (int j = i + 1; j < ntrees; j++) {
+      double d = tr_robinson_foulds_splits(splits[i], splits[j]);
+      mat_set(matrix, i, j, d);
+      mat_set(matrix, j, i, 0.0);
+    }
+    /* By symmetry, splits[i] is not needed after its upper-triangle row. */
+    tr_split_vector_free(splits[i]);
+    splits[i] = NULL;
+    if (log_progress && (i + 1) % 100 == 0)
+      fprintf(stderr, "Completed %d / %d trees...\n",
+              i + 1, ntrees);
+  }
+  sfree(splits);
+  tr_split_context_free(ctx);
+  return matrix;
+}
+
+void tr_write_robinson_foulds_matrix(Matrix *matrix, FILE *F) {
+  if (matrix->nrows != matrix->ncols)
+    die("ERROR: Robinson-Foulds distance matrix must be square.\n");
+
+  fprintf(F, "tree");
+  for (int i = 0; i < matrix->ncols; i++)
+    fprintf(F, "\ttree%d", i + 1);
+  fprintf(F, "\n");
+  for (int i = 0; i < matrix->nrows; i++) {
+    fprintf(F, "tree%d", i + 1);
+    for (int j = 0; j < matrix->ncols; j++)
+      fprintf(F, "\t%.0f", mat_get(matrix, i, j));
+    fprintf(F, "\n");
+  }
 }
 
 typedef struct {

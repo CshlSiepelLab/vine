@@ -1,4 +1,4 @@
-char HELP[3502] = "\nPROGRAM: evalTrees\n\
+char HELP[4079] = "\nPROGRAM: evalTrees\n\
 \n\
 USAGE: evalTrees trees.nwk > summary.txt\n\
 \n\
@@ -63,4 +63,15 @@ OPTIONS:\n\
         branch-length variance per branch\": topology-frequency-weighted\n\
         mean of sample variances of log branch lengths, averaged over\n\
         branches.\n\
+\n\
+    --rf-matrix, -r <file.tsv>\n\
+        Print an upper-triangular, tab-separated matrix of Robinson-Foulds\n\
+        distances between all input trees to the specified file. Rows and\n\
+        columns are labeled by input order.\n\
+\n\
+    --rf-mds, -M <file.tsv>\n\
+        Compute classical multidimensional scaling of the Robinson-Foulds\n\
+        distances between input trees and print the unscaled two-dimensional\n\
+        coordinates to the specified tab-separated file. Can be used together\n\
+        with --rf-matrix to produce both outputs in one run.\n\
 ";

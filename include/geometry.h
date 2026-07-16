@@ -46,6 +46,10 @@ void points_to_distances_hyperbolic(Vector *points, CovarData *data);
 
 void estimate_mmvn_from_distances(CovarData *data, multi_MVN *mmvn);
 
+/* Classical multidimensional scaling of an upper-triangular distance
+   matrix. Returns an n x dim matrix of unscaled point coordinates. */
+Matrix *classical_mds(Matrix *D, int dim);
+
 void estimate_mmvn_from_distances_euclidean(CovarData *data, multi_MVN *mmvn);
 
 void estimate_mmvn_from_distances_hyperbolic(CovarData *data, multi_MVN *mmvn);
