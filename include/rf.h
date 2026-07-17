@@ -29,14 +29,17 @@ double tr_robinson_foulds(TreeNode *t1, TreeNode *t2);
 Matrix *tr_robinson_foulds_matrix(List *trees, unsigned int log_progress);
 void tr_write_robinson_foulds_matrix(Matrix *matrix, FILE *F);
 
-/* Compute split entropy, topology entropy, and mean branch-length variance
- * for a collection of trees (each element a TreeNode*).
+/* Compute the number of unique topologies, split entropy, topology entropy,
+ * and mean branch-length variance for a collection of trees (each element a
+ * TreeNode*).
+ * n_topologies:       number of distinct sampled topologies.
  * H_split:            sum of Bernoulli entropies over non-trivial splits.
  * H_top:              Shannon entropy over distinct topologies.
  * mean_var:           topology-weighted sum of sample variances of log
  *                     branch lengths, summed over all branches.
  * mean_var_per_branch: mean_var / m  (m = number of branches per tree). */
-void tr_tree_entropy(List *trees, double *H_split, double *H_top,
+void tr_tree_entropy(List *trees, int *n_topologies,
+                     double *H_split, double *H_top,
                      double *mean_var, double *mean_var_per_branch);
 
 #endif

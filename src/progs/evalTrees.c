@@ -354,8 +354,11 @@ int main(int argc, char *argv[]) {
     printf("Reference tree length: %f\n", tr_tree_length(bsd_ref));
   }
   else if (do_entropy) {
+    int n_topologies;
     double H_split, H_top, mean_var, mean_var_per_branch;
-    tr_tree_entropy(trees_all, &H_split, &H_top, &mean_var, &mean_var_per_branch);
+    tr_tree_entropy(trees_all, &n_topologies, &H_split, &H_top,
+                    &mean_var, &mean_var_per_branch);
+    printf("Unique topologies: %d\n", n_topologies);
     printf("Split entropy: %f\n", H_split);
     printf("Topology entropy: %f\n", H_top);
     printf("Mean branch-length variance: %f\n", mean_var_per_branch);
