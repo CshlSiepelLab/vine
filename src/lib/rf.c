@@ -131,9 +131,11 @@ static double log_branch_length(double length) {
   return log(length > 0.0 ? length : 1e-300);
 }
 
-void tr_tree_entropy(List *trees, double *H_split, double *H_top,
+void tr_tree_entropy(List *trees, int *n_topologies,
+                     double *H_split, double *H_top,
                      double *mean_var, double *mean_var_per_branch) {
   int ntrees = lst_size(trees);
+  *n_topologies = 0;
   *H_split = 0.0;
   *H_top = 0.0;
   *mean_var = 0.0;
@@ -177,6 +179,7 @@ void tr_tree_entropy(List *trees, double *H_split, double *H_top,
       group_end++;
 
     int group_size = group_end - group_start;
+    (*n_topologies)++;
     int nbranches = first->size;
     double topology_prob = (double)group_size / ntrees;
     *H_top += -topology_prob * log(topology_prob);

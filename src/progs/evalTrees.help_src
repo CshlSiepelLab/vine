@@ -56,7 +56,8 @@ OPTIONS:
 
     --entropy, -e
         Compute uncertainty measures for the tree distribution.  Reports
-        three quantities: (1) "Split entropy": sum of Bernoulli entropies
+        the number of unique tree topologies and three uncertainty measures:
+        (1) "Split entropy": sum of Bernoulli entropies
         over all non-trivial splits weighted by their posterior inclusion
         probabilities; (2) "Topology entropy": Shannon entropy over
         distinct topologies, -sum p(tau) log p(tau); (3) "Mean
