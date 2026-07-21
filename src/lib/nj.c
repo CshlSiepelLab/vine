@@ -45,30 +45,22 @@ static void nj_record_join(Neighbors *nb, int step_idx, int u, int v, int w,
   ev->row_sum_v = row_sum_v;
 }
 
-static double nj_get_pair_dist(Matrix *D, int i, int j) {
-  return i < j ? mat_get(D, i, j) : mat_get(D, j, i);
-}
-
-static double nj_compute_Q_value(int i, int j, int nactive, Matrix *D,
-                                 Vector *sums) {
-  return (nactive - 2) * nj_get_pair_dist(D, i, j) -
-    vec_get(sums, i) - vec_get(sums, j);
-}
-
 static void nj_find_min_q(Matrix *D, const int *active_ids, Vector *sums,
                           int nactive, int *u, int *v) {
   int a, b;
   double best = INFINITY;
+  double scale = nactive - 2;
+  double *sum = sums->data;
 
   *u = *v = -1;
 
   for (a = 0; a < nactive; a++) {
     int i = active_ids[a];
+    double *row = D->data[i];
+    double sum_i = sum[i];
     for (b = a+1; b < nactive; b++) {
       int j = active_ids[b];
-      double q;
-
-      q = nj_compute_Q_value(i, j, nactive, D, sums);
+      double q = scale * row[j] - sum_i - sum[j];
       if (q < best) {
         best = q;
         *u = i;
