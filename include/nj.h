@@ -41,16 +41,10 @@ typedef struct neigh_struc {
   int branch_idx_root_v;    /* dL_dt index for branch root_v->root */
 } Neighbors;
 
-void nj_resetQ(Matrix *Q, Matrix *D, Vector *active, Vector *sums, int *u,
-               int *v, int maxidx);
-
 void nj_updateD(Matrix *D, int u, int v, int w, Vector *active, Vector *sums);
 
-TreeNode *nj_infer_tree(Matrix *initD, char **names, Matrix *dt_dD,
-                        Neighbors *nb);
-
-TreeNode *nj_fast_infer(Matrix *initD, char **names, Matrix *dt_dD,
-                        Neighbors *nb);
+TreeNode *nj_infer(Matrix *initD, char **names, Matrix *dt_dD,
+                   Neighbors *nb);
 
 double compute_JC_dist(MSA *msa, int i, int j);
 
