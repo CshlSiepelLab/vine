@@ -41,9 +41,6 @@ typedef struct neigh_struc {
   int branch_idx_root_v;    /* dL_dt index for branch root_v->root */
 } Neighbors;
 
-void nj_updateD(Matrix *D, int u, int v, int w, Vector *active, Vector *sums,
-                int nactive);
-
 TreeNode *nj_infer(Matrix *initD, char **names, Matrix *dt_dD,
                    Neighbors *nb);
 
@@ -69,10 +66,6 @@ Neighbors *nj_new_neighbors(int n);
 void nj_free_neighbors(Neighbors *nb);
 
 void nj_copy_neighbors(Neighbors *dest, Neighbors *src);
-
-void nj_record_join(Neighbors *nb, int step_idx, int u, int v, int w,
-                    int nactive, Vector *sums, Matrix *D, int branch_idx_u,
-                    int branch_idx_v);
 
 void nj_dL_dD_from_neighbors(const Neighbors *nb, Vector *dL_dt,
                              Vector *dL_dD);

@@ -22,47 +22,27 @@
 #include <backprop.h>
 #include <upgma.h>
 
-/* Update distance matrix after operation that joins neighbors u and v
-   and adds new node w.  Update active list accordingly. Assumes u < v
-   < w.  Also assumes all nodes > w are inactive. Assumes sums are
-   precomputed */
-void nj_updateD(Matrix *D, int u, int v, int w, Vector *active, Vector *sums,
-                int nactive) {
-  int k;
+/* Record one neighbor-joining merge event into the Neighbors tape. */
+static void nj_record_join(Neighbors *nb, int step_idx, int u, int v, int w,
+                           int nactive, double d_uv, double row_sum_u,
+                           double row_sum_v, int branch_idx_u,
+                           int branch_idx_v) {
+  if (step_idx < 0 || step_idx >= nb->nsteps)
+    die("nj_record_join: step_idx (%d) out of range [0,%d)\n",
+        step_idx, nb->nsteps);
 
-  if (D->nrows != D->ncols)
-    die("ERROR nj_updateD: dimension mismatch\n");
-  if (v <= u || w <= v)
-    die("ERROR nj_updateD: indices out of order\n");
-  if (nactive <= 2)
-    die("ERROR nj_updateD: too few active nodes\n");
-  
-  mat_set(D, u, w, 0.5 * mat_get(D, u, v) +
-          1.0/(2.0*(nactive-2)) * (vec_get(sums, u) - vec_get(sums, v)));
+  JoinEvent *ev = &nb->steps[step_idx];
+  ev->u = u;
+  ev->v = v;
+  ev->w = w;
+  ev->nk = nactive;
+  ev->branch_idx_u = branch_idx_u;
+  ev->branch_idx_v = branch_idx_v;
 
-  mat_set(D, v, w, mat_get(D, u, v) - mat_get(D, u, w));
-
-  /* we can't let the distances go negative in this implementation
-     because it will mess up the likelihood calculation */
-  if (signbit(mat_get(D, u, w))) /* covers -0 case */
-    mat_set(D, u, w, 0);
-  if (signbit(mat_get(D, v, w)))
-    mat_set(D, v, w, 0);
-  
-  for (k = 0; k < w; k++) {
-    if (vec_get(active, k) == TRUE && k != u && k != v) {
-      double du, dv;
-
-      /* needed because of upper triangular constraint */
-      du = (u < k ? mat_get(D, u, k) : mat_get(D, k, u));
-      dv = (v < k ? mat_get(D, v, k) : mat_get(D, k, v));
-      
-      mat_set(D, k, w, 0.5 * (du + dv - mat_get(D, u, v)));
-
-      if (mat_get(D, k, w) < 0)
-        mat_set(D, k, w, 0);
-    }
-  }
+  assert(u < v);  /* enforced by logical cluster order */
+  ev->d_uv = d_uv;
+  ev->row_sum_u = row_sum_u;
+  ev->row_sum_v = row_sum_v;
 }
 
 static double nj_get_pair_dist(Matrix *D, int i, int j) {
@@ -101,181 +81,174 @@ static void nj_find_min_q(Matrix *D, const int *active_ids, Vector *sums,
     die("ERROR nj_find_min_q: fewer than two active taxa\n");
 }
 
-
-/* Infer a tree from a starting distance matrix. Scans active Q values
-   directly.
-   Does not alter the provided distance matrix. If dt_dD is non-NULL,
-   will be populated with Jacobian for 2n-3 branch lengths
-   vs. n-choose-2 pairwise distances */
-TreeNode* nj_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *nb) {
-  int n = initD->nrows, orign = n;
-  int N = 2*n - 2;   /* number of nodes in unrooted tree */
-  int i, j, u = -1, v = -1, w;
-  int step_idx = 0;
+/* Infer a tree from a starting distance matrix. Reuse slot u for each newly
+   joined cluster and retire slot v, so the working distance matrix remains
+   n x n. Physical matrix slots are mapped to stable logical cluster IDs for
+   recording and backpropagation. Does not alter the provided distance matrix.
+   If dt_dD is non-NULL, populate it with the branch-length Jacobian. */
+TreeNode *nj_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *nb) {
+  int n = initD->nrows, nactive = n;
+  int N = 2*n - 2, npairs = n * (n-1) / 2;
+  int Npairs = N * (N-1) / 2;
+  int i, j, a, slot_u = -1, slot_v = -1, w = n, step_idx = 0;
   Matrix *D;
-  Vector *sums, *active;
-  int *active_ids;
-  List *nodes;  
-  TreeNode *node_u, *node_v, *node_w, *root;
-  int npairs = n * (n-1) / 2, Npairs = N * (N-1) / 2;
+  Vector *sums;
+  Vector *logical_active = NULL;
+  int *active_ids, *cluster_ids;
+  TreeNode **nodes;
+  TreeNode *root;
   static SparseMatrix *Jk = NULL, *Jnext = NULL;
-    
+
   if (initD->nrows != initD->ncols || n < 3)
     die("ERROR nj_infer: bad distance matrix\n");
-
   if (dt_dD != NULL && (dt_dD->nrows != N || dt_dD->ncols != npairs))
     die("ERROR nj_infer: bad dimension in dt_dD\n");
-    
-  /* create a larger distance matrix of dimension N x N to
-     accommodate internal nodes; also set up list of active nodes
-     and starting tree nodes */
-  D = mat_new(N, N); mat_zero(D);
-  active = vec_new(N); vec_set_all(active, FALSE);
-  active_ids = smalloc(N * sizeof(*active_ids));
-  sums = vec_new(N); vec_zero(sums);
-  nodes = lst_new_ptr(N);
-  tr_reset_id();
-    
-  for (i = 0; i < n; i++) {
-    node_u = tr_new_node();
-    snprintf(node_u->name, sizeof(node_u->name), "%s", names[i]);
-    lst_push_ptr(nodes, node_u);
-    vec_set(active, i, TRUE);
-    active_ids[i] = i;
-    for (j = i+1; j < n; j++) {
-      double d = mat_get(initD, i, j);
-      mat_set(D, i, j, d);
-      sums->data[i] += d;
-      sums->data[j] += d;
-    }
-  }
 
-  /* set up backprop data.  The Jk/Jnext sparse-matrix scratch is
-     cached across calls to avoid per-iteration spmat_new/free, but
-     when the problem size changes (multi-MSA process, mixture model
-     with per-component taxon count, etc.) the cached matrix has the
-     wrong dimensions and the old assert would just abort.  Detect a
-     size change and rebuild instead. */
+  D = mat_new(n, n);
+  sums = vec_new(n);
+  active_ids = smalloc(n * sizeof(*active_ids));
+  cluster_ids = smalloc(n * sizeof(*cluster_ids));
+  nodes = smalloc(n * sizeof(*nodes));
+
   if (dt_dD != NULL) {
+    logical_active = vec_new(N);
+    vec_set_all(logical_active, FALSE);
     if (Jk != NULL && (Jk->nrows != Npairs || Jk->ncols != npairs)) {
       spmat_free(Jk);
       spmat_free(Jnext);
       Jk = Jnext = NULL;
     }
-    if (Jk == NULL) { /* first call (or after a size change) */
+    if (Jk == NULL) {
       Jk = spmat_new(Npairs, npairs, 100);
       Jnext = spmat_new(Npairs, npairs, 100);
     }
-
     nj_backprop_init_sparse(Jk, n);
     mat_zero(dt_dD);
   }
-    
-  /* main loop, over internal nodes w */
-  for (w = n; w < N; w++) {
-    /* join u and v; w is the new node */
-    nj_find_min_q(D, active_ids, sums, n, &u, &v);
-    nj_updateD(D, u, v, w, active, sums, n);
-    node_w = tr_new_node();
-    lst_push_ptr(nodes, node_w);
 
-    /* attach child nodes to parent and set branch lengths */
-    node_u = lst_get_ptr(nodes, u);
-    node_v = lst_get_ptr(nodes, v);
+  vec_zero(sums);
+  tr_reset_id();
+  for (i = 0; i < n; i++) {
+    nodes[i] = tr_new_node();
+    snprintf(nodes[i]->name, sizeof(nodes[i]->name), "%s", names[i]);
+    active_ids[i] = i;
+    cluster_ids[i] = i;
+    if (logical_active != NULL)
+      vec_set(logical_active, i, TRUE);
+    mat_set(D, i, i, 0.0);
+    for (j = i + 1; j < n; j++) {
+      double d = mat_get(initD, i, j);
+      mat_set(D, i, j, d);
+      mat_set(D, j, i, d);
+      sums->data[i] += d;
+      sums->data[j] += d;
+    }
+  }
+
+  while (nactive > 2) {
+    TreeNode *node_u, *node_v, *node_w;
+    double d_uv, limb_u, limb_v, sum_w = 0.0;
+    int u, v;
+
+    nj_find_min_q(D, active_ids, sums, nactive, &slot_u, &slot_v);
+    u = cluster_ids[slot_u];
+    v = cluster_ids[slot_v];
+    d_uv = mat_get(D, slot_u, slot_v);
+    /* Preserve the original arithmetic order for reproducibility. */
+    limb_u = 0.5 * d_uv + 1.0 / (2.0 * (nactive - 2)) *
+      (sums->data[slot_u] - sums->data[slot_v]);
+    limb_v = d_uv - limb_u;
+    if (signbit(limb_u)) limb_u = 0.0;
+    if (signbit(limb_v)) limb_v = 0.0;
+
+    node_u = nodes[slot_u];
+    node_v = nodes[slot_v];
+    node_w = tr_new_node();
     tr_add_child(node_w, node_u);
     tr_add_child(node_w, node_v);
-    node_u->dparent = mat_get(D, u, w);
-    node_v->dparent = mat_get(D, v, w);
-    
-    /* update row sums */
-    vec_set(sums, w, 0);  
-    for (i = 0; i < w; i++) {
-      if (vec_get(active, i) == TRUE && i != u && i != v) {   
-        double du = (u < i ? mat_get(D, u, i) : mat_get(D, i, u)); /* upper triangular */
-        double dv = (v < i ? mat_get(D, v, i) : mat_get(D, i, v));
-        sums->data[i] += (mat_get(D, i, w) - du - dv); /* can be updated */
-        sums->data[w] += mat_get(D, i, w); /* have to compute from scratch */
-      }
-    }
+    node_u->dparent = limb_u;
+    node_v->dparent = limb_v;
 
-    if (nb != NULL) { /* record neighbor-joining event */
-      nj_record_join(nb, step_idx, u, v, w, n, sums,
-                     D, node_u->id, node_v->id);
+    if (nb != NULL) {
+      nj_record_join(nb, step_idx, u, v, w, nactive, d_uv,
+                     sums->data[slot_u], sums->data[slot_v],
+                     node_u->id, node_v->id);
       step_idx++;
     }
-    
     if (dt_dD != NULL) {
-            nj_backprop_set_dt_dD_sparse(Jk, dt_dD, orign, u, v, node_u->id, node_v->id, active);
-            nj_backprop_sparse(Jk, Jnext, orign, u, v, w, active);
+      nj_backprop_set_dt_dD_sparse(Jk, dt_dD, n, u, v,
+                                   node_u->id, node_v->id, logical_active);
+      nj_backprop_sparse(Jk, Jnext, n, u, v, w, logical_active);
     }
 
-    /* this has to be done after the backprop calls */
-    vec_set(active, u, FALSE);
-    vec_set(active, v, FALSE);
-    vec_set(active, w, TRUE);
-    /* active_ids is sorted before the merge. Remove u and v in place,
-       then append w, which is larger than every existing node ID. */
+    for (a = 0; a < nactive; a++) {
+      int k = active_ids[a];
+      double du, dv, dw;
+      if (k == slot_u || k == slot_v) continue;
+      du = mat_get(D, slot_u, k);
+      dv = mat_get(D, slot_v, k);
+      dw = 0.5 * (du + dv - d_uv);
+      if (dw < 0.0) dw = 0.0;
+      mat_set(D, slot_u, k, dw);
+      mat_set(D, k, slot_u, dw);
+      sums->data[k] += dw - du - dv;
+      sum_w += dw;
+    }
+    sums->data[slot_u] = sum_w;
+    nodes[slot_u] = node_w;
+    nodes[slot_v] = NULL;
+    cluster_ids[slot_u] = w;
+
+    if (logical_active != NULL) {
+      vec_set(logical_active, u, FALSE);
+      vec_set(logical_active, v, FALSE);
+      vec_set(logical_active, w, TRUE);
+    }
+    /* Remove both old logical clusters, then append the new cluster's slot. */
     j = 0;
-    for (i = 0; i < n; i++)
-      if (active_ids[i] != u && active_ids[i] != v)
-        active_ids[j++] = active_ids[i];
-    active_ids[j] = w;
-    n--;  /* one fewer active nodes */
+    for (a = 0; a < nactive; a++)
+      if (active_ids[a] != slot_u && active_ids[a] != slot_v)
+        active_ids[j++] = active_ids[a];
+    active_ids[j] = slot_u;
+    nactive--;
+    w++;
 
     if (dt_dD != NULL) {
-      /* swap pointers to avoid deep copy */
-      SparseMatrix *tmp = Jk; 
-      Jk = Jnext; 
+      SparseMatrix *tmp = Jk;
+      Jk = Jnext;
       Jnext = tmp;
     }
   }
 
-  /* there should be exactly two active nodes left. Join them under
-     a root. */
-  node_u = NULL; node_v = NULL;
+  slot_u = active_ids[0];
+  slot_v = active_ids[1];
   root = tr_new_node();
-  for (i = 0; i < N; i++) {
-    if (vec_get(active, i) == TRUE) {
-      if (node_u == NULL) {
-        u = i;
-        node_u = lst_get_ptr(nodes, i);
-      }
-      else if (node_v == NULL) {
-        v = i;
-        node_v = lst_get_ptr(nodes, i);
-      }
-      else
-        die("ERROR nj_infer: more than two nodes left at root\n");
-    }
+  tr_add_child(root, nodes[slot_u]);
+  tr_add_child(root, nodes[slot_v]);
+  nodes[slot_u]->dparent = mat_get(D, slot_u, slot_v) / 2.0;
+  nodes[slot_v]->dparent = mat_get(D, slot_u, slot_v) / 2.0;
+  if (nb != NULL) {
+    nb->nsteps = step_idx;
+    nb->root_u = cluster_ids[slot_u];
+    nb->root_v = cluster_ids[slot_v];
+    nb->branch_idx_root_u = nodes[slot_u]->id;
+    nb->branch_idx_root_v = nodes[slot_v]->id;
   }
-  tr_add_child(root, node_u);
-  tr_add_child(root, node_v);
-  node_u->dparent = mat_get(D, u, v) / 2;
-  node_v->dparent = mat_get(D, u, v) / 2;
-
-  if (nb != NULL) {  /* record the final join under the root */
-    nb->nsteps = step_idx; /* number of recorded merges */
-    nb->root_u = u;
-    nb->root_v = v;
-    nb->branch_idx_root_u = node_u->id;
-    nb->branch_idx_root_v = node_v->id;
-  }
-  
-  if (dt_dD != NULL) 
-    nj_backprop_set_dt_dD_sparse(Jk, dt_dD, orign, u, v, node_u->id, node_v->id, active);
-
-  /* finish set up of tree */
-  root->nnodes = N+1;
+  if (dt_dD != NULL)
+    nj_backprop_set_dt_dD_sparse(Jk, dt_dD, n,
+                                 cluster_ids[slot_u], cluster_ids[slot_v],
+                                 nodes[slot_u]->id, nodes[slot_v]->id,
+                                 logical_active);
+  root->nnodes = 2*n - 1;
   tr_reset_nnodes(root);
+  assert(root->id == root->nnodes - 1);
 
-  assert(root->id == root->nnodes - 1); /* important for indexing */
-
-  lst_free(nodes);
-  vec_free(active);
+  sfree(nodes);
+  sfree(cluster_ids);
   sfree(active_ids);
+  if (logical_active != NULL) vec_free(logical_active);
   vec_free(sums);
   mat_free(D);
-    
   return root;
 }
 
@@ -524,39 +497,4 @@ void nj_copy_neighbors(Neighbors *dest, Neighbors *src) {
   dest->branch_idx_root_v = src->branch_idx_root_v;
 
   memcpy(dest->steps, src->steps, src->nsteps * sizeof(JoinEvent));
-}
-
-/* Record one neighbor-joining merge event into the Neighbors tape.
- 
-   step_idx:       which step (0 .. nb->nsteps-1) this is
-   u, v, w:        indices of merged clusters (u,v -> w)
-   nactive:        number of active taxa before the merge
-   sums:           row sums for the active distance matrix at this step
-   D:              current distance matrix (upper triangular, N x N)
-   branch_idx_u/v: which row in dL_dt corresponds to branches u->w, v->w
- */
-void nj_record_join(Neighbors *nb, int step_idx, int u, int v, int w,
-                    int nactive, Vector *sums, Matrix *D, int branch_idx_u,
-                    int branch_idx_v) {
-  if (step_idx < 0 || step_idx >= nb->nsteps)
-    die("nj_record_join: step_idx (%d) out of range [0,%d)\n",
-        step_idx, nb->nsteps);
-
-  JoinEvent *ev = &nb->steps[step_idx];
-
-  ev->u = u;
-  ev->v = v;
-  ev->w = w;
-
-  /* number of active taxa at this step (before the merge) */
-  ev->nk = nactive;
-
-  ev->branch_idx_u = branch_idx_u;
-  ev->branch_idx_v = branch_idx_v;
-
-  /* distance and row sums at this step */
-  assert(u < v);  /* enforced by nj algorithm */
-  ev->d_uv      = mat_get(D, u, v);
-  ev->row_sum_u = vec_get(sums, u);
-  ev->row_sum_v = vec_get(sums, v);
 }
