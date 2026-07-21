@@ -576,7 +576,7 @@ int main(int argc, char *argv[]) {
         repair_zero_br(tree);
     }
     else
-      tree = nj_infer(D, names, NULL, NULL);
+      tree = nj_infer(D, names, NULL, NULL, outdistfile == NULL);
 
     if (had_dups == TRUE) {
       cpr_expand_tables_for_dups(crispr_muts, migtable);

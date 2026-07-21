@@ -42,7 +42,7 @@ typedef struct neigh_struc {
 } Neighbors;
 
 TreeNode *nj_infer(Matrix *initD, char **names, Matrix *dt_dD,
-                   Neighbors *nb);
+                   Neighbors *nb, unsigned int inplace);
 
 double compute_JC_dist(MSA *msa, int i, int j);
 

@@ -76,9 +76,11 @@ static void nj_find_min_q(Matrix *D, const int *active_ids, Vector *sums,
 /* Infer a tree from a starting distance matrix. Reuse slot u for each newly
    joined cluster and retire slot v, so the working distance matrix remains
    n x n. Physical matrix slots are mapped to stable logical cluster IDs for
-   recording and backpropagation. Does not alter the provided distance matrix.
-   If dt_dD is non-NULL, populate it with the branch-length Jacobian. */
-TreeNode *nj_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *nb) {
+   recording and backpropagation. If inplace is false, does not alter the
+   provided distance matrix. If dt_dD is non-NULL, populate it with the
+   branch-length Jacobian. */
+TreeNode *nj_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *nb,
+                   unsigned int inplace) {
   int n = initD->nrows, nactive = n;
   int N = 2*n - 2, npairs = n * (n-1) / 2;
   int Npairs = N * (N-1) / 2;
@@ -96,7 +98,7 @@ TreeNode *nj_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *nb) {
   if (dt_dD != NULL && (dt_dD->nrows != N || dt_dD->ncols != npairs))
     die("ERROR nj_infer: bad dimension in dt_dD\n");
 
-  D = mat_new(n, n);
+  D = inplace ? initD : mat_new(n, n);
   sums = vec_new(n);
   active_ids = smalloc(n * sizeof(*active_ids));
   cluster_ids = smalloc(n * sizeof(*cluster_ids));
@@ -240,7 +242,7 @@ TreeNode *nj_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *nb) {
   sfree(active_ids);
   if (logical_active != NULL) vec_free(logical_active);
   vec_free(sums);
-  mat_free(D);
+  if (!inplace) mat_free(D);
   return root;
 }
 
@@ -388,7 +390,7 @@ TreeNode *infer_distance_tree(Matrix *D, char **names, Matrix *dt_dD, Neighbors 
     return t;
   }
   else {
-    TreeNode *tree = nj_infer(D, names, dt_dD, nb);
+    TreeNode *tree = nj_infer(D, names, dt_dD, nb, FALSE);
     if (data->treeprior != NULL && data->treeprior->relclock == TRUE) { /* need to reroot in this case */
       if (data->seq_to_node_map == NULL) /* only need to do this once */
         update_seq_to_node_map(tree, names, data);
