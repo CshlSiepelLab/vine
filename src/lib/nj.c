@@ -26,19 +26,19 @@
    and adds new node w.  Update active list accordingly. Assumes u < v
    < w.  Also assumes all nodes > w are inactive. Assumes sums are
    precomputed */
-void nj_updateD(Matrix *D, int u, int v, int w, Vector *active, Vector *sums) {
+void nj_updateD(Matrix *D, int u, int v, int w, Vector *active, Vector *sums,
+                int nactive) {
   int k;
-  int n = vec_sum(active);
 
   if (D->nrows != D->ncols)
     die("ERROR nj_updateD: dimension mismatch\n");
   if (v <= u || w <= v)
     die("ERROR nj_updateD: indices out of order\n");
-  if (n <= 2)
+  if (nactive <= 2)
     die("ERROR nj_updateD: too few active nodes\n");
   
   mat_set(D, u, w, 0.5 * mat_get(D, u, v) +
-          1.0/(2.0*(n-2)) * (vec_get(sums, u) - vec_get(sums, v)));
+          1.0/(2.0*(nactive-2)) * (vec_get(sums, u) - vec_get(sums, v)));
 
   mat_set(D, v, w, mat_get(D, u, v) - mat_get(D, u, w));
 
@@ -75,20 +75,18 @@ static double nj_compute_Q_value(int i, int j, int nactive, Matrix *D,
     vec_get(sums, i) - vec_get(sums, j);
 }
 
-static void nj_find_min_q(Matrix *D, Vector *active, Vector *sums,
-                          int max_node, int nactive, int *u, int *v) {
-  int i, j;
+static void nj_find_min_q(Matrix *D, const int *active_ids, Vector *sums,
+                          int nactive, int *u, int *v) {
+  int a, b;
   double best = INFINITY;
 
   *u = *v = -1;
 
-  for (i = 0; i <= max_node; i++) {
-    if (vec_get(active, i) == FALSE)
-      continue;
-    for (j = i+1; j <= max_node; j++) {
+  for (a = 0; a < nactive; a++) {
+    int i = active_ids[a];
+    for (b = a+1; b < nactive; b++) {
+      int j = active_ids[b];
       double q;
-      if (vec_get(active, j) == FALSE)
-        continue;
 
       q = nj_compute_Q_value(i, j, nactive, D, sums);
       if (q < best) {
@@ -116,6 +114,7 @@ TreeNode* nj_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *nb) {
   int step_idx = 0;
   Matrix *D;
   Vector *sums, *active;
+  int *active_ids;
   List *nodes;  
   TreeNode *node_u, *node_v, *node_w, *root;
   int npairs = n * (n-1) / 2, Npairs = N * (N-1) / 2;
@@ -132,6 +131,7 @@ TreeNode* nj_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *nb) {
      and starting tree nodes */
   D = mat_new(N, N); mat_zero(D);
   active = vec_new(N); vec_set_all(active, FALSE);
+  active_ids = smalloc(N * sizeof(*active_ids));
   sums = vec_new(N); vec_zero(sums);
   nodes = lst_new_ptr(N);
   tr_reset_id();
@@ -141,6 +141,7 @@ TreeNode* nj_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *nb) {
     snprintf(node_u->name, sizeof(node_u->name), "%s", names[i]);
     lst_push_ptr(nodes, node_u);
     vec_set(active, i, TRUE);
+    active_ids[i] = i;
     for (j = i+1; j < n; j++) {
       double d = mat_get(initD, i, j);
       mat_set(D, i, j, d);
@@ -173,8 +174,8 @@ TreeNode* nj_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *nb) {
   /* main loop, over internal nodes w */
   for (w = n; w < N; w++) {
     /* join u and v; w is the new node */
-    nj_find_min_q(D, active, sums, w-1, n, &u, &v);
-    nj_updateD(D, u, v, w, active, sums);
+    nj_find_min_q(D, active_ids, sums, n, &u, &v);
+    nj_updateD(D, u, v, w, active, sums, n);
     node_w = tr_new_node();
     lst_push_ptr(nodes, node_w);
 
@@ -198,7 +199,7 @@ TreeNode* nj_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *nb) {
     }
 
     if (nb != NULL) { /* record neighbor-joining event */
-      nj_record_join(nb, step_idx, u, v, w, active, sums,
+      nj_record_join(nb, step_idx, u, v, w, n, sums,
                      D, node_u->id, node_v->id);
       step_idx++;
     }
@@ -212,6 +213,13 @@ TreeNode* nj_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *nb) {
     vec_set(active, u, FALSE);
     vec_set(active, v, FALSE);
     vec_set(active, w, TRUE);
+    /* active_ids is sorted before the merge. Remove u and v in place,
+       then append w, which is larger than every existing node ID. */
+    j = 0;
+    for (i = 0; i < n; i++)
+      if (active_ids[i] != u && active_ids[i] != v)
+        active_ids[j++] = active_ids[i];
+    active_ids[j] = w;
     n--;  /* one fewer active nodes */
 
     if (dt_dD != NULL) {
@@ -264,6 +272,7 @@ TreeNode* nj_infer(Matrix *initD, char **names, Matrix *dt_dD, Neighbors *nb) {
 
   lst_free(nodes);
   vec_free(active);
+  sfree(active_ids);
   vec_free(sums);
   mat_free(D);
     
@@ -521,13 +530,13 @@ void nj_copy_neighbors(Neighbors *dest, Neighbors *src) {
  
    step_idx:       which step (0 .. nb->nsteps-1) this is
    u, v, w:        indices of merged clusters (u,v -> w)
-   active:         current active vector BEFORE deactivating u,v and activating w
+   nactive:        number of active taxa before the merge
    sums:           row sums for the active distance matrix at this step
    D:              current distance matrix (upper triangular, N x N)
    branch_idx_u/v: which row in dL_dt corresponds to branches u->w, v->w
  */
 void nj_record_join(Neighbors *nb, int step_idx, int u, int v, int w,
-                    Vector *active, Vector *sums, Matrix *D, int branch_idx_u,
+                    int nactive, Vector *sums, Matrix *D, int branch_idx_u,
                     int branch_idx_v) {
   if (step_idx < 0 || step_idx >= nb->nsteps)
     die("nj_record_join: step_idx (%d) out of range [0,%d)\n",
@@ -540,7 +549,7 @@ void nj_record_join(Neighbors *nb, int step_idx, int u, int v, int w,
   ev->w = w;
 
   /* number of active taxa at this step (before the merge) */
-  ev->nk = vec_sum(active);
+  ev->nk = nactive;
 
   ev->branch_idx_u = branch_idx_u;
   ev->branch_idx_v = branch_idx_v;
