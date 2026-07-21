@@ -509,10 +509,17 @@ int main(int argc, char *argv[]) {
       else
         msa = msa_new_from_file_define_format(infile, format, alphabet);
       
-      if (msa->ss == NULL)
+      if (msa->ss == NULL && nj_only == FALSE)
         ss_from_msas(msa, 1, TRUE, NULL, NULL, NULL, -1, 0);
 
-      if (!silent) fprintf(stderr, "Read DNA alignment with %d sequences and %d sites (%d distinct tuples)...\n", msa->nseqs, msa->length, msa->ss->ntuples);
+      if (!silent) {
+        if (msa->ss != NULL)
+          fprintf(stderr, "Read DNA alignment with %d sequences and %d sites (%d distinct tuples)...\n",
+                  msa->nseqs, msa->length, msa->ss->ntuples);
+        else
+          fprintf(stderr, "Read DNA alignment with %d sequences and %d sites...\n",
+                  msa->nseqs, msa->length);
+      }
       
       names = msa->names;
       ntips = msa->nseqs;
@@ -561,14 +568,34 @@ int main(int argc, char *argv[]) {
   /* We must also have a distance matrix now; make sure valid */
   test_D(D);
   
-  /* set default dimensionality if not specified */
-  if (dim == -1) {
-    assert(DEFAULT_DIM_INTERCEPT >= 2);
-    dim = vine_default_dim(ntips);
-    if (!silent) fprintf(stderr, "Setting dimensionality to default of %d based on %d taxa...\n", dim, ntips);
+  /* Plain NJ-only runs do not need any of the variational/embedding state. */
+  if (nj_only == TRUE && dist_embedding == FALSE && embeddingfile == NULL) {
+    if (ultrametric == TRUE) {
+      tree = upgma_infer(D, names, NULL);
+      if (is_crispr == TRUE)
+        repair_zero_br(tree);
+    }
+    else
+      tree = nj_infer(D, names, NULL, NULL);
+
+    if (had_dups == TRUE) {
+      cpr_expand_tables_for_dups(crispr_muts, migtable);
+      cpr_check_dedup_tables(crispr_muts, migtable,
+                             "after cpr_expand_tables_for_dups (NJ path)");
+      cpr_add_dup_leaves(tree, crispr_muts);
+    }
+    if (!silent) fprintf(stderr, "Outputting NJ tree...\n");
+    tr_print(stdout, tree, TRUE);
   }
-  
-  covar_data = new_covar_data(covar_param, D, dim, msa, crispr_mod, names,
+  else {
+    /* set default dimensionality if not specified */
+    if (dim == -1) {
+      assert(DEFAULT_DIM_INTERCEPT >= 2);
+      dim = vine_default_dim(ntips);
+      if (!silent) fprintf(stderr, "Setting dimensionality to default of %d based on %d taxa...\n", dim, ntips);
+    }
+
+    covar_data = new_covar_data(covar_param, D, dim, msa, crispr_mod, names,
                                  natural_grad, kld_upweight, rank, var_reg,
                                  hyperbolic, negcurvature, ultrametric,
                                  radial_flow, planar_flow, tprior, migtable,
@@ -776,6 +803,7 @@ int main(int argc, char *argv[]) {
         tr_print(postmeanfile, t, TRUE);
         vec_free(mu_full);
       }
+    }
     }
   }
 
