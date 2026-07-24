@@ -186,6 +186,13 @@ INITIALIZATION:
        substitution models.
 
 COVARIANCE:
+    --posterior, -A
+       Convenience option that selects the recommended combination of
+       options for optimizing the posterior approximation, equivalent
+       to --covar DIST --radial-flow --planar-flow --var-reg 1 (see
+       Siepel et al., Nature Methods, under revision).  Not compatible
+       with --hyperbolic.
+
     --covar, -S CONST|DIAG|DIST|LOWR
        (default CONST) Parameterization to use for covariance matrix for
        the multivariate normal variational distribution.  DIAG assumes no

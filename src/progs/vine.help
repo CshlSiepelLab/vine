@@ -1,4 +1,4 @@
-char HELP[15577] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
+char HELP[   15996] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
 \n\
 USAGE: vine [OPTIONS] alignment.fa > trees.nwk\n\
 \n\
@@ -186,6 +186,13 @@ INITIALIZATION:\n\
        substitution models.\n\
 \n\
 COVARIANCE:\n\
+    --posterior, -A\n\
+       Convenience option that selects the recommended combination of\n\
+       options for optimizing the posterior approximation, equivalent\n\
+       to --covar DIST --radial-flow --planar-flow --var-reg 1 (see\n\
+       Siepel et al., Nature Methods, under revision).  Not compatible\n\
+       with --hyperbolic.\n\
+\n\
     --covar, -S CONST|DIAG|DIST|LOWR\n\
        (default CONST) Parameterization to use for covariance matrix for\n\
        the multivariate normal variational distribution.  DIAG assumes no\n\
