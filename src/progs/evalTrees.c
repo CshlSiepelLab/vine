@@ -11,7 +11,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <getopt.h>
-#include <openblas/cblas.h>
 #include <phast/misc.h>
 #include <nj.h>
 #include <likelihoods.h>
@@ -29,6 +28,15 @@
 #include <tree_parser.h>
 #include "evalTrees.help"
 
+/* OpenBLAS thread control.  Declared here (rather than pulling in
+ * <openblas/cblas.h>, whose location is not portable) and compiled only
+ * when the linked BLAS actually provides the symbol.  VINE_HAVE_OPENBLAS
+ * is defined by CMake; BLAS libraries that lack it (e.g. Apple Accelerate)
+ * simply skip the thread-limiting call below. */
+#ifdef VINE_HAVE_OPENBLAS
+extern void openblas_set_num_threads(int);
+#endif
+
 static inline
 void print_stats(FILE *F, double mean, double stdev, double median,
                  double min, double max, double min_95CI, double max_95CI,
@@ -42,7 +50,9 @@ void print_stats(FILE *F, double mean, double stdev, double median,
 }
 
 int main(int argc, char *argv[]) {
+#ifdef VINE_HAVE_OPENBLAS
   openblas_set_num_threads(1);
+#endif
 
   TreeNode *tree;
   TreeModel *mod = NULL;

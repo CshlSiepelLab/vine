@@ -18,6 +18,19 @@ endif()
 option(VINE_CODESIGN "Ad-hoc codesign executables on macOS after build" ${_vine_codesign_default})
 message(STATUS "VINE_CODESIGN=${VINE_CODESIGN} (CONDA_BUILD=$ENV{CONDA_BUILD})")
 
+# ---- Optional OpenBLAS thread control ----
+# evalTrees/compareTrees can cap OpenBLAS's internal thread pool (to avoid
+# oversubscription with vine's OpenMP threads).  This is OpenBLAS-specific;
+# other BLAS libraries (Apple Accelerate, MKL) lack the symbol.  Detect it
+# against whatever BLAS is available (packagers may pass -DBLAS_LIBRARIES).
+include(CheckFunctionExists)
+if(NOT DEFINED BLAS_LIBRARIES)
+  find_package(BLAS QUIET)
+endif()
+set(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+check_function_exists(openblas_set_num_threads VINE_HAVE_OPENBLAS)
+unset(CMAKE_REQUIRED_LIBRARIES)
+
 foreach(tgt vine evalTrees compareTrees crisprLnl)
     target_link_libraries(${tgt} PRIVATE vine_core)
     if(APPLE AND VINE_CODESIGN)
@@ -28,6 +41,11 @@ foreach(tgt vine evalTrees compareTrees crisprLnl)
         )
     endif()
 endforeach()
+
+if(VINE_HAVE_OPENBLAS)
+  target_compile_definitions(evalTrees PRIVATE VINE_HAVE_OPENBLAS)
+  target_compile_definitions(compareTrees PRIVATE VINE_HAVE_OPENBLAS)
+endif()
 
 # Read version file and strip whitespace
 file(READ "${CMAKE_SOURCE_DIR}/version" VINE_VERSION_RAW)

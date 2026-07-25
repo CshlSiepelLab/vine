@@ -13,7 +13,15 @@
 #include <getopt.h>
 #include <phast/misc.h>
 #include <phast/lists.h>
-#include <openblas/cblas.h>
+
+/* OpenBLAS thread control.  Declared here (rather than pulling in
+ * <openblas/cblas.h>, whose location is not portable) and compiled only
+ * when the linked BLAS actually provides the symbol.  VINE_HAVE_OPENBLAS
+ * is defined by CMake; BLAS libraries that lack it (e.g. Apple Accelerate)
+ * simply skip the thread-limiting call below. */
+#ifdef VINE_HAVE_OPENBLAS
+extern void openblas_set_num_threads(int);
+#endif
 #include <kl.h>
 #include <tree_parser.h>
 #include "compareTrees.help"
@@ -66,7 +74,9 @@ int main(int argc, char *argv[]) {
   if (optind != argc - 2)
     die("Missing required arguments.  Try '%s -h'.\n", argv[0]);
 
+#ifdef VINE_HAVE_OPENBLAS
   openblas_set_num_threads(nthreads);
+#endif
 
   est_fname = argv[optind];
   ref_fname = argv[optind + 1];
