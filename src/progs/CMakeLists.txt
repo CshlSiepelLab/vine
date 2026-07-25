@@ -21,15 +21,14 @@ message(STATUS "VINE_CODESIGN=${VINE_CODESIGN} (CONDA_BUILD=$ENV{CONDA_BUILD})")
 # ---- Optional OpenBLAS thread control ----
 # evalTrees/compareTrees can cap OpenBLAS's internal thread pool (to avoid
 # oversubscription with vine's OpenMP threads).  This is OpenBLAS-specific;
-# other BLAS libraries (Apple Accelerate, MKL) lack the symbol.  Detect it
-# against whatever BLAS is available (packagers may pass -DBLAS_LIBRARIES).
-include(CheckFunctionExists)
-if(NOT DEFINED BLAS_LIBRARIES)
-  find_package(BLAS QUIET)
-endif()
-set(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
-check_function_exists(openblas_set_num_threads VINE_HAVE_OPENBLAS)
-unset(CMAKE_REQUIRED_LIBRARIES)
+# other BLAS backends (Apple Accelerate, MKL) lack openblas_set_num_threads.
+# It cannot be auto-detected reliably: vine pulls BLAS in transitively via
+# PHAST, so probing find_package(BLAS) can report a symbol that the actual
+# (phast-provided) BLAS does not export, breaking the link.  Off by default;
+# packagers building against OpenBLAS (e.g. the bioconda recipe) opt in with
+# -DVINE_ENABLE_OPENBLAS_THREADS=ON.
+option(VINE_ENABLE_OPENBLAS_THREADS
+       "Cap OpenBLAS thread pool in evalTrees/compareTrees (OpenBLAS-linked builds only)" OFF)
 
 foreach(tgt vine evalTrees compareTrees crisprLnl)
     target_link_libraries(${tgt} PRIVATE vine_core)
@@ -42,7 +41,7 @@ foreach(tgt vine evalTrees compareTrees crisprLnl)
     endif()
 endforeach()
 
-if(VINE_HAVE_OPENBLAS)
+if(VINE_ENABLE_OPENBLAS_THREADS)
   target_compile_definitions(evalTrees PRIVATE VINE_HAVE_OPENBLAS)
   target_compile_definitions(compareTrees PRIVATE VINE_HAVE_OPENBLAS)
 endif()
