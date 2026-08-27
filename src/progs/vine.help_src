@@ -81,6 +81,13 @@ MAIN OPTIONS:
         Output a single tree reflecting the mean of the approximate
         posterior distribution to the specified file.
 
+    --nexus, -u <file.nex>
+        Output complete trees in NEXUS format to the specified file
+        (one tree per sample, or the single NJ/UPGMA tree if
+        --nj-only is used).  Unlike --labeled-trees, does not require
+        --migration and does not annotate nodes with cell-state
+        labels.
+
     --nsamples, -s <S>
         Number of samples to output (default 100) after convergence.
 

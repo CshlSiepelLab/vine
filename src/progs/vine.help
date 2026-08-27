@@ -1,4 +1,4 @@
-char HELP[   15996] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
+char HELP[16324] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
 \n\
 USAGE: vine [OPTIONS] alignment.fa > trees.nwk\n\
 \n\
@@ -80,6 +80,13 @@ MAIN OPTIONS:\n\
     --mean, -m <meantree.nh>\n\
         Output a single tree reflecting the mean of the approximate\n\
         posterior distribution to the specified file.\n\
+\n\
+    --nexus, -u <file.nex>\n\
+        Output complete trees in NEXUS format to the specified file\n\
+        (one tree per sample, or the single NJ/UPGMA tree if\n\
+        --nj-only is used).  Unlike --labeled-trees, does not require\n\
+        --migration and does not annotate nodes with cell-state\n\
+        labels.\n\
 \n\
     --nsamples, -s <S>\n\
         Number of samples to output (default 100) after convergence.\n\

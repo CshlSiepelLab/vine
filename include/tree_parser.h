@@ -27,4 +27,13 @@ TreeNode *tr_parse_newick_line(String *line, const char *fname, int lineno);
  * a List of TreeNode*. */
 List *tr_read_trees_from_file(const char *fname);
 
+/* Print a single tree in NEXUS format (TAXA and TREES blocks), with no
+ * node annotations. */
+void tr_print_nexus(TreeNode *tree, FILE *outf);
+
+/* Print a NEXUS file with a single TAXA block (taken from the first tree)
+ * and one TREE line per tree in tree_lst (e.g. a posterior sample), with
+ * no node annotations. */
+void tr_print_set_nexus(List *tree_lst, FILE *outf);
+
 #endif

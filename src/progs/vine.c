@@ -29,6 +29,7 @@
 #include <mvn.h>
 #include <mcmc.h>
 #include <tree_prior.h>
+#include <tree_parser.h>
 #include <migration.h>
 #include <multiDAG.h>
 #include <version.h>
@@ -98,7 +99,7 @@ int main(int argc, char *argv[]) {
   msa_format_type format = UNKNOWN_FORMAT;
   FILE *infile = NULL, *indistfile = NULL, *outdistfile = NULL, *logfile = NULL,
     *postmeanfile = NULL, *graphsfile = NULL, *nexusfile = NULL,
-    *consensusfile = NULL, *embeddingfile = NULL;
+    *consensusfile = NULL, *embeddingfile = NULL, *plain_nexusfile = NULL;
   Matrix *D = NULL;
   TreeNode *tree;
   List *namestr, *trees;
@@ -143,6 +144,7 @@ int main(int argc, char *argv[]) {
     {"out-dists", 1, 0, 'o'},
     {"sample-graphs", 1, 0, 'O'},
     {"labeled-trees", 1, 0, 'B'},
+    {"nexus", 1, 0, 'u'},
     {"consensus-graph", 1, 0, 'E'},
     {"nsamples", 1, 0, 's'},
     {"seed", 1, 0, 'q'},
@@ -188,7 +190,7 @@ int main(int argc, char *argv[]) {
          option".
      Keep this string in lockstep with long_opts. */
   while ((c = getopt_long(argc, argv,
-                          "01:aAb:B:c:Cd:D:eE:FgG:hHi:I:j:JkK:l:Lm:M:n:No:O:p:P:q:Q:r:Rs:S:t:T:U:v:V:w:W:xXyY:Z",
+                          "01:aAb:B:c:Cd:D:eE:FgG:hHi:I:j:JkK:l:Lm:M:n:No:O:p:P:q:Q:r:Rs:S:t:T:u:U:v:V:w:W:xXyY:Z",
                           long_opts, &opt_idx)) != -1) {
     switch (c) {
     case 'b':
@@ -198,6 +200,9 @@ int main(int argc, char *argv[]) {
       break;
     case 'B':
       nexusfile = phast_fopen(optarg, "w");
+      break;
+    case 'u':
+      plain_nexusfile = phast_fopen(optarg, "w");
       break;
     case 'E':
       consensusfile = phast_fopen(optarg, "w");
@@ -624,6 +629,11 @@ int main(int argc, char *argv[]) {
       if (!silent) fprintf(stderr, "Outputting NJ tree...\n");
       tr_print(stdout, tree, TRUE);
 
+      if (plain_nexusfile != NULL) {
+        if (!silent) fprintf(stderr, "Writing NEXUS tree...\n");
+        tr_print_nexus(tree, plain_nexusfile);
+      }
+
       if (embeddingfile != NULL) {  /* set up initial embedding for output below */
         mmvn = mmvn_new(ntips, dim, covar_data->mvn_type);
         estimate_mmvn_from_distances(covar_data, mmvn);
@@ -784,6 +794,10 @@ int main(int argc, char *argv[]) {
         if (!silent) fprintf(stderr, "Writing cell-state-labeled trees...\n");
         mig_print_set_labeled_nexus(trees, nexusfile, migtable, migstates_lst);
       }
+      if (plain_nexusfile != NULL) {
+        if (!silent) fprintf(stderr, "Writing sampled trees in NEXUS format...\n");
+        tr_print_set_nexus(trees, plain_nexusfile);
+      }
       if (consensusfile != NULL) {
         if (!silent) fprintf(stderr, "Writing edgewise consensus migration graph...\n");
         mig_print_set_edgewise_csv(trees, consensusfile, migtable, migstates_lst);
@@ -844,6 +858,8 @@ int main(int argc, char *argv[]) {
     fclose(graphsfile);
   if (nexusfile != NULL)
     fclose(nexusfile);
+  if (plain_nexusfile != NULL)
+    fclose(plain_nexusfile);
 
   if (!silent) fprintf(stderr, "Done.\n");
   

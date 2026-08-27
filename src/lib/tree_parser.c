@@ -49,3 +49,47 @@ List *tr_read_trees_from_file(const char *fname) {
   fclose(f);
   return trees;
 }
+
+/* write TAXA block listing the leaf names of tree */
+static void print_nexus_taxa_block(TreeNode *tree, FILE *outf) {
+  List *trav = tree->nodes;
+  int ntaxa = 0;
+  for (int i = 0; i < tree->nnodes; i++) {
+    TreeNode *n = lst_get_ptr(trav, i);
+    if (n->lchild == NULL && n->rchild == NULL)
+      ntaxa++;
+  }
+  fprintf(outf, "BEGIN TAXA;\n");
+  fprintf(outf, "  DIMENSIONS NTAX=%d;\n", ntaxa);
+  fprintf(outf, "  TAXLABELS\n");
+  for (int i = 0; i < tree->nnodes; i++) {
+    TreeNode *n = lst_get_ptr(trav, i);
+    if (n->lchild == NULL && n->rchild == NULL)
+      fprintf(outf, "    %s\n", n->name);
+  }
+  fprintf(outf, "  ;\nEND;\n\n");
+}
+
+void tr_print_nexus(TreeNode *tree, FILE *outf) {
+  fprintf(outf, "#NEXUS\n\n");
+  print_nexus_taxa_block(tree, outf);
+  fprintf(outf, "BEGIN TREES;\n");
+  fprintf(outf, "  TREE TREE1 = [&R] ");
+  tr_print(outf, tree, /*show_branch_lengths=*/1);
+  fprintf(outf, "END;\n\n");
+}
+
+void tr_print_set_nexus(List *tree_lst, FILE *outf) {
+  TreeNode *tree0 = (TreeNode*)lst_get_ptr(tree_lst, 0);
+
+  fprintf(outf, "#NEXUS\n\n");
+  print_nexus_taxa_block(tree0, outf);
+
+  fprintf(outf, "BEGIN TREES;\n");
+  for (int s = 0; s < lst_size(tree_lst); s++) {
+    TreeNode *tree = (TreeNode*)lst_get_ptr(tree_lst, s);
+    fprintf(outf, "  TREE sample_%d = [&R] ", s + 1);
+    tr_print(outf, tree, /*show_branch_lengths=*/1);
+  }
+  fprintf(outf, "END;\n\n");
+}
