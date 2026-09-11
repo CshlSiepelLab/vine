@@ -1,0 +1,53 @@
+evalTrees
+=========
+
+.. code-block:: console
+
+    evalTrees trees.nwk > summary.txt
+
+Evaluate properties of a collection of phylogenetic trees,
+typically representing samples from a posterior distribution.  By default,
+summarizes univariate distributions of all pairwise distances between taxa
+in terms of median, mean, 95 pct credible interval, min, max, 25th and 75th
+percentiles and standard deviation. But can alternatively evaluate the
+distribution of log likelihoods using a specified alignment.  If this
+alignment represents held-out data matching the data used to fit the model,
+the results can be interpreted as log pointwise predictive densities
+(LPPDs), a measure of model fit that can meaningfully be compared across
+different inference methods (e.g., Bayesian and ML).  Can also evaluate the
+variability of topologies using --topology, or the branch-length accuracy of
+the trees relative to a reference tree using --branch-score.
+
+Options
+-------
+
+``--help, -h``
+    Print this help message and exit.
+
+``--model-fit, -f alignment.fa``
+    Evaluate log likelihood of each sampled tree relative to the specified alignment.  By default uses JC69 model but alternatives can be specified using --hky-kappa or --tree-model.
+
+``--hky-kappa, k <kappa>``
+    (for use with --model-fit) Use HKY85 model with specified value of kappa when evaluating log likelihood.
+
+``--tree-model, -m <file.mod>``
+    (for use with --model-fit) Use specified PHAST-formatted tree model when evaluating log likelihood.
+
+``--crispr, -c``
+    (for use with --model-fit) Use CRISPR model rather than DNA model. In this case, argument to --model-fit will be expected to be a \*.tsv-formatted mutation matrix.
+
+``--topology, -t <reference.nwk>``
+    Instead of pairwise distances between taxa, consider the distribution of topological distances of all sampled trees from a given reference tree topology.
+
+``--branch-score, -b <reference.nwk>``
+    Evaluate the branch-score (Kuhner-Felsenstein) distance of the sampled trees to a given reference tree.  Unlike --topology, the lengths of all edges (including terminal edges) contribute, so this measures branch-length as well as topological agreement.  Reports the distribution of per-sample distances (as for --topology) followed by two additional lines: "Point (posterior-mean-tree) BSD", the distance between the reference and the posterior-mean split-length vector -- a point estimate of branch-length accuracy that is insensitive to posterior dispersion; and "Reference tree length", the total branch length of the reference (useful for normalization).
+
+``--entropy, -e``
+    Compute uncertainty measures for the tree distribution.  Reports the number of unique tree topologies and three uncertainty measures: (1) "Split entropy": sum of Bernoulli entropies over all non-trivial splits weighted by their posterior inclusion probabilities; (2) "Topology entropy": Shannon entropy over distinct topologies, -sum p(tau) log p(tau); (3) "Mean branch-length variance per branch": topology-frequency-weighted mean of sample variances of log branch lengths, averaged over branches.
+
+``--rf-matrix, -r <file.tsv>``
+    Print an upper-triangular, tab-separated matrix of Robinson-Foulds distances between all input trees to the specified file. Rows and columns are labeled by input order.
+
+``--rf-mds, -M <file.tsv>``
+    Compute classical multidimensional scaling of the Robinson-Foulds distances between input trees and print the unscaled two-dimensional coordinates to the specified tab-separated file. Can be used together with --rf-matrix to produce both outputs in one run.
+
