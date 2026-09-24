@@ -11,7 +11,7 @@ of supporting libraries for variational inference of phylogenetic trees.
 
 ## Installation
 
-VINE is easily installable via Bioconda:
+VINE is easily installable in a few minutes via Bioconda:
 
 ```bash
 conda install -c conda-forge -c bioconda vine-phylo
@@ -65,6 +65,10 @@ vine --help
 The same full usage message for vine is also available
 directly in the source tree:
 [vine.help_src](src/progs/vine.help_src).
+
+## Documentation
+The official documentation with usage and a demo on a SARS-COV2 dataset is located here: 
+(http://compgen.cshl.edu/vine-docs/)
 
 ## Support
 
