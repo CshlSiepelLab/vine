@@ -584,11 +584,17 @@ int main(int argc, char *argv[]) {
   /* We must also have a distance matrix now; make sure valid */
   test_D(D);
   
-  /* set default dimensionality if not specified */
+  /* set default dimensionality if not specified.  n taxa span at most
+     n - 1 dimensions, so cap the automatic choice; an explicit -D is
+     left as given */
   if (dim == -1) {
     assert(DEFAULT_DIM_INTERCEPT >= 2);
     dim = vine_default_dim(ntips);
-    if (!silent) fprintf(stderr, "Setting dimensionality to default of %d based on %d taxa...\n", dim, ntips);
+    if (dim > ntips - 1) {
+      dim = ntips - 1;
+      if (!silent) fprintf(stderr, "Setting dimensionality to %d (maximum for %d taxa)...\n", dim, ntips);
+    }
+    else if (!silent) fprintf(stderr, "Setting dimensionality to default of %d based on %d taxa...\n", dim, ntips);
   }
   
   covar_data = new_covar_data(covar_param, D, dim, msa, crispr_mod, names,
