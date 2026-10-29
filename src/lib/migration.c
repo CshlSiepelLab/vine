@@ -23,6 +23,19 @@
 /* for use in likelihood calculations to avoid underflow */
 #define REL_CUTOFF 1e-300 
 
+/* minimum branch length used by the migration model.  Cells with
+   identical barcodes can be joined by branches of length zero, but
+   "no edits" does not mean "no time": a tissue change on such a branch
+   must still be possible, otherwise the migration likelihood collapses
+   to zero.  Not applied to the leading branch above the root. */
+#define MIG_MIN_BL 1e-3
+
+static inline double mig_branch_len(TreeNode *n) {
+  if (n->parent != NULL && n->dparent < MIG_MIN_BL)
+    return MIG_MIN_BL;
+  return n->dparent;
+}
+
 MigTable *mig_new() {
   MigTable *M = smalloc(sizeof(MigTable));
   M->cellnames = lst_new_ptr(200);
@@ -537,7 +550,12 @@ double mig_compute_log_likelihood(TreeModel *mod, MigTable *mg,
       if (n != mod->tree->rchild) { /* skip branch to right of root because unrooted */
         /* calculate derivative analytically */
         deriv = 0;
-        mig_grad_REV_dt(mg, grad_mat[n->id], n->dparent);
+        /* branch length is clamped to MIG_MIN_BL below the minimum, so
+           the derivative wrt the actual length is zero there */
+        if (n->dparent < MIG_MIN_BL)
+          mat_zero(grad_mat[n->id]);
+        else
+          mig_grad_REV_dt(mg, grad_mat[n->id], n->dparent);
 
         for (i = 0; i < nstates; i++)
           for (j = 0; j < nstates; j++)
@@ -551,7 +569,7 @@ double mig_compute_log_likelihood(TreeModel *mod, MigTable *mg,
 
       /* we need partial derivatives for migration rates also;
          they have to be aggregated across all branches */
-      mig_grad_REV_dr(mg, grad_mat_P[n->id], n->dparent);
+      mig_grad_REV_dr(mg, grad_mat_P[n->id], mig_branch_len(n));
       /* loop over rate parameters */
       for (int pidx = 0; pidx < mg->gtr_params->size; pidx++) {
         double pderiv = 0; /* partial deriv wrt this param */
@@ -620,7 +638,7 @@ void mig_update_subst_matrices(TreeNode *tree, MigTable *mg) {
   for (int nodeidx = 0; nodeidx < tree->nnodes; nodeidx++) {
     TreeNode *n = lst_get_ptr(tree->nodes, nodeidx);
     MarkovMatrix *P = lst_get_ptr(mg->Pt, nodeidx);
-    mm_exp(P, mg->rate_matrix, n->dparent);
+    mm_exp(P, mg->rate_matrix, mig_branch_len(n));
 
     /* ensure no negative values due to numerical error */
     for (int i = 0; i < mg->nstates; i++) {
