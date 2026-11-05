@@ -696,7 +696,9 @@ void set_kld_grad_LOWR(Vector *kldgrad, multi_MVN *mmvn) {
   Matrix *Rgrad = mat_new(mmvn->mvn->lowR->nrows, mmvn->mvn->lowR->ncols);
 
   /* calculate partial derivatives using matrix operations, making use
-     of precomputed R^T x R */
+     of precomputed (R^T R)^{-1}.  KLD uses the pseudo-determinant
+     log det(R^T R) in place of log det(Sigma_0), which is singular:
+       -∂KLD/∂R = d * [R (R^T R)^{-1} - R] */
   mat_mult(Rgrad, mmvn->mvn->lowR, mmvn->mvn->lowR_invRtR);
   mat_minus_eq(Rgrad, mmvn->mvn->lowR);
   mat_scale(Rgrad, mmvn->d);  /* note: computing negative gradient; that is what we need */
@@ -710,17 +712,21 @@ void set_kld_grad_LOWR(Vector *kldgrad, multi_MVN *mmvn) {
 }
 
 /* compute partial derivatives of entropy H[q(x)] wrt LOWR variance
-   parameters: Sigma_0 = I + R R^T, Sigma = I_d ⊗ Sigma_0. */
+   parameters: Sigma_0 = R R^T (rank w < n), Sigma = I_d ⊗ Sigma_0.
+   Because Sigma_0 is singular, q(x) is treated as an intrinsic
+   wd-dimensional Gaussian and log det(Sigma_0) is replaced by the
+   pseudo-determinant log det(R^T R). */
 void set_entropy_grad_LOWR(Vector *entgrad, multi_MVN *mmvn) {
   int i, j;
   int offset = mmvn->d * mmvn->n;
   Matrix *Rgrad = mat_new(mmvn->mvn->lowR->nrows, mmvn->mvn->lowR->ncols);
 
   /* For entropy, only the log det term contributes:
-       H[q] = (d/2) * log det(Sigma_0) + const
-     For Sigma_0 = I + R R^T, using the matrix determinant lemma,
-       ∂H/∂R = d * R * (I + R^T R)^{-1}
-     and lowR_invRtR is precomputed as (I + R^T R)^{-1}.
+       H[q] = (d/2) * log det(R^T R) + const   (pseudo-determinant)
+     so
+       ∂H/∂R = d * R * (R^T R)^{-1}
+     and lowR_invRtR is precomputed as (R^T R)^{-1} (see
+     mvn_invert_RtR_LOWR).
   */
   mat_mult(Rgrad, mmvn->mvn->lowR, mmvn->mvn->lowR_invRtR);
   mat_scale(Rgrad, mmvn->d);   /* computing positive gradient of +H[q] */
