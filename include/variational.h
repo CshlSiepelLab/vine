@@ -37,7 +37,8 @@
 #define NSUBSAMPLES 256
 
 void variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
-                        double learnrate, int nbatches_conv, int min_nbatches,
+                        double learnrate, double lr_decay,
+                        int nbatches_conv, int min_nbatches,
                         CovarData *data, FILE *logf, unsigned int silent,
                         unsigned int log_all_params);
 

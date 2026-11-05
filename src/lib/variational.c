@@ -34,10 +34,13 @@
 
 /* optimize variational model by stochastic gradient ascent using the
    Adam algorithm.  Takes initial tree model and alignment and
-   distance matrix, dimensionality of Euclidean space to work in.
+   distance matrix, dimensionality of Euclidean space to work in.  If
+   lr_decay > 0, the learning rate decays as 1/(1 + t'/lr_decay) after
+   full gradients are in use (t' = steps since then); 0 disables.
    Note: alters distance matrix */
 void variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
-                        double learnrate, int nbatches_conv, int min_nbatches,
+                        double learnrate, double lr_decay,
+                        int nbatches_conv, int min_nbatches,
                         CovarData *data, FILE *logf,
                         unsigned int silent, unsigned int log_all) {
 
@@ -137,6 +140,7 @@ void variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
   int init_subsamp = data->crispr_mod == NULL ? NSUBSAMPLES : maxlen;
   Scheduler *s = sched_new(maxlen, init_subsamp, 20,
                            learnrate, 10, 50, 30);
+  s->lr_decay = lr_decay;
   SchedState *st = sched_new_state(s);
   SchedDirectives *sd = smalloc(sizeof(SchedDirectives));
   SchedMetrics *sm = smalloc(sizeof(SchedMetrics));

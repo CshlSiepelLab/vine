@@ -31,7 +31,8 @@ Scheduler *sched_new(int N_sites, int init_subsample, int inc_every,
   s->clip_beta = 0.98;
   s->persist_k = persist_k;
   s->fullgrad_every = fullgrad_every;
-  s->T_total = 400; 
+  s->T_total = 400;
+  s->lr_decay = 0.0; /* disabled by default; set by caller if desired */
   return s;
 }
 
@@ -43,6 +44,7 @@ SchedState* sched_new_state(const Scheduler *cfg) {
   st->persist_left = cfg->persist_k > 0 ? cfg->persist_k : 1;
   st->ema_gnorm = 0.0;
   st->lr_t = cfg->lr_full; /* will be overwritten on first step */
+  st->t_full = -1;
   return st;
 }
 
@@ -82,6 +84,14 @@ void sched_next(const Scheduler *cfg, SchedState *st,
   double alpha = (cfg->lr_alpha > 0 ? cfg->lr_alpha : 0.5); // 0.5 good for Adam
   if (in_full_mode) {
     st->lr_t = cfg->lr_full;   /* exact tuned LR in full mode */
+
+    /* optional diminishing step size once full gradients are in use.
+       Inverse-time decay satisfies the classical conditions (sum of
+       step sizes diverges, sum of squares converges) and damps any
+       oscillation across topology boundaries in late iterations */
+    if (st->t_full < 0) st->t_full = st->t;
+    if (cfg->lr_decay > 0.0)
+      st->lr_t /= (1.0 + (double)(st->t - st->t_full) / cfg->lr_decay);
   } else {
     st->lr_t = cfg->lr_full * pow(frac, alpha);
     /* gentle global decay (keeps end behavior intact) */

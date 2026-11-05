@@ -33,6 +33,10 @@ typedef struct {
   int    persist_k;         /* reuse same subset of sites for k updates (e.g., 5) */
   int    fullgrad_every;    /* 0 disables; else compute full grad every K steps */
   int    T_total;           /* total intended steps (for optional cosine ramps) */
+  double lr_decay;          /* 0 disables; else time scale T (in steps) for
+                               inverse-time decay of the learning rate once
+                               full gradients are in use:
+                               lr = lr_full / (1 + (t - t_full) / T) */
 } Scheduler;
 
 typedef struct {
@@ -41,6 +45,8 @@ typedef struct {
   int    persist_left;      /* steps left before resampling sites */
   double ema_gnorm;         /* EMA of gradient norm */
   double lr_t;              /* current learning rate */
+  int    t_full;            /* step at which full mode was first reached
+                               (-1 if not yet reached) */
 } SchedState;
 
 /* outputs per step */

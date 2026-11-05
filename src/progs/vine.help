@@ -1,4 +1,4 @@
-char HELP[   15996] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
+char HELP[   16662] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
 \n\
 USAGE: vine [OPTIONS] alignment.fa > trees.nwk\n\
 \n\
@@ -146,7 +146,18 @@ MAIN OPTIONS:\n\
 OPTIMIZATION:\n\
     --learnrate, -r <alpha>\n\
        Set learning rate for Adam algorithm to <alpha> (default 0.05).\n\
-        \n\
+\n\
+    --lrdecay, -u <T>\n\
+       Apply a diminishing step size once full gradients are in use\n\
+       (after the initial phase of site subsampling).  The learning\n\
+       rate decays as alpha / (1 + t/T), where t is the number of\n\
+       iterations since full gradients were first used.  This schedule\n\
+       satisfies the classical step-size conditions assumed in\n\
+       convergence analyses of stochastic gradient methods and damps\n\
+       oscillation of the embedding in late iterations.  Smaller values of <T> give faster decay (e.g.,\n\
+       --lrdecay 100 halves the learning rate after 100 iterations).\n\
+       By default, no decay is applied.\n\
+\n\
     --miniter, -M <N>\n\
         Set minimum number of iterations before convergence to <N>\n\
         (default 200).  Larger values will lead to longer convergence times\n\

@@ -105,7 +105,7 @@ int main(int argc, char *argv[]) {
   subst_mod_type subst_mod = JC69;
   TreeModel *mod = NULL;
   double learnrate = DEFAULT_LEARNRATE, migration_rate_prior_mean = 1.0,
-    negcurvature = 1.0, var_reg = 0.0, kld_upweight = 1.0;
+    negcurvature = 1.0, var_reg = 0.0, kld_upweight = 1.0, lr_decay = 0.0;
   MarkovMatrix *rmat = NULL;
   multi_MVN *mmvn = NULL;
   TreeNode *init_tree = NULL;
@@ -147,6 +147,7 @@ int main(int argc, char *argv[]) {
     {"nsamples", 1, 0, 's'},
     {"seed", 1, 0, 'q'},
     {"learnrate", 1, 0, 'r'},
+    {"lrdecay", 1, 0, 'u'},
     {"random-start", 0, 0, 'R'},
     {"var-reg", 1, 0, 'v'},
     {"covar", 1, 0, 'S'},
@@ -188,7 +189,7 @@ int main(int argc, char *argv[]) {
          option".
      Keep this string in lockstep with long_opts. */
   while ((c = getopt_long(argc, argv,
-                          "01:aAb:B:c:Cd:D:eE:FgG:hHi:I:j:JkK:l:Lm:M:n:No:O:p:P:q:Q:r:Rs:S:t:T:U:v:V:w:W:xXyY:Z",
+                          "01:aAb:B:c:Cd:D:eE:FgG:hHi:I:j:JkK:l:Lm:M:n:No:O:p:P:q:Q:r:Rs:S:t:T:u:U:v:V:w:W:xXyY:Z",
                           long_opts, &opt_idx)) != -1) {
     switch (c) {
     case 'b':
@@ -326,6 +327,11 @@ int main(int argc, char *argv[]) {
       learnrate = atof(optarg);
       if (learnrate <= 0)
         die("ERROR: --learnrate must be positive\n");
+      break;
+    case 'u':
+      lr_decay = atof(optarg);
+      if (lr_decay <= 0)
+        die("ERROR: --lrdecay must be positive\n");
       break;
     case 'R':
       random_start = TRUE;
@@ -711,7 +717,7 @@ int main(int argc, char *argv[]) {
 
       if (!silent) fprintf(stderr, "Starting variational inference...\n");
 
-      variational_inf(mod, mmvn, batchsize, learnrate,
+      variational_inf(mod, mmvn, batchsize, learnrate, lr_decay,
                          niter_conv, min_iter, 
                          covar_data, logfile, silent, log_all);
 

@@ -146,7 +146,18 @@ MAIN OPTIONS:
 OPTIMIZATION:
     --learnrate, -r <alpha>
        Set learning rate for Adam algorithm to <alpha> (default 0.05).
-        
+
+    --lrdecay, -u <T>
+       Apply a diminishing step size once full gradients are in use
+       (after the initial phase of site subsampling).  The learning
+       rate decays as alpha / (1 + t/T), where t is the number of
+       iterations since full gradients were first used.  This schedule
+       satisfies the classical step-size conditions assumed in
+       convergence analyses of stochastic gradient methods and damps
+       oscillation of the embedding in late iterations.  Smaller values of <T> give faster decay (e.g.,
+       --lrdecay 100 halves the learning rate after 100 iterations).
+       By default, no decay is applied.
+
     --miniter, -M <N>
         Set minimum number of iterations before convergence to <N>
         (default 200).  Larger values will lead to longer convergence times
