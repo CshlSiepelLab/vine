@@ -39,11 +39,14 @@
 /* second stage of two-stage inference (var_fit_scale): default number
    of antithetic pairs of Monte Carlo samples, margin by which the
    upper bound of the search for the log variance scale exceeds the log
-   prior variance (log pointscale^2), and tolerance for golden-section
-   search */
+   prior variance (log pointscale^2), tolerance of the coarse
+   golden-section pass, step size of the fine parabolic pass, and
+   maximum number of times the fine pass may shift its bracket */
 #define VAR_SCALE_NPAIRS 10
 #define VAR_SCALE_ETA_MARGIN 1.0
-#define VAR_SCALE_TOL 0.05
+#define VAR_SCALE_COARSE_TOL 0.25
+#define VAR_SCALE_FINE_STEP 0.3
+#define VAR_SCALE_MAX_SHIFTS 5
 
 void variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
                         double learnrate, double lr_decay,

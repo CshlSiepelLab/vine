@@ -95,9 +95,8 @@ int main(int argc, char *argv[]) {
                natural_grad = FALSE, is_crispr = FALSE,
                ultrametric = FALSE, radial_flow = FALSE, planar_flow = FALSE,
                use_taylor = TRUE, had_dups = FALSE, silent = FALSE,
-               log_all = FALSE, posterior = FALSE, covar_set = FALSE,
-               two_stage = FALSE, two_stage_dist = TRUE,
-               var_reg_set = FALSE;
+               log_all = FALSE, posterior = FALSE,
+               two_stage = FALSE, two_stage_dist = TRUE;
   MSA *msa = NULL;
   enum covar_type covar_param = CONST;
   char *alphabet = "ACGT";
@@ -349,7 +348,6 @@ int main(int argc, char *argv[]) {
       var_reg = atof(optarg);
       if (var_reg < 0)
         die("ERROR: --var-reg must be non-negative\n");
-      var_reg_set = TRUE;
       break;
     case 'r':
       learnrate = atof(optarg);
@@ -379,7 +377,6 @@ int main(int argc, char *argv[]) {
       else if (!strcmp(optarg, "LOWR"))
         covar_param = LOWR;
       else die("ERROR: bad argument to --covar (-S).\n");
-      covar_set = TRUE;
       break;
     case 't':
       init_tree = tr_new_from_file(phast_fopen(optarg, "r"));
@@ -447,19 +444,16 @@ int main(int argc, char *argv[]) {
   }
 
   /* --posterior is a convenience flag that selects the recommended
-     combination of options for optimizing the posterior approximation:
-     --covar DIST --radial-flow --planar-flow --var-reg 1.  Any of these
-     options given explicitly overrides the corresponding default, in any
-     order (tracked via covar_set / var_reg_set). */
+     option for the posterior approximation: two-stage inference, in
+     which the first stage is the default optimization (unchanged, so
+     point estimates are identical to those without --posterior) and the
+     second stage refits the variance scale with a DIST-shaped
+     covariance by maximizing the correctly scaled ELBO.  An explicit
+     --two-stage-shape overrides the shape. */
   if (posterior == TRUE) {
     if (hyperbolic == TRUE)
-      die("Cannot use --posterior with --hyperbolic; --posterior enables the radial- and planar-flow layers, which are incompatible with hyperbolic geometry.\n");
-    if (!covar_set)
-      covar_param = DIST;
-    if (!var_reg_set)
-      var_reg = 1.0;
-    radial_flow = TRUE;
-    planar_flow = TRUE;
+      die("Cannot use --posterior with --hyperbolic; the two-stage procedure has not been validated for hyperbolic geometry.\n");
+    two_stage = TRUE;
   }
 
   if (two_stage == TRUE) {

@@ -1,4 +1,4 @@
-char HELP[   17940] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
+char HELP[   18102] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
 \n\
 USAGE: vine [OPTIONS] alignment.fa > trees.nwk\n\
 \n\
@@ -198,11 +198,13 @@ INITIALIZATION:\n\
 \n\
 COVARIANCE:\n\
     --posterior, -A\n\
-       Convenience option that selects the recommended combination of\n\
-       options for optimizing the posterior approximation, equivalent\n\
-       to --covar DIST --radial-flow --planar-flow --var-reg 1 (see\n\
-       Siepel et al., Nature Methods, under revision).  Not compatible\n\
-       with --hyperbolic.\n\
+       Convenience option that selects the recommended configuration for\n\
+       approximating the posterior distribution, currently equivalent\n\
+       to --two-stage with the default DIST shape (see below).  The first\n\
+       stage is the default optimization, so point estimates (such as\n\
+       the posterior mean tree) are the same as without this option;\n\
+       only the variance of the approximate posterior differs.  Not\n\
+       compatible with --hyperbolic.\n\
 \n\
     --two-stage\n\
        After the variational parameters have been optimized, refit\n\

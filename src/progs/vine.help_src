@@ -198,11 +198,13 @@ INITIALIZATION:
 
 COVARIANCE:
     --posterior, -A
-       Convenience option that selects the recommended combination of
-       options for optimizing the posterior approximation, equivalent
-       to --covar DIST --radial-flow --planar-flow --var-reg 1 (see
-       Siepel et al., Nature Methods, under revision).  Not compatible
-       with --hyperbolic.
+       Convenience option that selects the recommended configuration for
+       approximating the posterior distribution, currently equivalent
+       to --two-stage with the default DIST shape (see below).  The first
+       stage is the default optimization, so point estimates (such as
+       the posterior mean tree) are the same as without this option;
+       only the variance of the approximate posterior differs.  Not
+       compatible with --hyperbolic.
 
     --two-stage
        After the variational parameters have been optimized, refit

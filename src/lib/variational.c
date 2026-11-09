@@ -803,12 +803,13 @@ static double var_scale_elbo(TreeModel *mod, multi_MVN *mmvn,
    by variational_inf, choose the single variance-scale parameter eta
    (Sigma = e^eta * Sigma_0) to maximize the correctly scaled ELBO,
    estimated by Monte Carlo with npairs antithetic pairs of common
-   random numbers.  The maximization is by golden-section search over
+   random numbers.  The maximization is in two passes: a coarse
+   golden-section search using a subset of the samples, followed by a
+   parabolic refinement with all samples.  The search range is
    [log(VARFLOOR), log(pointscale^2) + VAR_SCALE_ETA_MARGIN] (the upper
    end exceeds the variance of the prior in embedding units, which is
-   pointscale^2), which is reliable because the
-   objective is smooth and unimodal in eta at the resolution of
-   interest.  If dist_shape == TRUE, Sigma_0 is set to the (normalized,
+   pointscale^2).  This is reliable because the objective is smooth
+   and unimodal in eta at the resolution of interest.  If dist_shape == TRUE, Sigma_0 is set to the (normalized,
    double-centered) distance matrix implied by the mean embedding (DIST
    shape); otherwise the stage-1 shape is retained.  With dist_shape ==
    TRUE and a CONST stage-1 parameterization, a new multi_MVN is
@@ -818,7 +819,7 @@ static double var_scale_elbo(TreeModel *mod, multi_MVN *mmvn,
 multi_MVN *var_fit_scale(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
                          int npairs, unsigned int dist_shape,
                          unsigned int silent) {
-  int fd = mmvn->n * mmvn->d, n = data->nseqs, i, nevals = 2;
+  int fd = mmvn->n * mmvn->d, n = data->nseqs, i, ncoarse, nsampevals;
   const double gr = 0.6180339887498949; /* (sqrt(5) - 1) / 2 */
   double a = log(VARFLOOR),
     b = log(data->pointscale * data->pointscale) + VAR_SCALE_ETA_MARGIN,
@@ -868,37 +869,79 @@ multi_MVN *var_fit_scale(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
     mvn_sample_std(zs[i]);
   }
 
-  /* golden-section search for the maximum */
+  /* coarse pass: golden-section search using only a subset of the
+     antithetic pairs (the first ncoarse of the same draws) */
+  ncoarse = (npairs + 2) / 4;
+  if (ncoarse < 2) ncoarse = (npairs < 2 ? npairs : 2);
   c = b - gr * (b - a);
   d = a + gr * (b - a);
-  fc = var_scale_elbo(mod, mmvn, data, zs, npairs, c, NULL, NULL);
-  fdd = var_scale_elbo(mod, mmvn, data, zs, npairs, d, NULL, NULL);
-  while (b - a > VAR_SCALE_TOL) {
+  fc = var_scale_elbo(mod, mmvn, data, zs, ncoarse, c, NULL, NULL);
+  fdd = var_scale_elbo(mod, mmvn, data, zs, ncoarse, d, NULL, NULL);
+  nsampevals = 4 * ncoarse;
+  while (b - a > VAR_SCALE_COARSE_TOL) {
     if (fc > fdd) {
       b = d; d = c; fdd = fc;
       c = b - gr * (b - a);
-      fc = var_scale_elbo(mod, mmvn, data, zs, npairs, c, NULL, NULL);
+      fc = var_scale_elbo(mod, mmvn, data, zs, ncoarse, c, NULL, NULL);
     }
     else {
       a = c; c = d; fc = fdd;
       d = a + gr * (b - a);
-      fdd = var_scale_elbo(mod, mmvn, data, zs, npairs, d, NULL, NULL);
+      fdd = var_scale_elbo(mod, mmvn, data, zs, ncoarse, d, NULL, NULL);
     }
-    nevals++;
+    nsampevals += 2 * ncoarse;
   }
   besteta = (fc > fdd ? c : d);
-  if (!silent && (besteta < lo + 2 * VAR_SCALE_TOL ||
-                  besteta > hi - 2 * VAR_SCALE_TOL))
+
+  /* fine pass: with all pairs, evaluate at besteta and besteta +/- h,
+     shifting the triple until the center is highest, then take the
+     vertex of the interpolating parabola.  Fitting a parabola to points
+     spaced h apart smooths over the small-scale roughness of the Monte
+     Carlo objective (caused by discrete changes in topology) */
+  {
+    double h = VAR_SCALE_FINE_STEP, e[3], f[3], el[3], k[3], v, fv, ellv, klv;
+    int iter, have_center = FALSE;
+    for (iter = 0; iter < VAR_SCALE_MAX_SHIFTS; iter++) {
+      if (besteta - h < lo) besteta = lo + h;
+      if (besteta + h > hi) besteta = hi - h;
+      for (i = 0; i < 3; i++) {
+        e[i] = besteta + (i - 1) * h;
+        if (i == 1 && have_center) continue; /* already have it */
+        f[i] = var_scale_elbo(mod, mmvn, data, zs, npairs, e[i], &el[i], &k[i]);
+        nsampevals += 2 * npairs;
+      }
+      if (f[1] >= f[0] && f[1] >= f[2]) break;
+      /* shift toward the higher end, reusing that end as the new center */
+      i = (f[0] > f[2] ? 0 : 2);
+      besteta = e[i]; f[1] = f[i]; el[1] = el[i]; k[1] = k[i];
+      have_center = TRUE;
+    }
+    i = 1;  /* best of the three (the center unless at a boundary) */
+    if (f[0] > f[i]) i = 0;
+    if (f[2] > f[i]) i = 2;
+    besteta = e[i]; bestf = f[i]; ell = el[i]; kl = k[i];
+    if (i == 1 && f[1] >= f[2] && f[0] - 2 * f[1] + f[2] < 0) {
+      v = e[1] + 0.5 * h * (f[0] - f[2]) / (f[0] - 2 * f[1] + f[2]);
+      fv = var_scale_elbo(mod, mmvn, data, zs, npairs, v, &ellv, &klv);
+      nsampevals += 2 * npairs;
+      if (fv >= bestf) {
+        besteta = v; bestf = fv; ell = ellv; kl = klv;
+      }
+    }
+  }
+
+  if (!silent && (besteta < lo + VAR_SCALE_FINE_STEP + 1e-6 ||
+                  besteta > hi - VAR_SCALE_FINE_STEP - 1e-6))
     fprintf(stderr, "WARNING: stage-2 variance scale is at the boundary of its search range (eta = %.3f).\n", besteta);
 
-  /* final evaluation at the selected value also leaves the covariance
-     set accordingly */
-  bestf = var_scale_elbo(mod, mmvn, data, zs, npairs, besteta, &ell, &kl);
+  /* leave the covariance set at the selected value */
+  vec_set(data->params, 0, besteta);
+  update_covariance(mmvn, data);
 
   if (!silent)
-    fprintf(stderr, "Stage 2 (variance scale): shape %s, eta %.3f -> %.3f, ELBO %.2f (E[lnL] %.2f, KL %.2f; %d evaluations)\n",
+    fprintf(stderr, "Stage 2 (variance scale): shape %s, eta %.3f -> %.3f, ELBO %.2f (E[lnL] %.2f, KL %.2f; %d tree evaluations)\n",
             data->type == DIST ? "DIST" : "CONST", eta1, besteta, bestf,
-            ell, kl, nevals + 1);
+            ell, kl, nsampevals);
 
   for (i = 0; i < npairs; i++)
     vec_free(zs[i]);
