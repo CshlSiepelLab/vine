@@ -36,6 +36,15 @@
    algorithms */
 #define NSUBSAMPLES 256
 
+/* second stage of two-stage inference (var_fit_scale): default number
+   of antithetic pairs of Monte Carlo samples, margin by which the
+   upper bound of the search for the log variance scale exceeds the log
+   prior variance (log pointscale^2), and tolerance for golden-section
+   search */
+#define VAR_SCALE_NPAIRS 10
+#define VAR_SCALE_ETA_MARGIN 1.0
+#define VAR_SCALE_TOL 0.05
+
 void variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
                         double learnrate, double lr_decay,
                         int nbatches_conv, int min_nbatches,
@@ -57,6 +66,10 @@ void sample_points(multi_MVN *mmvn, Vector *points,
 
 void apply_normalizing_flows(Vector *points_y, Vector *points_x,
                                 CovarData *data, double *logdet);
+
+multi_MVN *var_fit_scale(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
+                         int npairs, unsigned int dist_shape,
+                         unsigned int silent);
 
 void set_kld_grad_LOWR(Vector *kldgrad, multi_MVN *mmvn);
 

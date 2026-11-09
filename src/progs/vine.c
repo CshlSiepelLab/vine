@@ -36,6 +36,11 @@
 #include "vine.help"
 
 #define DEFAULT_NSAMPLES 100
+
+/* long-only options (no single-character equivalents) */
+#define OPT_TWO_STAGE 1001
+#define OPT_TWO_STAGE_SHAPE 1002
+#define OPT_TWO_STAGE_NPAIRS 1003
 #define DEFAULT_BATCHSIZE 10
 #define DEFAULT_LEARNRATE 0.05
 #define DEFAULT_NITER_CONV 50
@@ -78,9 +83,10 @@ static void print_embedding(multi_MVN *mmvn, char **names, int n, int d, FILE *F
 }
 
 int main(int argc, char *argv[]) {
-  signed char c;
+  int c;
   int opt_idx, i, ntips = 0, nsamples = DEFAULT_NSAMPLES, dim = -1,
                   batchsize = DEFAULT_BATCHSIZE,
+                  two_stage_npairs = VAR_SCALE_NPAIRS,
                   niter_conv = DEFAULT_NITER_CONV, min_iter = DEFAULT_MIN_ITER,
                   rank = DEFAULT_RANK, nthreads = 1, dgamma_cats = 1,
                   mcmc_thin = DEFAULT_MCMC_THIN, seed = -1;
@@ -90,6 +96,7 @@ int main(int argc, char *argv[]) {
                ultrametric = FALSE, radial_flow = FALSE, planar_flow = FALSE,
                use_taylor = TRUE, had_dups = FALSE, silent = FALSE,
                log_all = FALSE, posterior = FALSE, covar_set = FALSE,
+               two_stage = FALSE, two_stage_dist = TRUE,
                var_reg_set = FALSE;
   MSA *msa = NULL;
   enum covar_type covar_param = CONST;
@@ -161,6 +168,9 @@ int main(int argc, char *argv[]) {
     {"radial-flow", 0, 0, 'F'},
     {"planar-flow", 0, 0, 'Z'},
     {"posterior", 0, 0, 'A'},
+    {"two-stage", 0, 0, OPT_TWO_STAGE},
+    {"two-stage-shape", 1, 0, OPT_TWO_STAGE_SHAPE},
+    {"two-stage-npairs", 1, 0, OPT_TWO_STAGE_NPAIRS},
     {"crispr-modtype", 1, 0, 'Y'},
     {"crispr-mutprior", 1, 0, 'p'},
     {"treeprior", 1, 0, 'P'},
@@ -224,6 +234,24 @@ int main(int argc, char *argv[]) {
       break;
     case 'F':
       radial_flow = TRUE;
+      break;
+    case OPT_TWO_STAGE:
+      two_stage = TRUE;
+      break;
+    case OPT_TWO_STAGE_SHAPE:
+      two_stage = TRUE;
+      if (!strcmp(optarg, "DIST"))
+        two_stage_dist = TRUE;
+      else if (!strcmp(optarg, "CONST"))
+        two_stage_dist = FALSE;
+      else
+        die("ERROR: --two-stage-shape must be CONST or DIST\n");
+      break;
+    case OPT_TWO_STAGE_NPAIRS:
+      two_stage = TRUE;
+      two_stage_npairs = atoi(optarg);
+      if (two_stage_npairs < 1)
+        die("ERROR: --two-stage-npairs must be positive\n");
       break;
     case 'A':
       posterior = TRUE;
@@ -432,6 +460,13 @@ int main(int argc, char *argv[]) {
       var_reg = 1.0;
     radial_flow = TRUE;
     planar_flow = TRUE;
+  }
+
+  if (two_stage == TRUE) {
+    if (covar_param != CONST && covar_param != DIST)
+      die("ERROR: --two-stage requires --covar CONST or DIST.\n");
+    if (tp_type != NONE)
+      die("ERROR: --two-stage is not supported with --treeprior.\n");
   }
 
   if (init_tree != NULL && indistfile != NULL)
@@ -720,6 +755,12 @@ int main(int argc, char *argv[]) {
       variational_inf(mod, mmvn, batchsize, learnrate, lr_decay,
                          niter_conv, min_iter, 
                          covar_data, logfile, silent, log_all);
+
+      /* optional second stage: refit the variance scale by maximizing
+         the correctly scaled ELBO with the mean held fixed */
+      if (two_stage == TRUE)
+        mmvn = var_fit_scale(mod, mmvn, covar_data, two_stage_npairs,
+                             two_stage_dist, silent);
 
       if (had_dups == TRUE && !silent)
         fprintf(stderr, "Sampling trees and re-adding duplicate cells...\n");

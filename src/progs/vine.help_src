@@ -204,6 +204,29 @@ COVARIANCE:
        Siepel et al., Nature Methods, under revision).  Not compatible
        with --hyperbolic.
 
+    --two-stage
+       After the variational parameters have been optimized, refit
+       the scale of the covariance matrix in a second stage.  The
+       mean (and any flow and nuisance parameters) is held fixed, and
+       the single variance-scale parameter is chosen to maximize the
+       evidence lower bound (ELBO), estimated by Monte Carlo with
+       common random numbers and optimized by golden-section search.
+       Unlike the objective used in the first stage, which down-weights
+       the KL term, this stage uses the standard (untempered) ELBO.
+       Requires --covar CONST or DIST (the default CONST is fine) and
+       the default implicit prior (no --treeprior).  See also
+       --two-stage-shape and --two-stage-npairs.
+
+    --two-stage-shape CONST|DIST
+       (default DIST; implies --two-stage) Shape of the covariance
+       matrix in the second stage.  DIST uses the double-centered
+       distance matrix implied by the first-stage mean embedding
+       (see --covar); CONST retains the first-stage shape.
+
+    --two-stage-npairs <N>
+       (default 10; implies --two-stage) Number of antithetic pairs of
+       Monte Carlo samples used to estimate the ELBO in the second stage.
+
     --covar, -S CONST|DIAG|DIST|LOWR
        (default CONST) Parameterization to use for covariance matrix for
        the multivariate normal variational distribution.  DIAG assumes no
