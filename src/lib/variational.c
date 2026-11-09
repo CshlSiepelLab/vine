@@ -541,9 +541,13 @@ double elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
        via dL_dt -> Jacobian -> dL_dx; the prior's nuisance grads
        (relclock_sig_grad, nodetimes_grad) are then picked up below by
        update_nuis_grad. */
+    /* the flow log-Jacobian is part of the objective (its gradient is
+       already included by compute_model_grad), so add it to the value */
+    double nf_logdet = 0;
     ll = compute_model_grad(mod, mmvn, points, points_std, grad, data,
-                               NULL, &migll, &lprior);
+                               &nf_logdet, &migll, &lprior);
     assert(isfinite(ll));
+    ll += nf_logdet;
 
     avell += ll;
     (*avemigll) += migll;

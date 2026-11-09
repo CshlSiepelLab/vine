@@ -113,8 +113,10 @@ double elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   /* Prior contribution is routed via dL_dt inside compute_model_grad
      and its nuisance grads (relclock_sig_grad, nodetimes_grad) are read
      out via update_nuis_grad below. */
+  double nf_logdet = 0;
   ll = compute_model_grad(mod, mmvn, mu, NULL,
-                             grad, data, NULL, migll, lprior);
+                             grad, data, &nf_logdet, migll, lprior);
+  ll += nf_logdet;  /* flow log-Jacobian (gradient already included) */
 
   /* do after calling compute_model_grad so tree is defined */
   assert(mod->tree->nnodes - 1 == td->nbranches);
@@ -202,7 +204,7 @@ double elbo_taylor(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   td->iter++;
   
   /* capture likelihood at mean before adding trace correction */
-  if (ll_at_mean != NULL) *ll_at_mean = ll;
+  if (ll_at_mean != NULL) *ll_at_mean = ll - nf_logdet;  /* likelihood only */
 
   /* add 1/2 T to log likelihood and scale gradient by 1/2; always used cached versions */
   ll += 0.5 * td->T_cache;
@@ -823,7 +825,7 @@ double elbo_hybrid(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
                       int nminibatch, Vector *grad, Vector *nuis_grad,
                       double *lprior, double *migll, double *ll_at_mean) {
   TaylorData *td = data->taylor;
-  double ll_mu;
+  double ll_mu, nf_logdet = 0;
 
   int fulld  = td->fulld;
   int sigdim = grad->size - fulld;
@@ -845,8 +847,9 @@ double elbo_hybrid(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
                                 NULL,        /* points_std == NULL → no variance grads */
                                 grad,
                                 data,
-                                NULL,
+                                &nf_logdet,
                                 migll, lprior);
+  ll_mu += nf_logdet;  /* flow log-Jacobian (gradient already included) */
 
   if (!isfinite(ll_mu)) {
     vec_free(mu);
@@ -1036,7 +1039,7 @@ double elbo_hybrid(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
    * 6. Cleanup
    * --------------------------------------- */
 
-  if (ll_at_mean != NULL) *ll_at_mean = ll_mu;
+  if (ll_at_mean != NULL) *ll_at_mean = ll_mu - nf_logdet;  /* likelihood only */
 
   vec_free(mu);
   if (mod->tree != NULL) {

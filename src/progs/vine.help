@@ -1,4 +1,4 @@
-char HELP[   18102] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
+char HELP[   18521] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
 \n\
 USAGE: vine [OPTIONS] alignment.fa > trees.nwk\n\
 \n\
@@ -212,7 +212,7 @@ COVARIANCE:\n\
        mean (and any flow and nuisance parameters) is held fixed, and\n\
        the single variance-scale parameter is chosen to maximize the\n\
        evidence lower bound (ELBO), estimated by Monte Carlo with\n\
-       common random numbers and optimized by golden-section search.\n\
+       common random numbers and optimized by a one-dimensional search.\n\
        Unlike the objective used in the first stage, which down-weights\n\
        the KL term, this stage uses the standard (untempered) ELBO.\n\
        Requires --covar CONST or DIST (the default CONST is fine) and\n\
@@ -244,23 +244,6 @@ COVARIANCE:\n\
     --rank, -W <rank>\n\
        (default 3) For use with --covar LOWR. Rank of low-rank\n\
        approximation of covariance matrix.  \n\
-\n\
-    --radial-flow, -F\n\
-       Add a radial-flow layer on top of the multivariate normal\n\
-       variational distribution, to capture radial nonlinearities in the\n\
-       posterior distribution. Estimates a single center point in <D>\n\
-       dimensions as well as a scale parameter alpha and strength\n\
-       parameter beta describing the manner in which points are pulled\n\
-       radially toward the center. This option is currently not compatible\n\
-       with --hyperbolic.\n\
-\n\
-    --planar-flow, -Z\n\
-       Add a planar-flow layer on top of the multivariate normal\n\
-       variational distribution, to accommodate directional skew and\n\
-       curvature. Estimates two vectors in <D> dimensions plus an\n\
-       intercept term to define a hyperplane toward which the posterior\n\
-       can be pulled.  Can be used in combination with --radial-flow but\n\
-       is not compatible with --hyperbolic.\n\
 \n\
     --var-reg, -v <multiplier>\n\
        The variance of the approximate posterior tends to shrink so a\n\
@@ -356,6 +339,30 @@ EXPERIMENTAL/LITTLE USED:\n\
        factor and therefore push the approximate posterior toward simpler\n\
        solutions (mean values closer to zero, covariance matrix closer to\n\
        identity). Use a logfile for guidance.        \n\
+\n\
+    --radial-flow, -F\n\
+       Add a radial-flow layer on top of the multivariate normal\n\
+       variational distribution, to capture radial nonlinearities in the\n\
+       posterior distribution. Estimates a single center point in <D>\n\
+       dimensions as well as a scale parameter alpha and strength\n\
+       parameter beta describing the manner in which points are pulled\n\
+       radially toward the center. This option is currently not compatible\n\
+       with --hyperbolic.\n\
+\n\
+    --planar-flow, -Z\n\
+       Add a planar-flow layer on top of the multivariate normal\n\
+       variational distribution, to accommodate directional skew and\n\
+       curvature. Estimates two vectors in <D> dimensions plus an\n\
+       intercept term to define a hyperplane toward which the posterior\n\
+       can be pulled.  Can be used in combination with --radial-flow but\n\
+       is not compatible with --hyperbolic.\n\
+\n\
+       Note on flows: in our benchmarks, flows did not improve the\n\
+       posterior approximation once the variance is refit by\n\
+       --two-stage (or --posterior), and they are not part of the\n\
+       recommended configuration.  When flows are used, the log\n\
+       likelihood reported in the log file includes the log-Jacobian of\n\
+       the flow transformation, which is part of the objective.\n\
 \n\
     --random-start, -R\n\
        Initialize variational inference randomly rather than from initial\n\
