@@ -216,8 +216,12 @@ COVARIANCE:
        Unlike the objective used in the first stage, which down-weights
        the KL term, this stage uses the standard (untempered) ELBO.
        Requires --covar CONST or DIST (the default CONST is fine) and
-       the default implicit prior (no --treeprior).  See also
-       --two-stage-shape and --two-stage-npairs.
+       the default implicit prior (no --treeprior).  With CRISPR data
+       (-i CRISPR), the variance scale is additionally capped so that
+       the expected total length of sampled trees is at most 1.25 times
+       that of the mean tree; with few sites the ELBO alone can favor
+       very diffuse distributions.  See also --two-stage-shape and
+       --two-stage-npairs.
 
     --two-stage-shape CONST|DIST
        (default DIST; implies --two-stage) Shape of the covariance

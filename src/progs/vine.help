@@ -1,4 +1,4 @@
-char HELP[   18521] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
+char HELP[   18798] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
 \n\
 USAGE: vine [OPTIONS] alignment.fa > trees.nwk\n\
 \n\
@@ -216,8 +216,12 @@ COVARIANCE:\n\
        Unlike the objective used in the first stage, which down-weights\n\
        the KL term, this stage uses the standard (untempered) ELBO.\n\
        Requires --covar CONST or DIST (the default CONST is fine) and\n\
-       the default implicit prior (no --treeprior).  See also\n\
-       --two-stage-shape and --two-stage-npairs.\n\
+       the default implicit prior (no --treeprior).  With CRISPR data\n\
+       (-i CRISPR), the variance scale is additionally capped so that\n\
+       the expected total length of sampled trees is at most 1.25 times\n\
+       that of the mean tree; with few sites the ELBO alone can favor\n\
+       very diffuse distributions.  See also --two-stage-shape and\n\
+       --two-stage-npairs.\n\
 \n\
     --two-stage-shape CONST|DIST\n\
        (default DIST; implies --two-stage) Shape of the covariance\n\

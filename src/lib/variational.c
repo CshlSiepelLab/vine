@@ -756,13 +756,14 @@ void set_entropy_grad_LOWR(Vector *entgrad, multi_MVN *mmvn) {
    units: only tr(Sigma) and mu^T mu are rescaled by 1/pointscale^2,
    and log det(Sigma) changes only by a constant.  If normalizing flows
    are in use, E_q[log|det J|] is included as part of the entropy.
-   Optionally returns the expected log likelihood and KL in *ell_out
-   and *kl_out. */
+   Optionally returns the expected log likelihood, KL, and expected
+   total tree length in *ell_out, *kl_out, and *tl_out. */
 static double var_scale_elbo(TreeModel *mod, multi_MVN *mmvn,
                              CovarData *data, Vector **zs, int npairs,
-                             double eta, double *ell_out, double *kl_out) {
+                             double eta, double *ell_out, double *kl_out,
+                             double *tl_out) {
   int fd = mmvn->n * mmvn->d, i, sgn;
-  double s2 = data->pointscale * data->pointscale, ell = 0, kl;
+  double s2 = data->pointscale * data->pointscale, ell = 0, kl, tl = 0;
   Vector *x = vec_new(fd), *y = vec_new(fd);
 
   vec_set(data->params, 0, eta);
@@ -778,6 +779,7 @@ static double var_scale_elbo(TreeModel *mod, multi_MVN *mmvn,
       apply_normalizing_flows(y, x, data, &logdet);
       points_to_distances(y, data);
       tree = infer_distance_tree(data->dist, data->names, NULL, NULL, data);
+      if (tl_out != NULL) tl += tr_total_len(tree);
       reset_tree_model(mod, tree);
       if (data->crispr_mod != NULL)
         ll = cpr_compute_log_likelihood(data->crispr_mod, NULL);
@@ -791,6 +793,7 @@ static double var_scale_elbo(TreeModel *mod, multi_MVN *mmvn,
     }
   }
   ell /= (2.0 * npairs);
+  if (tl_out != NULL) *tl_out = tl / (2.0 * npairs);
 
   kl = 0.5 * ((mmvn_trace(mmvn) + mmvn_mu2(mmvn)) / s2 - fd
               - (mmvn_log_det(mmvn) - fd * log(s2)));
@@ -813,7 +816,9 @@ static double var_scale_elbo(TreeModel *mod, multi_MVN *mmvn,
    [log(VARFLOOR), log(pointscale^2) + VAR_SCALE_ETA_MARGIN] (the upper
    end exceeds the variance of the prior in embedding units, which is
    pointscale^2).  This is reliable because the objective is smooth
-   and unimodal in eta at the resolution of interest.  If dist_shape == TRUE, Sigma_0 is set to the (normalized,
+   and unimodal in eta at the resolution of interest.  For CRISPR
+   data, eta is then capped by expected tree length (see below).  If
+   dist_shape == TRUE, Sigma_0 is set to the (normalized,
    double-centered) distance matrix implied by the mean embedding (DIST
    shape); otherwise the stage-1 shape is retained.  With dist_shape ==
    TRUE and a CONST stage-1 parameterization, a new multi_MVN is
@@ -823,7 +828,8 @@ static double var_scale_elbo(TreeModel *mod, multi_MVN *mmvn,
 multi_MVN *var_fit_scale(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
                          int npairs, unsigned int dist_shape,
                          unsigned int silent) {
-  int fd = mmvn->n * mmvn->d, n = data->nseqs, i, ncoarse, nsampevals;
+  int fd = mmvn->n * mmvn->d, n = data->nseqs, i, ncoarse, nsampevals,
+    capped = FALSE;
   const double gr = 0.6180339887498949; /* (sqrt(5) - 1) / 2 */
   double a = log(VARFLOOR),
     b = log(data->pointscale * data->pointscale) + VAR_SCALE_ETA_MARGIN,
@@ -879,19 +885,19 @@ multi_MVN *var_fit_scale(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   if (ncoarse < 2) ncoarse = (npairs < 2 ? npairs : 2);
   c = b - gr * (b - a);
   d = a + gr * (b - a);
-  fc = var_scale_elbo(mod, mmvn, data, zs, ncoarse, c, NULL, NULL);
-  fdd = var_scale_elbo(mod, mmvn, data, zs, ncoarse, d, NULL, NULL);
+  fc = var_scale_elbo(mod, mmvn, data, zs, ncoarse, c, NULL, NULL, NULL);
+  fdd = var_scale_elbo(mod, mmvn, data, zs, ncoarse, d, NULL, NULL, NULL);
   nsampevals = 4 * ncoarse;
   while (b - a > VAR_SCALE_COARSE_TOL) {
     if (fc > fdd) {
       b = d; d = c; fdd = fc;
       c = b - gr * (b - a);
-      fc = var_scale_elbo(mod, mmvn, data, zs, ncoarse, c, NULL, NULL);
+      fc = var_scale_elbo(mod, mmvn, data, zs, ncoarse, c, NULL, NULL, NULL);
     }
     else {
       a = c; c = d; fc = fdd;
       d = a + gr * (b - a);
-      fdd = var_scale_elbo(mod, mmvn, data, zs, ncoarse, d, NULL, NULL);
+      fdd = var_scale_elbo(mod, mmvn, data, zs, ncoarse, d, NULL, NULL, NULL);
     }
     nsampevals += 2 * ncoarse;
   }
@@ -911,7 +917,7 @@ multi_MVN *var_fit_scale(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
       for (i = 0; i < 3; i++) {
         e[i] = besteta + (i - 1) * h;
         if (i == 1 && have_center) continue; /* already have it */
-        f[i] = var_scale_elbo(mod, mmvn, data, zs, npairs, e[i], &el[i], &k[i]);
+        f[i] = var_scale_elbo(mod, mmvn, data, zs, npairs, e[i], &el[i], &k[i], NULL);
         nsampevals += 2 * npairs;
       }
       if (f[1] >= f[0] && f[1] >= f[2]) break;
@@ -926,7 +932,7 @@ multi_MVN *var_fit_scale(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
     besteta = e[i]; bestf = f[i]; ell = el[i]; kl = k[i];
     if (i == 1 && f[1] >= f[2] && f[0] - 2 * f[1] + f[2] < 0) {
       v = e[1] + 0.5 * h * (f[0] - f[2]) / (f[0] - 2 * f[1] + f[2]);
-      fv = var_scale_elbo(mod, mmvn, data, zs, npairs, v, &ellv, &klv);
+      fv = var_scale_elbo(mod, mmvn, data, zs, npairs, v, &ellv, &klv, NULL);
       nsampevals += 2 * npairs;
       if (fv >= bestf) {
         besteta = v; bestf = fv; ell = ellv; kl = klv;
@@ -934,7 +940,36 @@ multi_MVN *var_fit_scale(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
     }
   }
 
-  if (!silent && (besteta < lo + VAR_SCALE_FINE_STEP + 1e-6 ||
+  /* CRISPR data only: cap the variance scale so that the expected
+     length of sampled trees is at most (1 + VAR_SCALE_CRISPR_TLCAP)
+     times the length of trees at the lower end of the range (which
+     are essentially the mean tree).  With few, highly informative
+     sites, the likelihood depends weakly on most of the embedding, so
+     the entropy term can push the ELBO optimum to very large
+     variances, producing sampled trees that are much longer than the
+     mean tree and nearly random in topology.  If the cap binds, eta
+     is found by bisection, assuming tree length increases with eta. */
+  if (data->crispr_mod != NULL) {
+    double tl0, tlbest, tlmid, target, x0 = lo, x1 = besteta, xm;
+    var_scale_elbo(mod, mmvn, data, zs, npairs, lo, NULL, NULL, &tl0);
+    var_scale_elbo(mod, mmvn, data, zs, npairs, besteta, NULL, NULL, &tlbest);
+    nsampevals += 4 * npairs;
+    target = (1.0 + VAR_SCALE_CRISPR_TLCAP) * tl0;
+    if (tlbest > target) {
+      while (x1 - x0 > VAR_SCALE_CAP_TOL) {
+        xm = 0.5 * (x0 + x1);
+        var_scale_elbo(mod, mmvn, data, zs, npairs, xm, NULL, NULL, &tlmid);
+        nsampevals += 2 * npairs;
+        if (tlmid <= target) x0 = xm; else x1 = xm;
+      }
+      besteta = x0;   /* largest eta known to satisfy the cap */
+      bestf = var_scale_elbo(mod, mmvn, data, zs, npairs, besteta, &ell, &kl, NULL);
+      nsampevals += 2 * npairs;
+      capped = TRUE;
+    }
+  }
+
+  if (!silent && !capped && (besteta < lo + VAR_SCALE_FINE_STEP + 1e-6 ||
                   besteta > hi - VAR_SCALE_FINE_STEP - 1e-6))
     fprintf(stderr, "WARNING: stage-2 variance scale is at the boundary of its search range (eta = %.3f).\n", besteta);
 
@@ -943,8 +978,9 @@ multi_MVN *var_fit_scale(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   update_covariance(mmvn, data);
 
   if (!silent)
-    fprintf(stderr, "Stage 2 (variance scale): shape %s, eta %.3f -> %.3f, ELBO %.2f (E[lnL] %.2f, KL %.2f; %d tree evaluations)\n",
-            data->type == DIST ? "DIST" : "CONST", eta1, besteta, bestf,
+    fprintf(stderr, "Stage 2 (variance scale): shape %s, eta %.3f -> %.3f%s, ELBO %.2f (E[lnL] %.2f, KL %.2f; %d tree evaluations)\n",
+            data->type == DIST ? "DIST" : "CONST", eta1, besteta,
+            capped ? " (capped by tree length)" : "", bestf,
             ell, kl, nsampevals);
 
   for (i = 0; i < npairs; i++)

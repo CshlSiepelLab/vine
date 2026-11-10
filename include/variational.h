@@ -48,6 +48,12 @@
 #define VAR_SCALE_FINE_STEP 0.3
 #define VAR_SCALE_MAX_SHIFTS 5
 
+/* CRISPR data only: maximum fractional excess of the expected length of
+   trees sampled in the second stage over the length of the mean tree,
+   and the tolerance in eta of the bisection that enforces it */
+#define VAR_SCALE_CRISPR_TLCAP 0.25
+#define VAR_SCALE_CAP_TOL 0.01
+
 void variational_inf(TreeModel *mod, multi_MVN *mmvn, int nminibatch,
                         double learnrate, double lr_decay,
                         int nbatches_conv, int min_nbatches,
