@@ -909,8 +909,8 @@ multi_MVN *var_fit_scale(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
     double h = VAR_SCALE_FINE_STEP, e[3], f[3], el[3], k[3], v, fv, ellv, klv;
     int iter, have_center = FALSE;
     for (iter = 0; iter < VAR_SCALE_MAX_SHIFTS; iter++) {
-      if (besteta - h < lo) besteta = lo + h;
-      if (besteta + h > hi) besteta = hi - h;
+      if (besteta - h < lo) { besteta = lo + h; have_center = FALSE; }
+      if (besteta + h > hi) { besteta = hi - h; have_center = FALSE; }
       for (i = 0; i < 3; i++) {
         e[i] = besteta + (i - 1) * h;
         if (i == 1 && have_center) continue; /* already have it */

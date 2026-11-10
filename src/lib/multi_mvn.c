@@ -181,6 +181,7 @@ void mmvn_map_std(multi_MVN *mmvn, Vector *retval) {
       mvn_map_std(mmvn->mvn, xcomp, NULL);
       mmvn_project_up(mmvn, xcomp, retval, d);
     }
+    vec_free(xcomp);
   }
 }
 

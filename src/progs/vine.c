@@ -447,8 +447,10 @@ int main(int argc, char *argv[]) {
   if (two_stage == TRUE) {
     if (covar_param != CONST && covar_param != DIST)
       die("ERROR: --two-stage requires --covar CONST or DIST.\n");
-    if (tp_type != NONE)
-      die("ERROR: --two-stage is not supported with --treeprior.\n");
+    if (tp_type != NONE || relclock == TRUE)
+      die("ERROR: --two-stage is not supported with --treeprior or --relclock.\n");
+    if (hyperbolic == TRUE && negcurvature != 0)
+      die("ERROR: --two-stage is not supported with --hyperbolic; the procedure has not been validated for hyperbolic geometry.\n");
   }
 
   if (init_tree != NULL && indistfile != NULL)
