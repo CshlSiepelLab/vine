@@ -25,6 +25,10 @@ TYPICAL COMMANDS:
 
     For CRISPR:
         vine mymatrix.tsv --format CRISPR --logfile log > samples-crispr.nwk
+
+    For better-calibrated posterior uncertainty (see --posterior), add
+    --posterior to either command:
+        vine myalignment.fa --logfile log --hky85 --posterior > samples.nwk
         
 MAIN OPTIONS:
     --help, -h

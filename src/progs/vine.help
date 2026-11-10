@@ -1,4 +1,4 @@
-char HELP[   18702] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
+char HELP[   18897] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
 \n\
 USAGE: vine [OPTIONS] alignment.fa > trees.nwk\n\
 \n\
@@ -25,6 +25,10 @@ TYPICAL COMMANDS:\n\
 \n\
     For CRISPR:\n\
         vine mymatrix.tsv --format CRISPR --logfile log > samples-crispr.nwk\n\
+\n\
+    For better-calibrated posterior uncertainty (see --posterior), add\n\
+    --posterior to either command:\n\
+        vine myalignment.fa --logfile log --hky85 --posterior > samples.nwk\n\
         \n\
 MAIN OPTIONS:\n\
     --help, -h\n\
