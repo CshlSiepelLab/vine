@@ -25,6 +25,10 @@ TYPICAL COMMANDS:
 
     For CRISPR:
         vine mymatrix.tsv --format CRISPR --logfile log > samples-crispr.nwk
+
+    For better-calibrated posterior uncertainty (see --posterior), add
+    --posterior to either command:
+        vine myalignment.fa --logfile log --hky85 --posterior > samples.nwk
         
 MAIN OPTIONS:
     --help, -h
@@ -198,11 +202,37 @@ INITIALIZATION:
 
 COVARIANCE:
     --posterior, -A
-       Convenience option that selects the recommended combination of
-       options for optimizing the posterior approximation, equivalent
-       to --covar DIST --radial-flow --planar-flow --var-reg 1 (see
-       Siepel et al., Nature Methods, under revision).  Not compatible
-       with --hyperbolic.
+       Convenience option that selects the recommended configuration for
+       approximating the posterior distribution, currently equivalent
+       to --two-stage (see below).  The first stage is the default
+       optimization, so point estimates (such as the posterior mean
+       tree) are the same as without this option;
+       only the variance of the approximate posterior differs.  Not
+       compatible with --hyperbolic.
+
+    --two-stage
+       After the variational parameters have been optimized, refit
+       the scale of the covariance matrix in a second stage.  The
+       mean (and any flow and nuisance parameters) is held fixed, and
+       the single variance-scale parameter is chosen to maximize the
+       evidence lower bound (ELBO), estimated by Monte Carlo with
+       common random numbers and optimized by a one-dimensional search.
+       Unlike the objective used in the first stage, which down-weights
+       the KL term, this stage uses the standard (untempered) ELBO.
+       Requires --covar CONST or DIST (the default CONST is fine) and
+       the default implicit prior (no --treeprior or --relclock); not
+       compatible with --hyperbolic.  With CRISPR data
+       (-i CRISPR), the variance scale is additionally capped so that
+       the expected total length of sampled trees is at most 1.25 times
+       that of the mean tree; with few sites the ELBO alone can favor
+       very diffuse distributions.  The covariance in the second stage
+       has the DIST shape (see --covar), based on the distance matrix
+       implied by the first-stage mean embedding, whatever the
+       first-stage parameterization.  See also --two-stage-npairs.
+
+    --two-stage-npairs <N>
+       (default 10; implies --two-stage) Number of antithetic pairs of
+       Monte Carlo samples used to estimate the ELBO in the second stage.
 
     --covar, -S CONST|DIAG|DIST|LOWR
        (default CONST) Parameterization to use for covariance matrix for
@@ -219,23 +249,6 @@ COVARIANCE:
     --rank, -W <rank>
        (default 3) For use with --covar LOWR. Rank of low-rank
        approximation of covariance matrix.  
-
-    --radial-flow, -F
-       Add a radial-flow layer on top of the multivariate normal
-       variational distribution, to capture radial nonlinearities in the
-       posterior distribution. Estimates a single center point in <D>
-       dimensions as well as a scale parameter alpha and strength
-       parameter beta describing the manner in which points are pulled
-       radially toward the center. This option is currently not compatible
-       with --hyperbolic.
-
-    --planar-flow, -Z
-       Add a planar-flow layer on top of the multivariate normal
-       variational distribution, to accommodate directional skew and
-       curvature. Estimates two vectors in <D> dimensions plus an
-       intercept term to define a hyperplane toward which the posterior
-       can be pulled.  Can be used in combination with --radial-flow but
-       is not compatible with --hyperbolic.
 
     --var-reg, -v <multiplier>
        The variance of the approximate posterior tends to shrink so a
@@ -331,6 +344,30 @@ EXPERIMENTAL/LITTLE USED:
        factor and therefore push the approximate posterior toward simpler
        solutions (mean values closer to zero, covariance matrix closer to
        identity). Use a logfile for guidance.        
+
+    --radial-flow, -F
+       Add a radial-flow layer on top of the multivariate normal
+       variational distribution, to capture radial nonlinearities in the
+       posterior distribution. Estimates a single center point in <D>
+       dimensions as well as a scale parameter alpha and strength
+       parameter beta describing the manner in which points are pulled
+       radially toward the center. This option is currently not compatible
+       with --hyperbolic.
+
+    --planar-flow, -Z
+       Add a planar-flow layer on top of the multivariate normal
+       variational distribution, to accommodate directional skew and
+       curvature. Estimates two vectors in <D> dimensions plus an
+       intercept term to define a hyperplane toward which the posterior
+       can be pulled.  Can be used in combination with --radial-flow but
+       is not compatible with --hyperbolic.
+
+       Note on flows: in our benchmarks, flows did not improve the
+       posterior approximation once the variance is refit by
+       --two-stage (or --posterior), and they are not part of the
+       recommended configuration.  When flows are used, the log
+       likelihood reported in the log file includes the log-Jacobian of
+       the flow transformation, which is part of the objective.
 
     --random-start, -R
        Initialize variational inference randomly rather than from initial

@@ -27,6 +27,8 @@
 #include <hutchinson.h>
 #include <migration.h>
 #include <version.h>
+#include <covariance.h>
+#include <crispr.h>
 
 /* number of warmup iterations to run with migration model disabled;
    allows tree topology to converge before migration inference activates */
@@ -539,9 +541,13 @@ double elbo_montecarlo(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
        via dL_dt -> Jacobian -> dL_dx; the prior's nuisance grads
        (relclock_sig_grad, nodetimes_grad) are then picked up below by
        update_nuis_grad. */
+    /* the flow log-Jacobian is part of the objective (its gradient is
+       already included by compute_model_grad), so add it to the value */
+    double nf_logdet = 0;
     ll = compute_model_grad(mod, mmvn, points, points_std, grad, data,
-                               NULL, &migll, &lprior);
+                               &nf_logdet, &migll, &lprior);
     assert(isfinite(ll));
+    ll += nf_logdet;
 
     avell += ll;
     (*avemigll) += migll;
@@ -739,4 +745,245 @@ void set_entropy_grad_LOWR(Vector *entgrad, multi_MVN *mmvn) {
               mat_get(Rgrad, i, j));
 
   mat_free(Rgrad);
+}
+
+/* Value of the correctly scaled ELBO for the second stage of two-stage
+   inference (see var_fit_scale), at log variance scale eta.  The
+   expected log likelihood is estimated by Monte Carlo from the
+   antithetic pairs of fixed standard-normal draws in zs (common random
+   numbers across calls), so the function is deterministic in eta.  The
+   KL term is that of q(x) from the prior N(0, I) expressed in distance
+   units: only tr(Sigma) and mu^T mu are rescaled by 1/pointscale^2,
+   and log det(Sigma) changes only by a constant.  If normalizing flows
+   are in use, E_q[log|det J|] is included as part of the entropy.
+   Optionally returns the expected log likelihood, KL, and expected
+   total tree length in *ell_out, *kl_out, and *tl_out. */
+static double var_scale_elbo(TreeModel *mod, multi_MVN *mmvn,
+                             CovarData *data, Vector **zs, int npairs,
+                             double eta, double *ell_out, double *kl_out,
+                             double *tl_out) {
+  int fd = mmvn->n * mmvn->d, i, sgn;
+  double s2 = data->pointscale * data->pointscale, ell = 0, kl, tl = 0;
+  Vector *x = vec_new(fd), *y = vec_new(fd);
+
+  vec_set(data->params, 0, eta);
+  update_covariance(mmvn, data);
+
+  for (i = 0; i < npairs; i++) {
+    for (sgn = 0; sgn < 2; sgn++) {
+      double logdet = 0, ll;
+      TreeNode *tree;
+      vec_copy(x, zs[i]);
+      if (sgn == 1) vec_scale(x, -1.0);
+      mmvn_map_std(mmvn, x);
+      apply_normalizing_flows(y, x, data, &logdet);
+      points_to_distances(y, data);
+      tree = infer_distance_tree(data->dist, data->names, NULL, NULL, data);
+      if (tl_out != NULL) tl += tr_total_len(tree);
+      reset_tree_model(mod, tree);
+      if (data->crispr_mod != NULL)
+        ll = cpr_compute_log_likelihood(data->crispr_mod, NULL);
+      else
+        ll = compute_log_likelihood(mod, data, NULL);
+      if (data->migtable != NULL &&
+          !(data->crispr_mod != NULL && data->crispr_mod->mig_warmup))
+        ll += mig_compute_log_likelihood(mod, data->migtable,
+                                         data->crispr_mod, NULL);
+      ell += ll + logdet;
+    }
+  }
+  ell /= (2.0 * npairs);
+  if (tl_out != NULL) *tl_out = tl / (2.0 * npairs);
+
+  kl = 0.5 * ((mmvn_trace(mmvn) + mmvn_mu2(mmvn)) / s2 - fd
+              - (mmvn_log_det(mmvn) - fd * log(s2)));
+
+  vec_free(x);
+  vec_free(y);
+  if (ell_out != NULL) *ell_out = ell;
+  if (kl_out != NULL) *kl_out = kl;
+  return ell - kl;
+}
+
+/* Second stage of two-stage variational inference.  Holding the mean
+   (and any flow and nuisance parameters) fixed at the values obtained
+   by variational_inf, choose the single variance-scale parameter eta
+   (Sigma = e^eta * Sigma_0) to maximize the correctly scaled ELBO,
+   estimated by Monte Carlo with npairs antithetic pairs of common
+   random numbers.  The maximization is in two passes: a coarse
+   golden-section search using a subset of the samples, followed by a
+   parabolic refinement with all samples.  The search range is
+   [log(VARFLOOR), log(pointscale^2) + VAR_SCALE_ETA_MARGIN] (the upper
+   end exceeds the variance of the prior in embedding units, which is
+   pointscale^2).  This is reliable because the objective is smooth
+   and unimodal in eta at the resolution of interest.  For CRISPR
+   data, eta is then capped by expected tree length (see below).
+   Sigma_0 is set to the (normalized, double-centered) distance matrix
+   implied by the mean embedding (DIST shape).  With a CONST stage-1
+   parameterization, a new multi_MVN is allocated and the old one
+   freed, so callers must use the returned pointer.  Only CONST and DIST parameterizations and the default
+   implicit prior are supported. */
+multi_MVN *var_fit_scale(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
+                         int npairs, unsigned int silent) {
+  int fd = mmvn->n * mmvn->d, n = data->nseqs, i, ncoarse, nsampevals,
+    capped = FALSE;
+  const double gr = 0.6180339887498949; /* (sqrt(5) - 1) / 2 */
+  double a = log(VARFLOOR),
+    b = log(data->pointscale * data->pointscale) + VAR_SCALE_ETA_MARGIN,
+    c, d, fc, fdd,
+    eta1 = vec_get(data->params, 0), besteta, bestf, ell, kl;
+  unsigned int subsample_saved = data->subsample;
+  const double lo = a, hi = b; /* full search range, for boundary check */
+  Vector **zs;
+
+  if (data->type != CONST && data->type != DIST)
+    die("ERROR in var_fit_scale: only CONST and DIST parameterizations are supported.\n");
+  if (data->treeprior != NULL)
+    die("ERROR in var_fit_scale: explicit tree priors are not supported.\n");
+  if (npairs < 1)
+    die("ERROR in var_fit_scale: npairs must be positive.\n");
+
+  data->subsample = FALSE; /* exact likelihoods */
+
+  /* define Sigma_0 from the distances implied by the mean embedding */
+  {
+    Vector *mu = vec_new(fd), *muy = vec_new(fd);
+    for (i = 0; i < fd; i++)
+      vec_set(mu, i, mmvn_get_mu_el(mmvn, i));
+    apply_normalizing_flows(muy, mu, data, NULL);
+    points_to_distances(muy, data);
+    if (data->type == CONST) {
+      multi_MVN *newmmvn = mmvn_new(n, data->dim, MVN_GEN);
+      for (i = 0; i < fd; i++)
+        mmvn_set_mu_el(newmmvn, i, vec_get(mu, i));
+      mmvn_free(mmvn);
+      mmvn = newmmvn;
+      data->Lapl_pinv = mat_new(n, n);
+      data->Lapl_pinv_evals = vec_new(n);
+      data->Lapl_pinv_evecs = mat_new(n, n);
+      data->type = DIST;
+      data->mvn_type = MVN_GEN;
+    }
+    laplacian_pinv(data);
+    vec_free(mu);
+    vec_free(muy);
+  }
+
+  /* fixed standard-normal draws (common random numbers) */
+  zs = smalloc(npairs * sizeof(Vector*));
+  for (i = 0; i < npairs; i++) {
+    zs[i] = vec_new(fd);
+    mvn_sample_std(zs[i]);
+  }
+
+  /* coarse pass: golden-section search using only a subset of the
+     antithetic pairs (the first ncoarse of the same draws) */
+  ncoarse = (npairs + 2) / 4;
+  if (ncoarse < 2) ncoarse = (npairs < 2 ? npairs : 2);
+  c = b - gr * (b - a);
+  d = a + gr * (b - a);
+  fc = var_scale_elbo(mod, mmvn, data, zs, ncoarse, c, NULL, NULL, NULL);
+  fdd = var_scale_elbo(mod, mmvn, data, zs, ncoarse, d, NULL, NULL, NULL);
+  nsampevals = 4 * ncoarse;
+  while (b - a > VAR_SCALE_COARSE_TOL) {
+    if (fc > fdd) {
+      b = d; d = c; fdd = fc;
+      c = b - gr * (b - a);
+      fc = var_scale_elbo(mod, mmvn, data, zs, ncoarse, c, NULL, NULL, NULL);
+    }
+    else {
+      a = c; c = d; fc = fdd;
+      d = a + gr * (b - a);
+      fdd = var_scale_elbo(mod, mmvn, data, zs, ncoarse, d, NULL, NULL, NULL);
+    }
+    nsampevals += 2 * ncoarse;
+  }
+  besteta = (fc > fdd ? c : d);
+
+  /* fine pass: with all pairs, evaluate at besteta and besteta +/- h,
+     shifting the triple until the center is highest, then take the
+     vertex of the interpolating parabola.  Fitting a parabola to points
+     spaced h apart smooths over the small-scale roughness of the Monte
+     Carlo objective (caused by discrete changes in topology) */
+  {
+    double h = VAR_SCALE_FINE_STEP, e[3], f[3], el[3], k[3], v, fv, ellv, klv;
+    int iter, have_center = FALSE;
+    for (iter = 0; iter < VAR_SCALE_MAX_SHIFTS; iter++) {
+      if (besteta - h < lo) { besteta = lo + h; have_center = FALSE; }
+      if (besteta + h > hi) { besteta = hi - h; have_center = FALSE; }
+      for (i = 0; i < 3; i++) {
+        e[i] = besteta + (i - 1) * h;
+        if (i == 1 && have_center) continue; /* already have it */
+        f[i] = var_scale_elbo(mod, mmvn, data, zs, npairs, e[i], &el[i], &k[i], NULL);
+        nsampevals += 2 * npairs;
+      }
+      if (f[1] >= f[0] && f[1] >= f[2]) break;
+      /* shift toward the higher end, reusing that end as the new center */
+      i = (f[0] > f[2] ? 0 : 2);
+      besteta = e[i]; f[1] = f[i]; el[1] = el[i]; k[1] = k[i];
+      have_center = TRUE;
+    }
+    i = 1;  /* best of the three (the center unless at a boundary) */
+    if (f[0] > f[i]) i = 0;
+    if (f[2] > f[i]) i = 2;
+    besteta = e[i]; bestf = f[i]; ell = el[i]; kl = k[i];
+    if (i == 1 && f[1] >= f[2] && f[0] - 2 * f[1] + f[2] < 0) {
+      v = e[1] + 0.5 * h * (f[0] - f[2]) / (f[0] - 2 * f[1] + f[2]);
+      fv = var_scale_elbo(mod, mmvn, data, zs, npairs, v, &ellv, &klv, NULL);
+      nsampevals += 2 * npairs;
+      if (fv >= bestf) {
+        besteta = v; bestf = fv; ell = ellv; kl = klv;
+      }
+    }
+  }
+
+  /* CRISPR data only: cap the variance scale so that the expected
+     length of sampled trees is at most (1 + VAR_SCALE_CRISPR_TLCAP)
+     times the length of trees at the lower end of the range (which
+     are essentially the mean tree).  With few, highly informative
+     sites, the likelihood depends weakly on most of the embedding, so
+     the entropy term can push the ELBO optimum to very large
+     variances, producing sampled trees that are much longer than the
+     mean tree and nearly random in topology.  If the cap binds, eta
+     is found by bisection, assuming tree length increases with eta. */
+  if (data->crispr_mod != NULL) {
+    double tl0, tlbest, tlmid, target, x0 = lo, x1 = besteta, xm;
+    var_scale_elbo(mod, mmvn, data, zs, npairs, lo, NULL, NULL, &tl0);
+    var_scale_elbo(mod, mmvn, data, zs, npairs, besteta, NULL, NULL, &tlbest);
+    nsampevals += 4 * npairs;
+    target = (1.0 + VAR_SCALE_CRISPR_TLCAP) * tl0;
+    if (tlbest > target) {
+      while (x1 - x0 > VAR_SCALE_CAP_TOL) {
+        xm = 0.5 * (x0 + x1);
+        var_scale_elbo(mod, mmvn, data, zs, npairs, xm, NULL, NULL, &tlmid);
+        nsampevals += 2 * npairs;
+        if (tlmid <= target) x0 = xm; else x1 = xm;
+      }
+      besteta = x0;   /* largest eta known to satisfy the cap */
+      bestf = var_scale_elbo(mod, mmvn, data, zs, npairs, besteta, &ell, &kl, NULL);
+      nsampevals += 2 * npairs;
+      capped = TRUE;
+    }
+  }
+
+  if (!silent && !capped && (besteta < lo + VAR_SCALE_FINE_STEP + 1e-6 ||
+                  besteta > hi - VAR_SCALE_FINE_STEP - 1e-6))
+    fprintf(stderr, "WARNING: stage-2 variance scale is at the boundary of its search range (eta = %.3f).\n", besteta);
+
+  /* leave the covariance set at the selected value */
+  vec_set(data->params, 0, besteta);
+  update_covariance(mmvn, data);
+
+  if (!silent)
+    fprintf(stderr, "Stage 2 (variance scale): shape %s, eta %.3f -> %.3f%s, ELBO %.2f (E[lnL] %.2f, KL %.2f; %d tree evaluations)\n",
+            data->type == DIST ? "DIST" : "CONST", eta1, besteta,
+            capped ? " (capped by tree length)" : "", bestf,
+            ell, kl, nsampevals);
+
+  for (i = 0; i < npairs; i++)
+    vec_free(zs[i]);
+  sfree(zs);
+  data->subsample = subsample_saved;
+
+  return mmvn;
 }

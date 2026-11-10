@@ -36,6 +36,10 @@
 #include "vine.help"
 
 #define DEFAULT_NSAMPLES 100
+
+/* long-only options (no single-character equivalents) */
+#define OPT_TWO_STAGE 1001
+#define OPT_TWO_STAGE_NPAIRS 1003
 #define DEFAULT_BATCHSIZE 10
 #define DEFAULT_LEARNRATE 0.05
 #define DEFAULT_NITER_CONV 50
@@ -78,9 +82,10 @@ static void print_embedding(multi_MVN *mmvn, char **names, int n, int d, FILE *F
 }
 
 int main(int argc, char *argv[]) {
-  signed char c;
+  int c;
   int opt_idx, i, ntips = 0, nsamples = DEFAULT_NSAMPLES, dim = -1,
                   batchsize = DEFAULT_BATCHSIZE,
+                  two_stage_npairs = VAR_SCALE_NPAIRS,
                   niter_conv = DEFAULT_NITER_CONV, min_iter = DEFAULT_MIN_ITER,
                   rank = DEFAULT_RANK, nthreads = 1, dgamma_cats = 1,
                   mcmc_thin = DEFAULT_MCMC_THIN, seed = -1;
@@ -89,8 +94,8 @@ int main(int argc, char *argv[]) {
                natural_grad = FALSE, is_crispr = FALSE,
                ultrametric = FALSE, radial_flow = FALSE, planar_flow = FALSE,
                use_taylor = TRUE, had_dups = FALSE, silent = FALSE,
-               log_all = FALSE, posterior = FALSE, covar_set = FALSE,
-               var_reg_set = FALSE;
+               log_all = FALSE, posterior = FALSE,
+               two_stage = FALSE;
   MSA *msa = NULL;
   enum covar_type covar_param = CONST;
   char *alphabet = "ACGT";
@@ -161,6 +166,8 @@ int main(int argc, char *argv[]) {
     {"radial-flow", 0, 0, 'F'},
     {"planar-flow", 0, 0, 'Z'},
     {"posterior", 0, 0, 'A'},
+    {"two-stage", 0, 0, OPT_TWO_STAGE},
+    {"two-stage-npairs", 1, 0, OPT_TWO_STAGE_NPAIRS},
     {"crispr-modtype", 1, 0, 'Y'},
     {"crispr-mutprior", 1, 0, 'p'},
     {"treeprior", 1, 0, 'P'},
@@ -224,6 +231,15 @@ int main(int argc, char *argv[]) {
       break;
     case 'F':
       radial_flow = TRUE;
+      break;
+    case OPT_TWO_STAGE:
+      two_stage = TRUE;
+      break;
+    case OPT_TWO_STAGE_NPAIRS:
+      two_stage = TRUE;
+      two_stage_npairs = atoi(optarg);
+      if (two_stage_npairs < 1)
+        die("ERROR: --two-stage-npairs must be positive\n");
       break;
     case 'A':
       posterior = TRUE;
@@ -321,7 +337,6 @@ int main(int argc, char *argv[]) {
       var_reg = atof(optarg);
       if (var_reg < 0)
         die("ERROR: --var-reg must be non-negative\n");
-      var_reg_set = TRUE;
       break;
     case 'r':
       learnrate = atof(optarg);
@@ -351,7 +366,6 @@ int main(int argc, char *argv[]) {
       else if (!strcmp(optarg, "LOWR"))
         covar_param = LOWR;
       else die("ERROR: bad argument to --covar (-S).\n");
-      covar_set = TRUE;
       break;
     case 't':
       init_tree = tr_new_from_file(phast_fopen(optarg, "r"));
@@ -419,19 +433,24 @@ int main(int argc, char *argv[]) {
   }
 
   /* --posterior is a convenience flag that selects the recommended
-     combination of options for optimizing the posterior approximation:
-     --covar DIST --radial-flow --planar-flow --var-reg 1.  Any of these
-     options given explicitly overrides the corresponding default, in any
-     order (tracked via covar_set / var_reg_set). */
+     option for the posterior approximation: two-stage inference, in
+     which the first stage is the default optimization (unchanged, so
+     point estimates are identical to those without --posterior) and the
+     second stage refits the variance scale with a DIST-shaped
+     covariance by maximizing the correctly scaled ELBO. */
   if (posterior == TRUE) {
     if (hyperbolic == TRUE)
-      die("Cannot use --posterior with --hyperbolic; --posterior enables the radial- and planar-flow layers, which are incompatible with hyperbolic geometry.\n");
-    if (!covar_set)
-      covar_param = DIST;
-    if (!var_reg_set)
-      var_reg = 1.0;
-    radial_flow = TRUE;
-    planar_flow = TRUE;
+      die("Cannot use --posterior with --hyperbolic; the two-stage procedure has not been validated for hyperbolic geometry.\n");
+    two_stage = TRUE;
+  }
+
+  if (two_stage == TRUE) {
+    if (covar_param != CONST && covar_param != DIST)
+      die("ERROR: --two-stage requires --covar CONST or DIST.\n");
+    if (tp_type != NONE || relclock == TRUE)
+      die("ERROR: --two-stage is not supported with --treeprior or --relclock.\n");
+    if (hyperbolic == TRUE && negcurvature != 0)
+      die("ERROR: --two-stage is not supported with --hyperbolic; the procedure has not been validated for hyperbolic geometry.\n");
   }
 
   if (init_tree != NULL && indistfile != NULL)
@@ -720,6 +739,12 @@ int main(int argc, char *argv[]) {
       variational_inf(mod, mmvn, batchsize, learnrate, lr_decay,
                          niter_conv, min_iter, 
                          covar_data, logfile, silent, log_all);
+
+      /* optional second stage: refit the variance scale by maximizing
+         the correctly scaled ELBO with the mean held fixed */
+      if (two_stage == TRUE)
+        mmvn = var_fit_scale(mod, mmvn, covar_data, two_stage_npairs,
+                             silent);
 
       if (had_dups == TRUE && !silent)
         fprintf(stderr, "Sampling trees and re-adding duplicate cells...\n");
