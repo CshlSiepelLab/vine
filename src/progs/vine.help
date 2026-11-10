@@ -1,4 +1,4 @@
-char HELP[   18798] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
+char HELP[   18644] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
 \n\
 USAGE: vine [OPTIONS] alignment.fa > trees.nwk\n\
 \n\
@@ -200,9 +200,9 @@ COVARIANCE:\n\
     --posterior, -A\n\
        Convenience option that selects the recommended configuration for\n\
        approximating the posterior distribution, currently equivalent\n\
-       to --two-stage with the default DIST shape (see below).  The first\n\
-       stage is the default optimization, so point estimates (such as\n\
-       the posterior mean tree) are the same as without this option;\n\
+       to --two-stage (see below).  The first stage is the default\n\
+       optimization, so point estimates (such as the posterior mean\n\
+       tree) are the same as without this option;\n\
        only the variance of the approximate posterior differs.  Not\n\
        compatible with --hyperbolic.\n\
 \n\
@@ -220,14 +220,10 @@ COVARIANCE:\n\
        (-i CRISPR), the variance scale is additionally capped so that\n\
        the expected total length of sampled trees is at most 1.25 times\n\
        that of the mean tree; with few sites the ELBO alone can favor\n\
-       very diffuse distributions.  See also --two-stage-shape and\n\
-       --two-stage-npairs.\n\
-\n\
-    --two-stage-shape CONST|DIST\n\
-       (default DIST; implies --two-stage) Shape of the covariance\n\
-       matrix in the second stage.  DIST uses the double-centered\n\
-       distance matrix implied by the first-stage mean embedding\n\
-       (see --covar); CONST retains the first-stage shape.\n\
+       very diffuse distributions.  The covariance in the second stage\n\
+       has the DIST shape (see --covar), based on the distance matrix\n\
+       implied by the first-stage mean embedding, whatever the\n\
+       first-stage parameterization.  See also --two-stage-npairs.\n\
 \n\
     --two-stage-npairs <N>\n\
        (default 10; implies --two-stage) Number of antithetic pairs of\n\

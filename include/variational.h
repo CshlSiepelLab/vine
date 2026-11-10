@@ -77,8 +77,7 @@ void apply_normalizing_flows(Vector *points_y, Vector *points_x,
                                 CovarData *data, double *logdet);
 
 multi_MVN *var_fit_scale(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
-                         int npairs, unsigned int dist_shape,
-                         unsigned int silent);
+                         int npairs, unsigned int silent);
 
 void set_kld_grad_LOWR(Vector *kldgrad, multi_MVN *mmvn);
 

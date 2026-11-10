@@ -817,17 +817,14 @@ static double var_scale_elbo(TreeModel *mod, multi_MVN *mmvn,
    end exceeds the variance of the prior in embedding units, which is
    pointscale^2).  This is reliable because the objective is smooth
    and unimodal in eta at the resolution of interest.  For CRISPR
-   data, eta is then capped by expected tree length (see below).  If
-   dist_shape == TRUE, Sigma_0 is set to the (normalized,
-   double-centered) distance matrix implied by the mean embedding (DIST
-   shape); otherwise the stage-1 shape is retained.  With dist_shape ==
-   TRUE and a CONST stage-1 parameterization, a new multi_MVN is
-   allocated and the old one freed, so callers must use the returned
-   pointer.  Only CONST and DIST parameterizations and the default
+   data, eta is then capped by expected tree length (see below).
+   Sigma_0 is set to the (normalized, double-centered) distance matrix
+   implied by the mean embedding (DIST shape).  With a CONST stage-1
+   parameterization, a new multi_MVN is allocated and the old one
+   freed, so callers must use the returned pointer.  Only CONST and DIST parameterizations and the default
    implicit prior are supported. */
 multi_MVN *var_fit_scale(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
-                         int npairs, unsigned int dist_shape,
-                         unsigned int silent) {
+                         int npairs, unsigned int silent) {
   int fd = mmvn->n * mmvn->d, n = data->nseqs, i, ncoarse, nsampevals,
     capped = FALSE;
   const double gr = 0.6180339887498949; /* (sqrt(5) - 1) / 2 */
@@ -848,8 +845,8 @@ multi_MVN *var_fit_scale(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
 
   data->subsample = FALSE; /* exact likelihoods */
 
-  if (dist_shape == TRUE) {
-    /* define Sigma_0 from the distances implied by the mean embedding */
+  /* define Sigma_0 from the distances implied by the mean embedding */
+  {
     Vector *mu = vec_new(fd), *muy = vec_new(fd);
     for (i = 0; i < fd; i++)
       vec_set(mu, i, mmvn_get_mu_el(mmvn, i));

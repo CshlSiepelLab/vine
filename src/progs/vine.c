@@ -39,7 +39,6 @@
 
 /* long-only options (no single-character equivalents) */
 #define OPT_TWO_STAGE 1001
-#define OPT_TWO_STAGE_SHAPE 1002
 #define OPT_TWO_STAGE_NPAIRS 1003
 #define DEFAULT_BATCHSIZE 10
 #define DEFAULT_LEARNRATE 0.05
@@ -96,7 +95,7 @@ int main(int argc, char *argv[]) {
                ultrametric = FALSE, radial_flow = FALSE, planar_flow = FALSE,
                use_taylor = TRUE, had_dups = FALSE, silent = FALSE,
                log_all = FALSE, posterior = FALSE,
-               two_stage = FALSE, two_stage_dist = TRUE;
+               two_stage = FALSE;
   MSA *msa = NULL;
   enum covar_type covar_param = CONST;
   char *alphabet = "ACGT";
@@ -168,7 +167,6 @@ int main(int argc, char *argv[]) {
     {"planar-flow", 0, 0, 'Z'},
     {"posterior", 0, 0, 'A'},
     {"two-stage", 0, 0, OPT_TWO_STAGE},
-    {"two-stage-shape", 1, 0, OPT_TWO_STAGE_SHAPE},
     {"two-stage-npairs", 1, 0, OPT_TWO_STAGE_NPAIRS},
     {"crispr-modtype", 1, 0, 'Y'},
     {"crispr-mutprior", 1, 0, 'p'},
@@ -236,15 +234,6 @@ int main(int argc, char *argv[]) {
       break;
     case OPT_TWO_STAGE:
       two_stage = TRUE;
-      break;
-    case OPT_TWO_STAGE_SHAPE:
-      two_stage = TRUE;
-      if (!strcmp(optarg, "DIST"))
-        two_stage_dist = TRUE;
-      else if (!strcmp(optarg, "CONST"))
-        two_stage_dist = FALSE;
-      else
-        die("ERROR: --two-stage-shape must be CONST or DIST\n");
       break;
     case OPT_TWO_STAGE_NPAIRS:
       two_stage = TRUE;
@@ -448,8 +437,7 @@ int main(int argc, char *argv[]) {
      which the first stage is the default optimization (unchanged, so
      point estimates are identical to those without --posterior) and the
      second stage refits the variance scale with a DIST-shaped
-     covariance by maximizing the correctly scaled ELBO.  An explicit
-     --two-stage-shape overrides the shape. */
+     covariance by maximizing the correctly scaled ELBO. */
   if (posterior == TRUE) {
     if (hyperbolic == TRUE)
       die("Cannot use --posterior with --hyperbolic; the two-stage procedure has not been validated for hyperbolic geometry.\n");
@@ -754,7 +742,7 @@ int main(int argc, char *argv[]) {
          the correctly scaled ELBO with the mean held fixed */
       if (two_stage == TRUE)
         mmvn = var_fit_scale(mod, mmvn, covar_data, two_stage_npairs,
-                             two_stage_dist, silent);
+                             silent);
 
       if (had_dups == TRUE && !silent)
         fprintf(stderr, "Sampling trees and re-adding duplicate cells...\n");
