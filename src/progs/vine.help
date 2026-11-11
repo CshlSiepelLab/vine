@@ -1,4 +1,4 @@
-char HELP[   18897] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
+char HELP[   17894] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
 \n\
 USAGE: vine [OPTIONS] alignment.fa > trees.nwk\n\
 \n\
@@ -151,16 +151,12 @@ OPTIMIZATION:\n\
     --learnrate, -r <alpha>\n\
        Set learning rate for Adam algorithm to <alpha> (default 0.05).\n\
 \n\
-    --lrdecay, -u <T>\n\
+    --lrdecay, -u <T>    \n\
        Apply a diminishing step size once full gradients are in use\n\
        (after the initial phase of site subsampling).  The learning\n\
        rate decays as alpha / (1 + t/T), where t is the number of\n\
-       iterations since full gradients were first used.  This schedule\n\
-       satisfies the classical step-size conditions assumed in\n\
-       convergence analyses of stochastic gradient methods and damps\n\
-       oscillation of the embedding in late iterations.  Smaller values of <T> give faster decay (e.g.,\n\
-       --lrdecay 100 halves the learning rate after 100 iterations).\n\
-       By default, no decay is applied.\n\
+       iterations since full gradients were first used.  By default,\n\
+       no decay is applied.\n\
 \n\
     --miniter, -M <N>\n\
         Set minimum number of iterations before convergence to <N>\n\
@@ -193,7 +189,7 @@ INITIALIZATION:\n\
 \n\
     --tree, -t <file.nh>\n\
        Obtain pairwise distances from specified tree, rather than from a\n\
-       distance matrix or the alignment.  Alterative to --distances.\n\
+       distance matrix or the alignment.  Alternative to --distances.\n\
 \n\
     --treemodel, -T <file.mod>\n\
        Use the specified PHAST tree model for initialization and\n\
@@ -201,34 +197,27 @@ INITIALIZATION:\n\
        substitution models.\n\
 \n\
 COVARIANCE:\n\
-    --posterior, -A\n\
-       Convenience option that selects the recommended configuration for\n\
-       approximating the posterior distribution, currently equivalent\n\
-       to --two-stage (see below).  The first stage is the default\n\
-       optimization, so point estimates (such as the posterior mean\n\
-       tree) are the same as without this option;\n\
-       only the variance of the approximate posterior differs.  Not\n\
-       compatible with --hyperbolic.\n\
+    --posterior, -A    \n\
+       Convenience option that selects the recommended configuration\n\
+       for approximating the posterior distribution, currently\n\
+       equivalent to --two-stage (see below).  The first stage is the\n\
+       default optimization, so point estimates (such as the posterior\n\
+       mean tree) are the same as without this option; only the\n\
+       variance of the approximate posterior differs.  Not compatible\n\
+       with --hyperbolic.\n\
 \n\
-    --two-stage\n\
-       After the variational parameters have been optimized, refit\n\
-       the scale of the covariance matrix in a second stage.  The\n\
-       mean (and any flow and nuisance parameters) is held fixed, and\n\
-       the single variance-scale parameter is chosen to maximize the\n\
-       evidence lower bound (ELBO), estimated by Monte Carlo with\n\
-       common random numbers and optimized by a one-dimensional search.\n\
-       Unlike the objective used in the first stage, which down-weights\n\
-       the KL term, this stage uses the standard (untempered) ELBO.\n\
-       Requires --covar CONST or DIST (the default CONST is fine) and\n\
-       the default implicit prior (no --treeprior or --relclock); not\n\
-       compatible with --hyperbolic.  With CRISPR data\n\
-       (-i CRISPR), the variance scale is additionally capped so that\n\
-       the expected total length of sampled trees is at most 1.25 times\n\
-       that of the mean tree; with few sites the ELBO alone can favor\n\
-       very diffuse distributions.  The covariance in the second stage\n\
-       has the DIST shape (see --covar), based on the distance matrix\n\
-       implied by the first-stage mean embedding, whatever the\n\
-       first-stage parameterization.  See also --two-stage-npairs.\n\
+    --two-stage    \n\
+       After the variational parameters have been optimized, refit the\n\
+       scale of the covariance matrix in a second stage.  The mean\n\
+       (and any nuisance parameters) is held fixed, and the single\n\
+       variance-scale parameter is chosen to maximize the evidence\n\
+       lower bound (ELBO), estimated by Monte Carlo and optimized by a\n\
+       one-dimensional search.  Requires --covar CONST or DIST and the\n\
+       default implicit prior (no --treeprior or --relclock); not\n\
+       compatible with --hyperbolic.  With CRISPR data (-i CRISPR),\n\
+       the variance scale is additionally capped so that the expected\n\
+       total length of sampled trees is at most 1.25 times that of the\n\
+       mean tree to avoid overly diffuse solutions.\n\
 \n\
     --two-stage-npairs <N>\n\
        (default 10; implies --two-stage) Number of antithetic pairs of\n\
@@ -245,19 +234,6 @@ COVARIANCE:\n\
        branches of an unrooted tree (1 d.o.f.). LOWR instead assumes a\n\
        generally parameterized low-rank approximation of the full\n\
        covariance matrix (<ntaxa> * <rank> d.o.f. see --rank).\n\
-\n\
-    --rank, -W <rank>\n\
-       (default 3) For use with --covar LOWR. Rank of low-rank\n\
-       approximation of covariance matrix.  \n\
-\n\
-    --var-reg, -v <multiplier>\n\
-       The variance of the approximate posterior tends to shrink so a\n\
-       regularizer is used to keep it from collapsing. (For most\n\
-       parameterizations, an L2 penalty is appiled to the log variance). This\n\
-       option can be used to alter the default penalty by a multiplicative\n\
-       factor. Use values > 1 to inflate the variance further or values\n\
-       between 0 and 1 to give it more latitude to shrink (tends to improve\n\
-       the ELBO).  A value of zero will disable regularization. (default = 0)\n\
 \n\
 HYPERBOLIC GEOMETRY:\n\
     --hyperbolic, -H\n\
@@ -345,6 +321,18 @@ EXPERIMENTAL/LITTLE USED:\n\
        solutions (mean values closer to zero, covariance matrix closer to\n\
        identity). Use a logfile for guidance.        \n\
 \n\
+    --rank, -W <rank>\n\
+       (default 3) For use with --covar LOWR. Rank of low-rank\n\
+       approximation of covariance matrix.  \n\
+\n\
+    --var-reg, -v <multiplier>\n\
+       Regularizer used to keep posterior variance from collapsing. (For most\n\
+       parameterizations, an L2 penalty is applied to the log variance). This\n\
+       option can be used to alter the default penalty by a multiplicative\n\
+       factor. Use values > 1 to inflate the variance further or values\n\
+       between 0 and 1 to give it more latitude to shrink (tends to improve\n\
+       the ELBO).  A value of zero will disable regularization. (default = 0)\n\
+\n\
     --radial-flow, -F\n\
        Add a radial-flow layer on top of the multivariate normal\n\
        variational distribution, to capture radial nonlinearities in the\n\
@@ -352,22 +340,19 @@ EXPERIMENTAL/LITTLE USED:\n\
        dimensions as well as a scale parameter alpha and strength\n\
        parameter beta describing the manner in which points are pulled\n\
        radially toward the center. This option is currently not compatible\n\
-       with --hyperbolic.\n\
+       with --hyperbolic. In our benchmarks, flows did not improve the\n\
+       posterior approximation once the variance is refit by\n\
+       --two-stage (or --posterior). \n\
 \n\
     --planar-flow, -Z\n\
        Add a planar-flow layer on top of the multivariate normal\n\
        variational distribution, to accommodate directional skew and\n\
        curvature. Estimates two vectors in <D> dimensions plus an\n\
-       intercept term to define a hyperplane toward which the posterior\n\
-       can be pulled.  Can be used in combination with --radial-flow but\n\
-       is not compatible with --hyperbolic.\n\
-\n\
-       Note on flows: in our benchmarks, flows did not improve the\n\
-       posterior approximation once the variance is refit by\n\
-       --two-stage (or --posterior), and they are not part of the\n\
-       recommended configuration.  When flows are used, the log\n\
-       likelihood reported in the log file includes the log-Jacobian of\n\
-       the flow transformation, which is part of the objective.\n\
+       intercept term to define a hyperplane toward which the\n\
+       posterior can be pulled.  Can be used in combination with\n\
+       --radial-flow but is not compatible with --hyperbolic. In our\n\
+       benchmarks, flows did not improve the posterior approximation\n\
+       once the variance is refit by --two-stage (or --posterior).\n\
 \n\
     --random-start, -R\n\
        Initialize variational inference randomly rather than from initial\n\

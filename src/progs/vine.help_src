@@ -151,16 +151,12 @@ OPTIMIZATION:
     --learnrate, -r <alpha>
        Set learning rate for Adam algorithm to <alpha> (default 0.05).
 
-    --lrdecay, -u <T>
+    --lrdecay, -u <T>    
        Apply a diminishing step size once full gradients are in use
        (after the initial phase of site subsampling).  The learning
        rate decays as alpha / (1 + t/T), where t is the number of
-       iterations since full gradients were first used.  This schedule
-       satisfies the classical step-size conditions assumed in
-       convergence analyses of stochastic gradient methods and damps
-       oscillation of the embedding in late iterations.  Smaller values of <T> give faster decay (e.g.,
-       --lrdecay 100 halves the learning rate after 100 iterations).
-       By default, no decay is applied.
+       iterations since full gradients were first used.  By default,
+       no decay is applied.
 
     --miniter, -M <N>
         Set minimum number of iterations before convergence to <N>
@@ -193,7 +189,7 @@ INITIALIZATION:
 
     --tree, -t <file.nh>
        Obtain pairwise distances from specified tree, rather than from a
-       distance matrix or the alignment.  Alterative to --distances.
+       distance matrix or the alignment.  Alternative to --distances.
 
     --treemodel, -T <file.mod>
        Use the specified PHAST tree model for initialization and
@@ -201,34 +197,27 @@ INITIALIZATION:
        substitution models.
 
 COVARIANCE:
-    --posterior, -A
-       Convenience option that selects the recommended configuration for
-       approximating the posterior distribution, currently equivalent
-       to --two-stage (see below).  The first stage is the default
-       optimization, so point estimates (such as the posterior mean
-       tree) are the same as without this option;
-       only the variance of the approximate posterior differs.  Not
-       compatible with --hyperbolic.
+    --posterior, -A    
+       Convenience option that selects the recommended configuration
+       for approximating the posterior distribution, currently
+       equivalent to --two-stage (see below).  The first stage is the
+       default optimization, so point estimates (such as the posterior
+       mean tree) are the same as without this option; only the
+       variance of the approximate posterior differs.  Not compatible
+       with --hyperbolic.
 
-    --two-stage
-       After the variational parameters have been optimized, refit
-       the scale of the covariance matrix in a second stage.  The
-       mean (and any flow and nuisance parameters) is held fixed, and
-       the single variance-scale parameter is chosen to maximize the
-       evidence lower bound (ELBO), estimated by Monte Carlo with
-       common random numbers and optimized by a one-dimensional search.
-       Unlike the objective used in the first stage, which down-weights
-       the KL term, this stage uses the standard (untempered) ELBO.
-       Requires --covar CONST or DIST (the default CONST is fine) and
-       the default implicit prior (no --treeprior or --relclock); not
-       compatible with --hyperbolic.  With CRISPR data
-       (-i CRISPR), the variance scale is additionally capped so that
-       the expected total length of sampled trees is at most 1.25 times
-       that of the mean tree; with few sites the ELBO alone can favor
-       very diffuse distributions.  The covariance in the second stage
-       has the DIST shape (see --covar), based on the distance matrix
-       implied by the first-stage mean embedding, whatever the
-       first-stage parameterization.  See also --two-stage-npairs.
+    --two-stage    
+       After the variational parameters have been optimized, refit the
+       scale of the covariance matrix in a second stage.  The mean
+       (and any nuisance parameters) is held fixed, and the single
+       variance-scale parameter is chosen to maximize the evidence
+       lower bound (ELBO), estimated by Monte Carlo and optimized by a
+       one-dimensional search.  Requires --covar CONST or DIST and the
+       default implicit prior (no --treeprior or --relclock); not
+       compatible with --hyperbolic.  With CRISPR data (-i CRISPR),
+       the variance scale is additionally capped so that the expected
+       total length of sampled trees is at most 1.25 times that of the
+       mean tree to avoid overly diffuse solutions.
 
     --two-stage-npairs <N>
        (default 10; implies --two-stage) Number of antithetic pairs of
@@ -245,19 +234,6 @@ COVARIANCE:
        branches of an unrooted tree (1 d.o.f.). LOWR instead assumes a
        generally parameterized low-rank approximation of the full
        covariance matrix (<ntaxa> * <rank> d.o.f. see --rank).
-
-    --rank, -W <rank>
-       (default 3) For use with --covar LOWR. Rank of low-rank
-       approximation of covariance matrix.  
-
-    --var-reg, -v <multiplier>
-       The variance of the approximate posterior tends to shrink so a
-       regularizer is used to keep it from collapsing. (For most
-       parameterizations, an L2 penalty is appiled to the log variance). This
-       option can be used to alter the default penalty by a multiplicative
-       factor. Use values > 1 to inflate the variance further or values
-       between 0 and 1 to give it more latitude to shrink (tends to improve
-       the ELBO).  A value of zero will disable regularization. (default = 0)
 
 HYPERBOLIC GEOMETRY:
     --hyperbolic, -H
@@ -345,6 +321,18 @@ EXPERIMENTAL/LITTLE USED:
        solutions (mean values closer to zero, covariance matrix closer to
        identity). Use a logfile for guidance.        
 
+    --rank, -W <rank>
+       (default 3) For use with --covar LOWR. Rank of low-rank
+       approximation of covariance matrix.  
+
+    --var-reg, -v <multiplier>
+       Regularizer used to keep posterior variance from collapsing. (For most
+       parameterizations, an L2 penalty is applied to the log variance). This
+       option can be used to alter the default penalty by a multiplicative
+       factor. Use values > 1 to inflate the variance further or values
+       between 0 and 1 to give it more latitude to shrink (tends to improve
+       the ELBO).  A value of zero will disable regularization. (default = 0)
+
     --radial-flow, -F
        Add a radial-flow layer on top of the multivariate normal
        variational distribution, to capture radial nonlinearities in the
@@ -352,22 +340,19 @@ EXPERIMENTAL/LITTLE USED:
        dimensions as well as a scale parameter alpha and strength
        parameter beta describing the manner in which points are pulled
        radially toward the center. This option is currently not compatible
-       with --hyperbolic.
+       with --hyperbolic. In our benchmarks, flows did not improve the
+       posterior approximation once the variance is refit by
+       --two-stage (or --posterior). 
 
     --planar-flow, -Z
        Add a planar-flow layer on top of the multivariate normal
        variational distribution, to accommodate directional skew and
        curvature. Estimates two vectors in <D> dimensions plus an
-       intercept term to define a hyperplane toward which the posterior
-       can be pulled.  Can be used in combination with --radial-flow but
-       is not compatible with --hyperbolic.
-
-       Note on flows: in our benchmarks, flows did not improve the
-       posterior approximation once the variance is refit by
-       --two-stage (or --posterior), and they are not part of the
-       recommended configuration.  When flows are used, the log
-       likelihood reported in the log file includes the log-Jacobian of
-       the flow transformation, which is part of the objective.
+       intercept term to define a hyperplane toward which the
+       posterior can be pulled.  Can be used in combination with
+       --radial-flow but is not compatible with --hyperbolic. In our
+       benchmarks, flows did not improve the posterior approximation
+       once the variance is refit by --two-stage (or --posterior).
 
     --random-start, -R
        Initialize variational inference randomly rather than from initial
