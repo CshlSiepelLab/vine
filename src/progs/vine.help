@@ -1,4 +1,4 @@
-char HELP[   17894] = "\nPROGRAM: vine [Variational Inference with Node Embedding]\n\
+char HELP[   17895] = "\nPROGRAM: vine [Variational Inference with Node Embeddings]\n\
 \n\
 USAGE: vine [OPTIONS] alignment.fa > trees.nwk\n\
 \n\

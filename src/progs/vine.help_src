@@ -1,4 +1,4 @@
-PROGRAM: vine [Variational Inference with Node Embedding]
+PROGRAM: vine [Variational Inference with Node Embeddings]
 
 USAGE: vine [OPTIONS] alignment.fa > trees.nwk
 
