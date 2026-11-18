@@ -43,6 +43,8 @@
 #include <phast/misc.h>
 #include <local_posterior.h>
 #include <likelihoods.h>
+#include <crispr.h>
+#include <migration.h>
 
 typedef struct {
   int nn, n, root;
@@ -198,7 +200,15 @@ static double lp_lnl(LpTree *T, double *bl, char **names, TreeModel *mod,
   t = lp_build(T, bl, names, idmap);
   mod->tree = NULL;
   reset_tree_model(mod, t);
-  lnl = compute_log_likelihood(mod, data, bg);
+  if (data->crispr_mod != NULL) {
+    assert(grad == NULL);
+    lnl = cpr_compute_log_likelihood(data->crispr_mod, NULL);
+  }
+  else
+    lnl = compute_log_likelihood(mod, data, bg);
+  if (data->migtable != NULL &&
+      !(data->crispr_mod != NULL && data->crispr_mod->mig_warmup))
+    lnl += mig_compute_log_likelihood(mod, data->migtable, data->crispr_mod, NULL);
   if (grad != NULL) {
     for (i = 0; i < T->nn; i++)
       grad[i] = (i == T->root ? 0 : vec_get(bg, idmap[i]));
@@ -239,6 +249,341 @@ static int lp_curvature(LpTree *T, double *bl, double l0, double *g,
   return nfb;
 }
 
+/* ---------------------------------------------------------------------
+   Ultrametric (rooted, clock-like) trees, used for CRISPR data and with
+   --ultrametric.  The free parameters are the heights of the n-1
+   internal nodes (leaves have height zero), so every sampled tree is
+   ultrametric.  Gradients and curvatures are obtained by finite
+   differences, the topological moves are rooted NNIs (exchanging a
+   child of a non-root internal node with that node's sibling), and
+   heights are sampled from the leaves upward, each truncated below by
+   the heights of its children.  Because node heights are strongly
+   correlated, each sampled tree is also rescaled by a global factor
+   drawn from a Laplace approximation for the overall scale of the
+   tree.  Branches at which no NNI configuration is favored (typically
+   of zero length, e.g., where no mutations distinguish several cells)
+   are merged into polytomies that are resolved at random in each
+   sampled tree.
+   --------------------------------------------------------------------- */
+
+/* branch lengths from node heights */
+static void lp_heights_to_bl(LpTree *T, double *H, double *bl) {
+  for (int i = 0; i < T->nn; i++)
+    bl[i] = (i == T->root ? 0 : fmax(0, H[T->par[i]] - H[i]));
+}
+
+static double lp_lnl_h(LpTree *T, double *H, double *bl, char **names,
+                       TreeModel *mod, CovarData *data) {
+  lp_heights_to_bl(T, H, bl);
+  return lp_lnl(T, bl, names, mod, data, NULL);
+}
+
+static double lp_maxchild(LpTree *T, double *H, int v) {
+  return fmax(H[T->lc[v]], H[T->rc[v]]);
+}
+
+/* postorder list of internal nodes */
+static void lp_post_internal(LpTree *T, int v, int *out, int *k) {
+  if (T->lc[v] < 0) return;
+  lp_post_internal(T, T->lc[v], out, k);
+  lp_post_internal(T, T->rc[v], out, k);
+  out[(*k)++] = v;
+}
+
+/* finite-difference first and second derivatives of lnL with respect
+   to the height of internal node v, respecting the ordering
+   constraints.  l0 is lnL at H.  Returns FALSE if no usable step. */
+static int lp_fd_height(LpTree *T, double *H, double *bl, int v, double l0,
+                        double scale, char **names, TreeModel *mod,
+                        CovarData *data, double *g, double *h) {
+  double up = (v == T->root ? scale : H[T->par[v]] - H[v]),
+    dn = H[v] - lp_maxchild(T, H, v), tiny = 1e-6 * scale, d, l1, l2,
+    h0 = H[v];
+
+  if (fmin(up, dn) > tiny) {          /* central */
+    d = LP_REL_STEP * fmin(up, dn);
+    H[v] = h0 + d; l1 = lp_lnl_h(T, H, bl, names, mod, data);
+    H[v] = h0 - d; l2 = lp_lnl_h(T, H, bl, names, mod, data);
+    *g = (l1 - l2) / (2 * d);
+    *h = -(l1 - 2 * l0 + l2) / (d * d);
+  }
+  else if (up >= dn && up > tiny) {   /* forward */
+    d = 0.5 * LP_REL_STEP * up;
+    H[v] = h0 + d; l1 = lp_lnl_h(T, H, bl, names, mod, data);
+    H[v] = h0 + 2 * d; l2 = lp_lnl_h(T, H, bl, names, mod, data);
+    *g = (-3 * l0 + 4 * l1 - l2) / (2 * d);
+    *h = -(l0 - 2 * l1 + l2) / (d * d);
+  }
+  else if (dn > tiny) {               /* backward */
+    d = 0.5 * LP_REL_STEP * dn;
+    H[v] = h0 - d; l1 = lp_lnl_h(T, H, bl, names, mod, data);
+    H[v] = h0 - 2 * d; l2 = lp_lnl_h(T, H, bl, names, mod, data);
+    *g = (3 * l0 - 4 * l1 + l2) / (2 * d);
+    *h = -(l0 - 2 * l1 + l2) / (d * d);
+  }
+  else {
+    H[v] = h0;
+    return FALSE;
+  }
+  H[v] = h0;
+  return TRUE;
+}
+
+/* derivatives for all internal nodes; nonpositive curvatures get a
+   fallback.  Returns the number of fallbacks. */
+static int lp_fd_all(LpTree *T, double *H, double *bl, double l0,
+                     double scale, int *post, int npost, char **names,
+                     TreeModel *mod, CovarData *data, double *g, double *h) {
+  int k, nfb = 0;
+  for (k = 0; k < npost; k++) {
+    int v = post[k];
+    double up = (v == T->root ? scale : H[T->par[v]] - H[v]),
+      dn = H[v] - lp_maxchild(T, H, v), s;
+    if (!lp_fd_height(T, H, bl, v, l0, scale, names, mod, data, &g[v], &h[v]))
+      g[v] = h[v] = 0;
+    if (!(h[v] > 0)) {
+      s = fmax(fmax(fmin(up, dn), 0.5 * fmax(up, dn)), 1e-3 * scale);
+      h[v] = 1.0 / (s * s);
+      nfb++;
+    }
+  }
+  return nfb;
+}
+
+/* replace the connected set of internal nodes mem[0..m-1] (with top node
+   top) by a random binary resolution of the polytomy formed by their
+   child subtrees, reusing the same node ids so that the rest of the
+   tree is unchanged.  Topology is read from T0 and written to T.  The
+   member nodes are marked as used. */
+static void lp_resolve_polytomy(LpTree *T0, LpTree *T, int *mem, int m,
+                                int top, int *comp, int c, int *used) {
+  int *pool = smalloc((m + 1) * sizeof(int)), *ids = smalloc(m * sizeof(int)),
+    np = 0, ni = 0, k;
+  for (k = 0; k < m; k++) {
+    int v = mem[k];
+    used[v] = 1;
+    if (comp[T0->lc[v]] != c) pool[np++] = T0->lc[v];
+    if (comp[T0->rc[v]] != c) pool[np++] = T0->rc[v];
+    if (v != top) ids[ni++] = v;
+  }
+  ids[ni++] = top;   /* the final join takes the top node's place */
+  assert(np == m + 1 && ni == m);
+  for (k = 0; k < m; k++) {   /* random sequential joins */
+    int a = (int)(lp_unif() * np), x, y;
+    x = pool[a]; pool[a] = pool[--np];
+    a = (int)(lp_unif() * np);
+    y = pool[a]; pool[a] = pool[--np];
+    T->lc[ids[k]] = x; T->rc[ids[k]] = y;
+    T->par[x] = ids[k]; T->par[y] = ids[k];
+    pool[np++] = ids[k];
+  }
+  sfree(pool); sfree(ids);
+}
+
+static List *lp_sample_ultrametric(int nsamples, TreeNode *pointtree,
+                                   TreeModel *mod, CovarData *data,
+                                   char **names, unsigned int silent) {
+  int n = data->nseqs, i, j, k, e, it, ne = 0, nfb, npost = 0;
+  unsigned int subsample_saved = data->subsample;
+  clock_t c0 = clock();
+  LpTree *T0;
+  double *H, *Hn, *bl, *g, *h, *P, lcur, lnew, l0, scale;
+  int *post, *E;
+  List *retval = lst_new_ptr(nsamples);
+
+  data->subsample = FALSE;
+  if (mod->tree != NULL) { tr_free(mod->tree); mod->tree = NULL; }
+
+  T0 = lp_tree_new(pointtree, names, n);
+  H = smalloc(T0->nn * sizeof(double)); Hn = smalloc(T0->nn * sizeof(double));
+  bl = smalloc(T0->nn * sizeof(double));
+  g = smalloc(T0->nn * sizeof(double)); h = smalloc(T0->nn * sizeof(double));
+  post = smalloc(T0->nn * sizeof(int));
+
+  /* heights from the point estimate */
+  for (i = 0; i < T0->nn; i++) {
+    TreeNode *nd = lst_get_ptr(pointtree->nodes, i);
+    bl[nd->id] = (nd->parent != NULL ? fmax(nd->dparent, 0) : 0);
+  }
+  lp_post_internal(T0, T0->root, post, &npost);
+  assert(npost == n - 1);
+  for (i = 0; i < T0->nn; i++) H[i] = 0;
+  for (k = 0; k < npost; k++) {
+    int v = post[k];
+    H[v] = fmax(H[T0->lc[v]] + bl[T0->lc[v]], H[T0->rc[v]] + bl[T0->rc[v]]);
+  }
+  scale = fmax(H[T0->root], 1e-6);
+  memcpy(Hn, H, T0->nn * sizeof(double));   /* leaves stay at zero */
+
+  /* 1. diagonal Newton iterations on the internal node heights */
+  l0 = lcur = lp_lnl_h(T0, H, bl, names, mod, data);
+  nfb = lp_fd_all(T0, H, bl, lcur, scale, post, npost, names, mod, data, g, h);
+  for (it = 0; it < LP_MAX_NEWTON_H; it++) {
+    double step = 1.0;
+    for (;;) {
+      for (k = 0; k < npost; k++) {  /* postorder keeps heights ordered */
+        int v = post[k];
+        Hn[v] = fmax(H[v] + step * g[v] / h[v], lp_maxchild(T0, Hn, v));
+      }
+      lnew = lp_lnl_h(T0, Hn, bl, names, mod, data);
+      if (lnew >= lcur || step < 0.1) break;
+      step *= 0.5;
+    }
+    if (lnew < lcur) break;   /* no improvement; g, h still current */
+    for (k = 0; k < npost; k++) H[post[k]] = Hn[post[k]];
+    double gain = lnew - lcur;
+    lcur = lnew;
+    /* 2. derivatives at the new heights (final ones define the Laplace
+       approximation) */
+    nfb = lp_fd_all(T0, H, bl, lcur, scale, post, npost, names, mod, data, g, h);
+    if (gain < LP_NEWTON_TOL) break;
+  }
+
+  /* global scale of all node heights: the dominant correlated
+     direction, which the per-node (conditional) variances miss */
+  double sd_scale = 0;
+  {
+    double *Ht = smalloc(T0->nn * sizeof(double)), d = LP_SCALE_STEP, lp1, lm1, hs;
+    for (i = 0; i < T0->nn; i++) Ht[i] = H[i] * exp(d);
+    lp1 = lp_lnl_h(T0, Ht, bl, names, mod, data);
+    for (i = 0; i < T0->nn; i++) Ht[i] = H[i] * exp(-d);
+    lm1 = lp_lnl_h(T0, Ht, bl, names, mod, data);
+    hs = -(lp1 - 2 * lcur + lm1) / (d * d);
+    if (hs > 0) sd_scale = 1.0 / sqrt(hs);
+    sfree(Ht);
+  }
+
+  /* 3. rooted NNI scores at each internal non-root node */
+  E = smalloc(n * sizeof(int));
+  for (k = 0; k < npost; k++)
+    if (post[k] != T0->root) E[ne++] = post[k];
+  assert(ne == n - 2);
+  P = smalloc(3 * (ne > 0 ? ne : 1) * sizeof(double));
+  int nunc = 0;
+  for (e = 0; e < ne; e++) {
+    int v = E[e], p = T0->par[v];
+    double l[3], mx, s = 0, hv = H[v];
+    LpEdge ed = {v, p, FALSE};
+    l[0] = lcur;
+    for (j = 0; j < 2; j++) {
+      lp_nni(T0, &ed, j);
+      H[v] = fmax(hv, lp_maxchild(T0, H, v));
+      l[j+1] = lp_lnl_h(T0, H, bl, names, mod, data);
+      H[v] = hv;
+      lp_nni(T0, &ed, j);   /* undo */
+    }
+    mx = fmax(l[0], fmax(l[1], l[2]));
+    for (j = 0; j < 3; j++) { P[3*e+j] = exp(l[j] - mx); s += P[3*e+j]; }
+    for (j = 0; j < 3; j++) P[3*e+j] /= s;
+    if (P[3*e] < 0.95) nunc++;
+  }
+
+  /* unresolved branches (no configuration favored, typically zero
+     length) are merged into polytomies, which are resolved at random
+     in each sampled tree */
+  int *comp = smalloc(T0->nn * sizeof(int)), nclust = 0, npoly = 0;
+  int **cmem = NULL, *csize = NULL, *ctop = NULL;
+  for (i = 0; i < T0->nn; i++) comp[i] = i;
+  for (e = 0; e < ne; e++) {
+    if (P[3*e] >= LP_POLYTOMY_P) continue;
+    int a = E[e], b = T0->par[E[e]];
+    while (comp[a] != a) a = comp[a];
+    while (comp[b] != b) b = comp[b];
+    if (a != b) comp[a] = b;
+    npoly++;
+  }
+  {
+    int *cid = smalloc(T0->nn * sizeof(int)), *cnt = calloc(T0->nn, sizeof(int));
+    for (i = 0; i < T0->nn; i++) {
+      int r = i; while (comp[r] != r) r = comp[r];
+      comp[i] = r; cnt[r]++;
+    }
+    for (i = 0; i < T0->nn; i++) cid[i] = -1;
+    for (i = 0; i < T0->nn; i++)
+      if (comp[i] == i && cnt[i] > 1) cid[i] = nclust++;
+    cmem = smalloc((nclust > 0 ? nclust : 1) * sizeof(int*));
+    csize = calloc(nclust > 0 ? nclust : 1, sizeof(int));
+    ctop = smalloc((nclust > 0 ? nclust : 1) * sizeof(int));
+    for (j = 0; j < nclust; j++) cmem[j] = smalloc(T0->nn * sizeof(int));
+    for (i = 0; i < T0->nn; i++) {
+      int c = cid[comp[i]];
+      if (c < 0) { comp[i] = -1; continue; }
+      cmem[c][csize[c]++] = i;
+      comp[i] = c;
+    }
+    for (j = 0; j < nclust; j++)   /* top: member whose parent is outside */
+      for (k = 0; k < csize[j]; k++) {
+        int v = cmem[j][k];
+        if (v == T0->root || comp[T0->par[v]] != j) ctop[j] = v;
+      }
+    sfree(cid); free(cnt);
+  }
+
+  if (!silent) {
+    fprintf(stderr, "Local posterior (ultrametric): height optimization lnL %.2f -> %.2f (%d iterations)",
+            l0, lcur, it);
+    if (nfb > 0) fprintf(stderr, ", %d nodes with fallback curvature", nfb);
+    fprintf(stderr, ";\n  global height-scale sd %.3f; %d of %d internal nodes with NNI support < 0.95,\n  %d unresolved, forming %d polytomies (%.1f s)\n",
+            sd_scale, nunc, ne, npoly, nclust, (double)(clock() - c0) / CLOCKS_PER_SEC);
+  }
+
+  /* 4. sample trees */
+  int *perm = smalloc((ne > 0 ? ne : 1) * sizeof(int)),
+    *used = smalloc(T0->nn * sizeof(int)), *spost = smalloc(T0->nn * sizeof(int));
+  double *Hs = smalloc(T0->nn * sizeof(double)), nswap = 0;
+  for (int s = 0; s < nsamples; s++) {
+    LpTree *T = lp_tree_copy(T0);
+    int ns = 0;
+    memset(used, 0, T0->nn * sizeof(int));
+    for (j = 0; j < nclust; j++)
+      lp_resolve_polytomy(T0, T, cmem[j], csize[j], ctop[j], comp, j, used);
+    for (e = 0; e < ne; e++) perm[e] = e;
+    for (e = ne - 1; e > 0; e--) {
+      int r = (int)(lp_unif() * (e + 1)), tmp = perm[e];
+      perm[e] = perm[r]; perm[r] = tmp;
+    }
+    for (int q = 0; q < ne; q++) {
+      double u = lp_unif();
+      int v;
+      e = perm[q]; v = E[e];
+      if (P[3*e] < LP_POLYTOMY_P) continue;   /* handled as a polytomy */
+      j = (u < P[3*e] ? 0 : (u < P[3*e] + P[3*e+1] ? 1 : 2));
+      if (j == 0 || used[v] || used[T->par[v]]) continue;
+      LpEdge ed = {v, T->par[v], FALSE};
+      lp_nni(T, &ed, j - 1);
+      used[v] = used[ed.p] = 1;
+      nswap++;
+    }
+    lp_post_internal(T, T->root, spost, &ns);
+    /* heights from the leaves up, each truncated below by its children */
+    for (i = 0; i < T0->nn; i++) Hs[i] = 0;
+    for (k = 0; k < ns; k++) {
+      int v = spost[k];
+      double lb = lp_maxchild(T, Hs, v);
+      Hs[v] = lb + lp_trunc_norm(H[v] + g[v] / h[v] - lb, 1.0 / sqrt(h[v]));
+    }
+    if (sd_scale > 0) {
+      double f = exp(sd_scale * lp_norm());
+      for (i = 0; i < T0->nn; i++) Hs[i] *= f;
+    }
+    lp_heights_to_bl(T, Hs, bl);
+    lst_push_ptr(retval, lp_build(T, bl, names, NULL));
+    lp_tree_free(T, FALSE);
+  }
+
+  if (!silent)
+    fprintf(stderr, "Local posterior: %.1f NNI moves per sampled tree.\n",
+            nswap / nsamples);
+
+  data->subsample = subsample_saved;
+  sfree(Hs); sfree(perm); sfree(used); sfree(spost); sfree(P); sfree(E);
+  for (j = 0; j < nclust; j++) sfree(cmem[j]);
+  sfree(cmem); free(csize); sfree(ctop); sfree(comp);
+  sfree(H); sfree(Hn); sfree(bl); sfree(g); sfree(h); sfree(post);
+  lp_tree_free(T0, TRUE);
+  return retval;
+}
+
 List *lp_sample(int nsamples, TreeNode *pointtree, TreeModel *mod,
                 CovarData *data, char **names, unsigned int silent) {
   int n = data->nseqs, i, j, e, it, ne = 0, nfb;
@@ -252,6 +597,9 @@ List *lp_sample(int nsamples, TreeNode *pointtree, TreeModel *mod,
 
   if (n < 3)
     die("ERROR in lp_sample: need at least three taxa.\n");
+
+  if (data->ultrametric)
+    return lp_sample_ultrametric(nsamples, pointtree, mod, data, names, silent);
 
   data->subsample = FALSE;  /* exact likelihoods */
   if (mod->tree != NULL) { tr_free(mod->tree); mod->tree = NULL; }

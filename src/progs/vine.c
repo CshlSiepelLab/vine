@@ -435,25 +435,19 @@ int main(int argc, char *argv[]) {
 
   /* --posterior selects the recommended posterior approximation.  The
      variational optimization is unchanged, so point estimates are
-     identical to those without --posterior.  For nucleotide data with
-     unconstrained (NJ) trees, samples are then drawn from a local
-     approximation around the point estimate: NNI-based topological
-     uncertainty plus a Laplace approximation for branch lengths (see
-     local_posterior.c).  For CRISPR data and ultrametric trees, the
-     variance scale of the variational distribution is instead refit in
-     a second stage (--two-stage). */
+     identical to those without --posterior.  Samples are then drawn
+     from a local approximation around the point estimate: NNI-based
+     topological uncertainty plus a Laplace approximation for branch
+     lengths (or, for ultrametric trees including CRISPR data, node
+     heights); see local_posterior.c. */
   if (posterior == TRUE) {
     if (hyperbolic == TRUE)
       die("Cannot use --posterior with --hyperbolic; the posterior approximation has not been validated for hyperbolic geometry.\n");
     if (tp_type != NONE || relclock == TRUE)
       die("Cannot use --posterior with --treeprior or --relclock.\n");
-    if (is_crispr == TRUE || ultrametric == TRUE)
-      two_stage = TRUE;
-    else {
-      local_post = TRUE;
-      if (mcmc == TRUE)
-        die("Cannot use --posterior with --mcmc.\n");
-    }
+    local_post = TRUE;
+    if (mcmc == TRUE)
+      die("Cannot use --posterior with --mcmc.\n");
   }
 
   if (two_stage == TRUE) {
@@ -797,7 +791,10 @@ int main(int argc, char *argv[]) {
          different sampled trees) */
       if (had_dups == TRUE) {
         for (i = 0; i < nsamples; i++)
-          cpr_add_dup_leaves(lst_get_ptr(trees, i), crispr_mod->mut);
+          if (local_post == TRUE) /* identical cells are exchangeable */
+            cpr_add_dup_leaves_random(lst_get_ptr(trees, i), crispr_mod->mut);
+          else
+            cpr_add_dup_leaves(lst_get_ptr(trees, i), crispr_mod->mut);
         /* invalidate msa_seq_idx so it is rebuilt per-tree below */
         if (crispr_mod->mod->msa_seq_idx != NULL) {
           sfree(crispr_mod->mod->msa_seq_idx);

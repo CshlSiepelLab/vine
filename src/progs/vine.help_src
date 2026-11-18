@@ -201,17 +201,20 @@ COVARIANCE:
        Recommended option for sampling from an approximate posterior
        distribution.  The variational optimization is unchanged, so
        point estimates (such as the mean tree; see --mean) are the same
-       as without this option.  For nucleotide data, trees are then
-       sampled from a local approximation around the point estimate:
-       each internal branch is resolved independently in one of its
-       three nearest-neighbor-interchange (NNI) configurations, with
+       as without this option.  Trees are then sampled from a local
+       approximation around the point estimate: each internal branch
+       is resolved independently in one of its three
+       nearest-neighbor-interchange (NNI) configurations, with
        probabilities proportional to their likelihoods, and branch
        lengths are drawn from a Laplace approximation about their
-       maximum-likelihood values.  Topological uncertainty is
-       therefore limited to the neighborhood of the point estimate.
-       For CRISPR data (-i CRISPR) and with --ultrametric, --posterior
-       is instead equivalent to --two-stage (see below).  Not
-       compatible with --hyperbolic, --treeprior, --relclock, or --mcmc.
+       maximum-likelihood values.  For ultrametric trees (including
+       CRISPR data), node heights take the place of branch lengths, the
+       overall scale of the tree is also sampled, and branches with no
+       favored configuration (e.g., where no mutations distinguish
+       several cells) are treated as polytomies and resolved at random.
+       Topological uncertainty is therefore limited to the neighborhood
+       of the point estimate.  Not compatible with --hyperbolic,
+       --treeprior, --relclock, or --mcmc.
 
     --two-stage    
        After the variational parameters have been optimized, refit the

@@ -110,6 +110,8 @@ void cpr_deduplicate(CrisprMutTable *M, struct mgtab *mg);
 
 void cpr_add_dup_leaves(TreeNode *tree, CrisprMutTable *M);
 
+void cpr_add_dup_leaves_random(TreeNode *tree, CrisprMutTable *M);
+
 void cpr_expand_tables_for_dups(CrisprMutTable *M, struct mgtab *mg);
 
 double cpr_compute_log_likelihood(CrisprMutModel *cprmod,

@@ -1,4 +1,4 @@
-char HELP[   18435] = "\nPROGRAM: vine [Variational Inference with Node Embeddings]\n\
+char HELP[   18617] = "\nPROGRAM: vine [Variational Inference with Node Embeddings]\n\
 \n\
 USAGE: vine [OPTIONS] alignment.fa > trees.nwk\n\
 \n\
@@ -201,17 +201,20 @@ COVARIANCE:\n\
        Recommended option for sampling from an approximate posterior\n\
        distribution.  The variational optimization is unchanged, so\n\
        point estimates (such as the mean tree; see --mean) are the same\n\
-       as without this option.  For nucleotide data, trees are then\n\
-       sampled from a local approximation around the point estimate:\n\
-       each internal branch is resolved independently in one of its\n\
-       three nearest-neighbor-interchange (NNI) configurations, with\n\
+       as without this option.  Trees are then sampled from a local\n\
+       approximation around the point estimate: each internal branch\n\
+       is resolved independently in one of its three\n\
+       nearest-neighbor-interchange (NNI) configurations, with\n\
        probabilities proportional to their likelihoods, and branch\n\
        lengths are drawn from a Laplace approximation about their\n\
-       maximum-likelihood values.  Topological uncertainty is\n\
-       therefore limited to the neighborhood of the point estimate.\n\
-       For CRISPR data (-i CRISPR) and with --ultrametric, --posterior\n\
-       is instead equivalent to --two-stage (see below).  Not\n\
-       compatible with --hyperbolic, --treeprior, --relclock, or --mcmc.\n\
+       maximum-likelihood values.  For ultrametric trees (including\n\
+       CRISPR data), node heights take the place of branch lengths, the\n\
+       overall scale of the tree is also sampled, and branches with no\n\
+       favored configuration (e.g., where no mutations distinguish\n\
+       several cells) are treated as polytomies and resolved at random.\n\
+       Topological uncertainty is therefore limited to the neighborhood\n\
+       of the point estimate.  Not compatible with --hyperbolic,\n\
+       --treeprior, --relclock, or --mcmc.\n\
 \n\
     --two-stage    \n\
        After the variational parameters have been optimized, refit the\n\

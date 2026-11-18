@@ -15,7 +15,8 @@
    proportional to the likelihood of each configuration; branch-length
    uncertainty is represented by a diagonal Laplace approximation in
    branch-length space about the maximum-likelihood branch lengths of
-   the point-estimate topology. */
+   the point-estimate topology.  For ultrametric trees (including
+   CRISPR data), node heights are used in place of branch lengths. */
 
 #ifndef LOCAL_POST_H
 #define LOCAL_POST_H
@@ -28,9 +29,22 @@
 /* maximum number of diagonal Newton iterations for branch lengths */
 #define LP_MAX_NEWTON 6
 
+/* maximum number of Newton iterations for node heights (ultrametric
+   trees), each requiring two likelihood evaluations per internal node */
+#define LP_MAX_NEWTON_H 50
+
 /* stop Newton iterations when the log likelihood improves by less
    than this amount */
 #define LP_NEWTON_TOL 0.01
+
+/* ultrametric trees: internal branches at which the point-estimate
+   configuration has NNI probability below this value are treated as
+   unresolved and merged into polytomies resolved at random */
+#define LP_POLYTOMY_P 0.4
+
+/* ultrametric trees: log-scale step for the curvature of the log
+   likelihood with respect to a global rescaling of node heights */
+#define LP_SCALE_STEP 0.02
 
 /* relative and minimum absolute step for finite-difference curvature */
 #define LP_REL_STEP 0.1

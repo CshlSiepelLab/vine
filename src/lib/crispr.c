@@ -1608,7 +1608,23 @@ double cpr_ll_parallel(CrisprMutModel *cprmod, Vector *branchgrad,
    within the binary tree constraint).  NOTE: this function only
    modifies the tree structure; call cpr_expand_tables_for_dups()
    once beforehand to add duplicate entries to M and mg. */
+static void cpr_add_dup_leaves_impl(TreeNode *tree, CrisprMutTable *M,
+                                    unsigned int randomize);
+
 void cpr_add_dup_leaves(TreeNode *tree, CrisprMutTable *M) {
+  cpr_add_dup_leaves_impl(tree, M, FALSE);
+}
+
+/* as cpr_add_dup_leaves, but each group of identical cells is joined
+   in a random binary topology (all branches of length zero) rather
+   than a fixed caterpillar; appropriate for sampled trees, since
+   identical cells are exchangeable */
+void cpr_add_dup_leaves_random(TreeNode *tree, CrisprMutTable *M) {
+  cpr_add_dup_leaves_impl(tree, M, TRUE);
+}
+
+static void cpr_add_dup_leaves_impl(TreeNode *tree, CrisprMutTable *M,
+                                    unsigned int randomize) {
   int i, j, idx;
   TreeNode *leaf, *newint, *newleaf, *subtree;
 
@@ -1649,6 +1665,40 @@ void cpr_add_dup_leaves(TreeNode *tree, CrisprMutTable *M) {
     int ndups = lst_size(dups);
     TreeNode *parent = leaf->parent;
     double orig_dparent = leaf->dparent;
+
+    if (randomize) {
+      /* pool of the original leaf and its duplicates, joined at random */
+      int np = ndups + 1;
+      TreeNode **pool = smalloc(np * sizeof(TreeNode *));
+      pool[0] = leaf;
+      leaf->dparent = 0;
+      for (j = 0; j < ndups; j++) {
+        pool[j+1] = tr_new_node();
+        snprintf(pool[j+1]->name, sizeof(pool[j+1]->name), "%s",
+                 ((String*)lst_get_ptr(dups, j))->chars);
+        pool[j+1]->dparent = 0;
+      }
+      while (np > 1) {
+        int a = (int)(np * (random() / ((double)RAND_MAX + 1.0)));
+        TreeNode *x = pool[a]; pool[a] = pool[--np];
+        int b = (int)(np * (random() / ((double)RAND_MAX + 1.0)));
+        TreeNode *y = pool[b]; pool[b] = pool[--np];
+        newint = tr_new_node();
+        newint->lchild = x; newint->rchild = y;
+        x->parent = newint; y->parent = newint;
+        newint->dparent = 0;
+        pool[np++] = newint;
+      }
+      subtree = pool[0];
+      sfree(pool);
+      subtree->dparent = orig_dparent;
+      subtree->parent = parent;
+      if (parent->lchild == leaf)
+        parent->lchild = subtree;
+      else
+        parent->rchild = subtree;
+      continue;
+    }
 
     /* start with original leaf and first dup as siblings */
     leaf->dparent = 0;
