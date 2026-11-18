@@ -198,13 +198,20 @@ INITIALIZATION:\n\
 \n\
 COVARIANCE:\n\
     --posterior, -A    \n\
-       Convenience option that selects the recommended configuration\n\
-       for approximating the posterior distribution, currently\n\
-       equivalent to --two-stage (see below).  The first stage is the\n\
-       default optimization, so point estimates (such as the posterior\n\
-       mean tree) are the same as without this option; only the\n\
-       variance of the approximate posterior differs.  Not compatible\n\
-       with --hyperbolic.\n\
+       Recommended option for sampling from an approximate posterior\n\
+       distribution.  The variational optimization is unchanged, so\n\
+       point estimates (such as the mean tree; see --mean) are the same\n\
+       as without this option.  For nucleotide data, trees are then\n\
+       sampled from a local approximation around the point estimate:\n\
+       each internal branch is resolved independently in one of its\n\
+       three nearest-neighbor-interchange (NNI) configurations, with\n\
+       probabilities proportional to their likelihoods, and branch\n\
+       lengths are drawn from a Laplace approximation about their\n\
+       maximum-likelihood values.  Topological uncertainty is\n\
+       therefore limited to the neighborhood of the point estimate.\n\
+       For CRISPR data (-i CRISPR) and with --ultrametric, --posterior\n\
+       is instead equivalent to --two-stage (see below).  Not\n\
+       compatible with --hyperbolic, --treeprior, --relclock, or --mcmc.\n\
 \n\
     --two-stage    \n\
        After the variational parameters have been optimized, refit the\n\

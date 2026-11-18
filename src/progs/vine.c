@@ -28,6 +28,7 @@
 #include <phast/sufficient_stats.h>
 #include <mvn.h>
 #include <mcmc.h>
+#include <local_posterior.h>
 #include <tree_prior.h>
 #include <migration.h>
 #include <multiDAG.h>
@@ -95,7 +96,7 @@ int main(int argc, char *argv[]) {
                ultrametric = FALSE, radial_flow = FALSE, planar_flow = FALSE,
                use_taylor = TRUE, had_dups = FALSE, silent = FALSE,
                log_all = FALSE, posterior = FALSE,
-               two_stage = FALSE;
+               two_stage = FALSE, local_post = FALSE;
   MSA *msa = NULL;
   enum covar_type covar_param = CONST;
   char *alphabet = "ACGT";
@@ -432,16 +433,27 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  /* --posterior is a convenience flag that selects the recommended
-     option for the posterior approximation: two-stage inference, in
-     which the first stage is the default optimization (unchanged, so
-     point estimates are identical to those without --posterior) and the
-     second stage refits the variance scale with a DIST-shaped
-     covariance by maximizing the correctly scaled ELBO. */
+  /* --posterior selects the recommended posterior approximation.  The
+     variational optimization is unchanged, so point estimates are
+     identical to those without --posterior.  For nucleotide data with
+     unconstrained (NJ) trees, samples are then drawn from a local
+     approximation around the point estimate: NNI-based topological
+     uncertainty plus a Laplace approximation for branch lengths (see
+     local_posterior.c).  For CRISPR data and ultrametric trees, the
+     variance scale of the variational distribution is instead refit in
+     a second stage (--two-stage). */
   if (posterior == TRUE) {
     if (hyperbolic == TRUE)
-      die("Cannot use --posterior with --hyperbolic; the two-stage procedure has not been validated for hyperbolic geometry.\n");
-    two_stage = TRUE;
+      die("Cannot use --posterior with --hyperbolic; the posterior approximation has not been validated for hyperbolic geometry.\n");
+    if (tp_type != NONE || relclock == TRUE)
+      die("Cannot use --posterior with --treeprior or --relclock.\n");
+    if (is_crispr == TRUE || ultrametric == TRUE)
+      two_stage = TRUE;
+    else {
+      local_post = TRUE;
+      if (mcmc == TRUE)
+        die("Cannot use --posterior with --mcmc.\n");
+    }
   }
 
   if (two_stage == TRUE) {
@@ -763,6 +775,16 @@ int main(int argc, char *argv[]) {
         covar_data->subsample = FALSE;  /* MCMC always needs exact likelihood */
         trees = var_sample_mcmc(nsamples, mcmc_thin, mmvn, covar_data, mod,
                                    logfile, silent);
+      }
+
+      else if (local_post == TRUE) {
+        /* local approximation around the point-estimate tree */
+        Vector *mu_full = vec_new(mmvn->d * mmvn->n);
+        mmvn_save_mu(mmvn, mu_full);
+        TreeNode *pt = mean_tree(mu_full, names, covar_data);
+        trees = lp_sample(nsamples, pt, mod, covar_data, names, silent);
+        tr_free(pt);
+        vec_free(mu_full);
       }
 
       else /* otherwise just sample directly from approx posterior */

@@ -13,6 +13,7 @@ add_library(vine_core STATIC
     hutchinson.c
     kl.c
     likelihoods.c
+    local_posterior.c
     migration.c
     mcmc.c
     multi_mvn.c
