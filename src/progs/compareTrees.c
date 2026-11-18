@@ -30,7 +30,7 @@ int main(int argc, char *argv[]) {
   int opt_idx, c;
   char *est_fname, *ref_fname;
   List *trees_est, *trees_ref;
-  double split_kl, pairwise_dist_kl, embed_kl;
+  double split_kl, split_kl_ref, pairwise_dist_kl, embed_kl;
   int dim = -1;   /* -1 means "use vine's default formula" */
   int nthreads = 1;
   int pairwise_dist_kl_enabled = FALSE;
@@ -89,7 +89,7 @@ int main(int argc, char *argv[]) {
 
   fprintf(stderr, "Computing split KL divergence (%d vs %d trees)...\n",
           lst_size(trees_est), lst_size(trees_ref));
-  tr_split_kl(trees_est, trees_ref, &split_kl);
+  tr_split_kl(trees_est, trees_ref, &split_kl, &split_kl_ref);
 
   if (pairwise_dist_kl_enabled) {
     fprintf(stderr, "Computing raw pairwise-distance KL divergence...\n");
@@ -106,6 +106,7 @@ int main(int argc, char *argv[]) {
   printf("Mean KL divergences of %s (estimate) from %s (reference):\n",
          est_fname, ref_fname);
   printf("Mean_split_KL: %f\n", split_kl);
+  printf("Mean_split_KL_refnorm: %f\n", split_kl_ref);
   if (pairwise_dist_kl_enabled)
     printf("Mean_pairwise_dist_KL: %f\n", pairwise_dist_kl);
   if (embed_dist_kl)

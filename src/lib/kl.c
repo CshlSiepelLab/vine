@@ -27,9 +27,14 @@
    two tree samples. Split inclusion probabilities are estimated from observed
    frequencies with Laplace smoothing, the Bernoulli KL divergence is computed
    for each split in the union of the samples, and the result is averaged
-   across splits. */
-void tr_split_kl(List *trees_est, List *trees_ref, double *mean_kl) {
+   across splits.  If ref_mean_kl is non-NULL, it receives the same sum
+   divided instead by the number of distinct splits in the reference
+   sample, which (unlike the mean over the union) is not reduced when the
+   estimate contains many rare splits absent from the reference. */
+void tr_split_kl(List *trees_est, List *trees_ref, double *mean_kl,
+                 double *ref_mean_kl) {
   *mean_kl = 0.0;
+  if (ref_mean_kl != NULL) *ref_mean_kl = 0.0;
 
   int S_est = lst_size(trees_est), S_ref = lst_size(trees_ref);
   if (S_est == 0 || S_ref == 0)
@@ -72,6 +77,8 @@ void tr_split_kl(List *trees_est, List *trees_ref, double *mean_kl) {
 
   /* compute the mean KL divergence per split */
   *mean_kl = (nsplits > 0) ? sum_kl / nsplits : 0.0;
+  if (ref_mean_kl != NULL)
+    *ref_mean_kl = (nsc_r > 0) ? sum_kl / nsc_r : 0.0;
 
   tr_split_counts_free(sce, nsc_e);
   tr_split_counts_free(scr, nsc_r);

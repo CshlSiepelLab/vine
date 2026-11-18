@@ -1,4 +1,4 @@
-char HELP[3340] = "\nPROGRAM: compareTrees\n\
+char HELP[    3690] = "\nPROGRAM: compareTrees\n\
 \n\
 USAGE: compareTrees [OPTIONS] estimate.nwk reference.nwk > output.txt\n\
 \n\
@@ -19,7 +19,11 @@ split has probability exactly 0 or 1).  This approximates the KL\n\
 divergence between the two posterior distributions over tree topology,\n\
 and remains well-behaved even when the two samples share few or no exact\n\
 topologies, unlike the full-topology KL divergence -sum p(tau) log\n\
-(p(tau)/q(tau)).\n\
+(p(tau)/q(tau)).  A second value (Mean_split_KL_refnorm) divides the same\n\
+sum by the number of distinct splits in the reference sample rather than\n\
+in the union.  Because the denominator is then the same for all estimates\n\
+compared with a given reference, this version is not reduced by\n\
+an estimate that contains many rare splits absent from the reference.\n\
 \n\
 (2) Mean pairwise-distance KL (enabled by --pairwise-dist-kl): for each\n\
 leaf pair, a Gaussian(mean, sd) is fit to its raw tree distance across each\n\

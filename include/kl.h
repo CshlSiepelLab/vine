@@ -21,7 +21,8 @@
  * respectively.  Averaged over the union of splits observed in either
  * sample (Laplace-smoothed so no split has probability exactly 0 or 1).
  * trees_est and trees_ref must be over the same set of leaf names. */
-void tr_split_kl(List *trees_est, List *trees_ref, double *mean_kl);
+void tr_split_kl(List *trees_est, List *trees_ref, double *mean_kl,
+                 double *ref_mean_kl);
 
 /* Mean Gaussian KL divergence between the estimate and reference samples'
  * raw pairwise leaf-distance distributions.  For each leaf pair, a Gaussian

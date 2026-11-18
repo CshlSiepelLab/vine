@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(vine
-  VERSION 0.4.1
+  VERSION 0.4.2
   LANGUAGES C)
 
 # Use C99 

@@ -19,7 +19,11 @@ split has probability exactly 0 or 1).  This approximates the KL
 divergence between the two posterior distributions over tree topology,
 and remains well-behaved even when the two samples share few or no exact
 topologies, unlike the full-topology KL divergence -sum p(tau) log
-(p(tau)/q(tau)).
+(p(tau)/q(tau)).  A second value (Mean_split_KL_refnorm) divides the same
+sum by the number of distinct splits in the reference sample rather than
+in the union.  Because the denominator is then the same for all estimates
+compared with a given reference, this version is not reduced by
+an estimate that contains many rare splits absent from the reference.
 
 (2) Mean pairwise-distance KL (enabled by --pairwise-dist-kl): for each
 leaf pair, a Gaussian(mean, sd) is fit to its raw tree distance across each
