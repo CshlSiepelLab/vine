@@ -483,6 +483,21 @@ void init_gtr_mapping(TreeModel *tm) {
   }
 }
 
+/* free the lists allocated by init_gtr_mapping.  Must be called before
+   tm_free, which would otherwise free them using tm_get_nparams, a
+   count that does not match GTR_NPARAMS */
+void free_gtr_mapping(TreeModel *tm) {
+  if (tm->rate_matrix_param_row == NULL) return;
+  for (int i = 0; i < GTR_NPARAMS; i++) {
+    lst_free(tm->rate_matrix_param_row[i]);
+    lst_free(tm->rate_matrix_param_col[i]);
+  }
+  sfree(tm->rate_matrix_param_row);
+  sfree(tm->rate_matrix_param_col);
+  tm->rate_matrix_param_row = NULL;
+  tm->rate_matrix_param_col = NULL;
+}
+
 /* --- code for multithreading of likelihood calculations --- */
 
 /* The main likelihood function (same interface as previously) is now a wrapper

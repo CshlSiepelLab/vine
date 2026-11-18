@@ -67,6 +67,8 @@ int get_seq_idx(char **names, char *name, int n);
 
 void init_gtr_mapping(TreeModel *tm);
 
+void free_gtr_mapping(TreeModel *tm);
+
 double compute_log_likelihood(TreeModel *mod, CovarData *data, Vector *branchgrad);
 
 double ll_parallel(TreeModel *mod, CovarData *data, Vector *branchgrad,

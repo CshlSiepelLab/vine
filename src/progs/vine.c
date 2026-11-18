@@ -863,8 +863,11 @@ int main(int argc, char *argv[]) {
     cpr_free_table(crispr_muts); /* the original mut table; the
                                     SITEWISE copy is freed via
                                     cpr_free_model above */
-  if (mod != NULL)
+  if (mod != NULL) {
+    if (subst_mod == REV)
+      free_gtr_mapping(mod);
     tm_free(mod);
+  }
   if (covar_data != NULL)
     free_covar_data(covar_data);
   if (mmvn != NULL)

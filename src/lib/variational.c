@@ -985,5 +985,12 @@ multi_MVN *var_fit_scale(TreeModel *mod, multi_MVN *mmvn, CovarData *data,
   sfree(zs);
   data->subsample = subsample_saved;
 
+  /* as at the end of variational_inf, release the last tree evaluated
+     (otherwise tm_free may later walk model structures sized for it) */
+  if (mod->tree != NULL) {
+    tr_free(mod->tree);
+    mod->tree = NULL;
+  }
+
   return mmvn;
 }
